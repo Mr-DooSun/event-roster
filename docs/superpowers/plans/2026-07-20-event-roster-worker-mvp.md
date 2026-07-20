@@ -13,6 +13,7 @@
 - 승인 기준 문서는 `docs/superpowers/specs/2026-07-20-event-roster-worker-design.md`이며, 이전 FastAPI 계획은 실행하지 않는다.
 - 배포는 하나의 `https://event-roster.<account>.workers.dev` Worker다. 별도 Pages, 별도 API origin, CORS, VM, 커스텀 도메인을 만들지 않는다.
 - Worker 설정은 신규 프로젝트 권장 형식인 `wrangler.jsonc`를 쓰고 `compatibility_date`는 `2026-07-20`으로 고정한다.
+- 실행 보정(2026-07-20 승인): `@cloudflare/vitest-pool-workers`는 Vitest `^4.1.0` 및 `cloudflareTest()` Vite plugin과 호환되는 `^0.18.6`을 사용한다. 이전의 `^0.10.0`은 Vitest 2–3.2만 지원하므로 사용하지 않는다.
 - `apps/web`은 React/Vite 코드만, `apps/worker`는 Hono·D1·Worker 설정만, `packages/domain`은 순수 규칙만, `packages/contracts`는 Zod 계약만 가진다.
 - D1 자동 프로비저닝은 Wrangler 4.45 이상에서만 사용한다. 이 기능은 Cloudflare Beta이므로, 첫 배포가 실제 D1 ID를 `wrangler.jsonc`에 기록했는지 확인하고 기록되지 않으면 `wrangler d1 create event-roster --binding DB --update-config`로 명시적으로 바꾼다.
 - 정적 자산은 `apps/web/dist`에서 제공하고 `assets.run_worker_first`는 `['/api/*']`만 쓴다. API 외 SPA deep link는 `index.html`로 fallback한다.
@@ -352,7 +353,7 @@ packages:
   },
   "dependencies": { "hono": "^4.0.0" },
   "devDependencies": {
-    "@cloudflare/vitest-pool-workers": "^0.10.0",
+    "@cloudflare/vitest-pool-workers": "^0.18.6",
     "@types/node": "^22.0.0",
     "tsx": "^4.0.0",
     "typescript": "^5.0.0",
@@ -578,7 +579,7 @@ Create package manifests with these scripts and dependencies; pin exact resolved
   },
   "dependencies": { "hono": "^4.0.0" },
   "devDependencies": {
-    "@cloudflare/vitest-pool-workers": "^0.10.0",
+    "@cloudflare/vitest-pool-workers": "^0.18.6",
     "@types/node": "^22.0.0",
     "typescript": "^5.0.0",
     "vitest": "^4.1.0",

@@ -1,0 +1,13 @@
+{
+  "name": "event-roster",
+  "private": true,
+  "packageManager": "pnpm@10",
+  "scripts": {
+    "check": "pnpm -r run check",
+    "test": "pnpm -r run test",
+    "format:check": "biome check ."
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.0.0"
+  }
+}

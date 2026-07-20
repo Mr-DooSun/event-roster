@@ -1,0 +1,23 @@
+{
+  "name": "@event-roster/workers-free-capability",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "check": "tsc --noEmit && biome check .",
+    "types": "wrangler types",
+    "probe:remote": "tsx scripts/run-remote-probe.mts",
+    "assert:evidence": "tsx scripts/assert-capability-evidence.mts"
+  },
+  "dependencies": {
+    "hono": "^4.0.0"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.18.6",
+    "@types/node": "^22.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.0.0",
+    "vitest": "^4.1.0",
+    "wrangler": "^4.45.0"
+  }
+}
