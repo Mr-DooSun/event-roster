@@ -1,0 +1,1002 @@
+{
+  "runId": "34431eac-ecad-4f37-a463-f0a3bfd816c9",
+  "createdAt": "2026-07-20T12:20:43.502Z",
+  "entries": [
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "required",
+      "scenario": "jwt-revocation",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "required",
+      "scenario": "atomic",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "required",
+      "scenario": "rollback",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "concurrent",
+      "scenario": "correct",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "concurrent",
+      "scenario": "correct",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "concurrent",
+      "scenario": "correct",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "concurrent",
+      "scenario": "correct",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "concurrent",
+      "scenario": "correct",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "concurrent",
+      "scenario": "correct",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "concurrent",
+      "scenario": "correct",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "concurrent",
+      "scenario": "correct",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "concurrent",
+      "scenario": "correct",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "concurrent",
+      "scenario": "correct",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "concurrent",
+      "scenario": "correct",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "concurrent",
+      "scenario": "correct",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "concurrent",
+      "scenario": "correct",
+      "status": 404,
+      "response": {}
+    }
+  ]
+}

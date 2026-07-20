@@ -1,0 +1,1016 @@
+{
+  "runId": "e55f8b42-0e96-4c91-b8e2-c5cf6c115a88",
+  "createdAt": "2026-07-20T12:23:10.279Z",
+  "entries": [
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "correct",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "wrong",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "sequential",
+      "scenario": "nonexistent",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "required",
+      "scenario": "jwt-revocation",
+      "status": 200,
+      "response": {
+        "scenario": "jwt-revocation",
+        "scenarioPassed": true,
+        "jwtVerified": true,
+        "revokedJwtRejected": true,
+        "changedPasswordRevokedBothSessions": true
+      }
+    },
+    {
+      "phase": "required",
+      "scenario": "atomic",
+      "status": 200,
+      "response": {
+        "scenario": "atomic",
+        "scenarioPassed": true,
+        "committedRows": 392
+      }
+    },
+    {
+      "phase": "required",
+      "scenario": "rollback",
+      "status": 200,
+      "response": {
+        "scenario": "rollback",
+        "scenarioPassed": true,
+        "rollbackRows": 0
+      }
+    },
+    {
+      "phase": "concurrent",
+      "scenario": "correct",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "concurrent",
+      "scenario": "correct",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "concurrent",
+      "scenario": "correct",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "concurrent",
+      "scenario": "correct",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "concurrent",
+      "scenario": "correct",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "concurrent",
+      "scenario": "correct",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "concurrent",
+      "scenario": "correct",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "concurrent",
+      "scenario": "correct",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "concurrent",
+      "scenario": "correct",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "concurrent",
+      "scenario": "correct",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "concurrent",
+      "scenario": "correct",
+      "status": 500,
+      "response": {}
+    },
+    {
+      "phase": "concurrent",
+      "scenario": "correct",
+      "status": 404,
+      "response": {}
+    },
+    {
+      "phase": "concurrent",
+      "scenario": "correct",
+      "status": 500,
+      "response": {}
+    }
+  ]
+}

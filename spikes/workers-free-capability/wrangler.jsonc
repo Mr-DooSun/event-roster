@@ -12,7 +12,7 @@
     {
       "binding": "DB",
       "database_name": "event-roster-capability",
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "9f3e0f72-1097-463a-b2e9-c91dc588a5e5",
       "migrations_dir": "./migrations"
     }
   ]
