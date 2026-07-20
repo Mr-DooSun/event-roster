@@ -89,7 +89,7 @@ X-ER-KDF-Body-SHA256: <base64url SHA-256 of exact request bytes>
 X-ER-KDF-Signature: <base64url HMAC-SHA-256>
 ```
 
-서명 입력은 `v1\n<timestamp>\n<HTTP method>\n<path>\n<body digest>`다. 서비스는 시계 차이가 60초를 넘거나 body digest·서명이 일치하지 않으면 `401`을 반환하며, JSON parsing·KDF를 수행하지 않는다. HTTPS가 전송 중 기밀성을 제공하고, 서명은 Cloud Run URL을 아는 제3자가 KDF endpoint를 호출하지 못하게 한다. KDF 서비스는 request body·Authorization 계열 헤더·비밀번호·PHC 값을 기록하지 않는 구조화 로거만 사용한다.
+서명 입력은 `v1\n<timestamp>\n<HTTP method>\n<path>\n<body digest>`다. 서비스는 시계 차이가 60초를 넘거나 body digest·서명이 일치하지 않으면 `401`을 반환하며, JSON parsing·KDF를 수행하지 않는다. HTTPS가 전송 중 기밀성을 제공하고, 서명은 Cloud Run URL을 아는 제3자가 KDF endpoint를 호출하지 못하게 한다. 이 timestamp 서명은 네트워크 격리나 완전한 재전송 방지가 아니므로, Cloud Run 공개 URL과 그 위험을 운영 문서에 명시한다. KDF 서비스는 request body·Authorization 계열 헤더·비밀번호·PHC 값을 기록하지 않는 구조화 로거만 사용한다.
 
 ## 5. D1 모델과 계정 수명주기
 
@@ -115,7 +115,7 @@ X-ER-KDF-Signature: <base64url HMAC-SHA-256>
 
 초기 공용 운영자 생성 성공 시 32 random bytes를 base64url로 인코딩한 복구 코드를 한 번만 표시한다. `recovery_codes` 테이블에는 `HMAC-SHA-256(RECOVERY_CODE_PEPPER, code)`와 상태·교체 시각만 저장한다.
 
-`POST /api/v1/auth/recover`는 복구 코드, 새 영문 로그인 ID, 표시 이름, 새 비밀번호를 받는다. Worker는 요청 제한·입력을 먼저 검증하고 KDF service로 해시를 만든 뒤, 단일 D1 트랜잭션에서 기존 코드를 소비하고 새 `OPERATOR` 계정·자격 증명을 만들고 교체 복구 코드를 생성한다. 응답은 새 복구 코드를 한 번만 포함한다. 이 흐름은 공용 운영자 계정을 복원하지 않는다.
+`POST /api/v1/auth/recover`는 복구 코드, 새 영문 로그인 ID, 표시 이름, 새 비밀번호를 받는다. Worker는 요청 제한·입력을 먼저 검증하고 KDF service로 해시를 만든 뒤, 단일 D1 트랜잭션에서 기존 코드를 소비하고 `must_change_password=1`인 새 `OPERATOR` 계정·자격 증명을 만들고 교체 복구 코드를 생성한다. 응답은 새 복구 코드를 한 번만 포함한다. 새 운영자가 제공한 비밀번호로 로그인한 뒤 최초 비밀번호 변경을 성공해야만, 아직 활성인 공용 운영자 계정이 표준 인수인계 규칙에 따라 폐기된다. 이 흐름은 공용 운영자 계정을 직접 복원하지 않는다.
 
 ## 6. 로그인, 세션, 권한 흐름
 
@@ -124,7 +124,7 @@ X-ER-KDF-Signature: <base64url HMAC-SHA-256>
 3. Worker는 D1의 PHC를 읽어 KDF service의 `verify`를 호출한다. 계정이 없거나 비활성인 경우에도 dummy verify를 한 번 호출한다.
 4. 유효·활성 계정의 검증이 성공하면 Worker가 `auth_sessions`를 만들고 `sub`, `sid`, `sv`, `iat`, `exp` claim을 가진 8시간 JWT를 `__Host-er_session; HttpOnly; Secure; SameSite=Lax; Path=/` 쿠키로 설정한다.
 5. `must_change_password=1`이면 허용 route는 `GET /api/v1/auth/me`, `POST /api/v1/auth/change-password`, `POST /api/v1/auth/logout`만이다. 비밀번호 변경 성공은 그 세션을 포함해 해당 사용자의 모든 이전 세션을 폐기하고, 사용자를 로그아웃시킨다.
-6. 모든 상태 변경 요청은 같은 origin, `credentials: include`, 별도 CSRF cookie와 `X-CSRF-Token`의 D1 hash 검증을 요구한다.
+6. 로그인과 `GET /api/v1/auth/csrf`를 제외한 모든 상태 변경 요청은 같은 origin, `credentials: include`, 브라우저 메모리에만 둔 `X-ER-CSRF` 원문과 D1의 SHA-256 hash 검증을 요구한다. 별도 CSRF cookie는 만들지 않는다. 로그인 응답과 `GET /api/v1/auth/csrf`만 새 원문을 JSON으로 반환하며 `Cache-Control: no-store`를 설정한다.
 
 로그아웃, 계정 비활성화, 역할/조직 변경, 비밀번호 재설정은 관련 D1 세션을 폐기하거나 `session_version`을 증가시킨다. 어떤 역할도 JWT claim만으로 신뢰하지 않고 D1의 현재 역할·조직 연결을 기준으로 인가한다.
 
@@ -135,6 +135,7 @@ X-ER-KDF-Signature: <base64url HMAC-SHA-256>
 - 15분에 5회 실패하면 IP/login ID 복합 키를 잠그고, 성공 시 해당 실패 상태를 초기화한다. IP 원문은 D1에 넣지 않고 `IP_HASH_KEY`로 HMAC 처리한다.
 - Worker의 `JWT_SIGNING_KEY`, `AUTH_KDF_SHARED_SECRET`, `IP_HASH_KEY`, `BOOTSTRAP_TOKEN`, `RECOVERY_CODE_PEPPER`는 Cloudflare Worker Secrets에만 둔다. `PASSWORD_PEPPER`, `AUTH_KDF_SHARED_SECRET`, `DUMMY_ARGON2_PHC`는 Google Secret Manager에서 Cloud Run으로 주입한다.
 - `BOOTSTRAP_TOKEN`은 초기 인수인계 검증 뒤 Cloudflare에서 삭제한다. 비밀번호, PHC, pepper, JWT 원문, 복구 코드, CSRF 원문은 로그·감사 로그·엑셀·브라우저 영구 저장소에 남기지 않는다.
+- `PASSWORD_PEPPER`는 일상적으로 교체하지 않는다. 교체가 필요한 침해 대응에서는 모든 기존 비밀번호 검증을 중단하고, 긴급 복구 코드로 새 운영자를 만든 뒤 모든 계정의 비밀번호 재설정과 모든 세션 폐기를 수행한다. `kdf_version`은 알고리즘/비용 변경을 식별하지만 이전 pepper를 복구하지 않는다.
 - Cloud Run에는 결제 계정이 필요하다. 월 예산 알림을 설정하고 `min-instances=0`, `max-instances=1`을 유지한다. 예산 알림은 hard spending cap이 아니므로 Worker 로그인 rate limit과 Cloud Run instance cap을 함께 적용한다.
 
 ## 8. UI 기준
