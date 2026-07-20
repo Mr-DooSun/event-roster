@@ -1,5 +1,7 @@
 # Event Roster MVP Implementation Plan
 
+> **상태: 폐기됨.** 이 계획은 FastAPI Python Worker 전제를 사용하며, Workers Free 번들 한도 검증에 실패했다. 실행하지 말고 [Worker 기반 설계](../specs/2026-07-20-event-roster-worker-design.md)에서 새 계획을 작성한다.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 상반기·하반기 행사마다 사전 명단, 당일 변동, 조직별 집계, 감사 이력, 엑셀 이관·내보내기를 안전하게 운영하는 내부 서비스를 만든다.
