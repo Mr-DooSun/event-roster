@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse
 
 from password_service.api import InvalidPayloadError, Kdf, router
 from password_service.config import Settings
-from password_service.kdf import DUMMY_PASSWORD_INPUT, PasswordKdf
+from password_service.kdf import DUMMY_PASSWORD_INPUT, PasswordKdf, is_policy_argon2id_phc
 
 
 def create_app(settings: Settings | None = None, kdf: Kdf | None = None) -> FastAPI:
@@ -17,7 +17,9 @@ def create_app(settings: Settings | None = None, kdf: Kdf | None = None) -> Fast
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         runtime_settings = settings or Settings.from_environment()
         configured_kdf = PasswordKdf(runtime_settings.password_pepper)
-        if not configured_kdf.verify(
+        if not is_policy_argon2id_phc(
+            runtime_settings.dummy_argon2_phc
+        ) or not configured_kdf.verify(
             DUMMY_PASSWORD_INPUT, runtime_settings.dummy_argon2_phc
         ):
             raise RuntimeError("DUMMY_ARGON2_PHC does not match PASSWORD_PEPPER")

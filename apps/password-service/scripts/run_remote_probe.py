@@ -15,6 +15,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+from password_service.kdf import is_policy_argon2id_phc
+
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 EVIDENCE_DIRECTORY = REPOSITORY_ROOT / "docs" / "superpowers" / "evidence"
 
@@ -205,7 +207,7 @@ def run_probe(probe_url: str, probe_token: str) -> dict[str, object]:
     hash_semantic = (
         hash_result["status"] == 200
         and isinstance(phc_value, str)
-        and phc_value.startswith("$argon2id$")
+        and is_policy_argon2id_phc(phc_value)
     )
     corrupt_semantic = corrupt_result["status"] == 401
     return {

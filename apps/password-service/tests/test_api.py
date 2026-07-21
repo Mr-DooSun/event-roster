@@ -7,8 +7,17 @@ import pytest
 from fastapi.testclient import TestClient
 
 from conftest import KdfSpy
+from argon2 import PasswordHasher, Type
 from password_service.config import Settings
-from password_service.kdf import PasswordKdf
+from password_service.kdf import (
+    DUMMY_PASSWORD_INPUT,
+    HASH_LENGTH,
+    MEMORY_COST,
+    PARALLELISM,
+    SALT_LENGTH,
+    TIME_COST,
+    PasswordKdf,
+)
 from password_service.main import create_app
 
 
@@ -142,6 +151,27 @@ def test_startup_rejects_dummy_phc_that_does_not_verify_with_current_pepper(
     settings: Settings,
 ) -> None:
     invalid_settings = replace(settings, dummy_argon2_phc=settings.dummy_argon2_phc + "\n")
+    with pytest.raises(RuntimeError, match="DUMMY_ARGON2_PHC"):
+        with TestClient(create_app(settings=invalid_settings)):
+            pass
+
+
+def test_startup_rejects_dummy_phc_that_verifies_but_uses_a_weaker_policy() -> None:
+    configured_kdf = PasswordKdf("test-pepper")
+    weaker_phc = PasswordHasher(
+        time_cost=TIME_COST - 1,
+        memory_cost=MEMORY_COST,
+        parallelism=PARALLELISM,
+        hash_len=HASH_LENGTH,
+        salt_len=SALT_LENGTH,
+        type=Type.ID,
+    ).hash(configured_kdf._prepared(DUMMY_PASSWORD_INPUT))
+    invalid_settings = Settings(
+        password_pepper="test-pepper",
+        auth_kdf_shared_secret="test-shared-secret",
+        dummy_argon2_phc=weaker_phc,
+    )
+
     with pytest.raises(RuntimeError, match="DUMMY_ARGON2_PHC"):
         with TestClient(create_app(settings=invalid_settings)):
             pass

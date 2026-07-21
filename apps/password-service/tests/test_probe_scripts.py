@@ -4,6 +4,7 @@ from copy import deepcopy
 
 import pytest
 
+from password_service.kdf import PasswordKdf
 from scripts.assert_evidence import EvidenceValidationError, validate_evidence
 from scripts.run_remote_probe import _call_probe, load_probe_configuration, percentile_95, run_probe
 
@@ -122,6 +123,34 @@ def test_remote_run_preserves_only_factual_attempts_after_transport_failure(
     assert scenarios["dummy"]["statuses"] == [None]
     assert len(scenarios["concurrent"]["statuses"]) == 13
     assert call_count == 18
+
+
+def test_remote_hash_requires_the_exact_argon2id_policy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    out_of_policy_phc = PasswordKdf("test-pepper").hash("temporary-test-input").replace(
+        "m=19456", "m=19457"
+    )
+
+    def successful_call(
+        _probe_url: str, _probe_token: str, operation: dict[str, str]
+    ) -> dict[str, object]:
+        if operation["operation"] == "hash":
+            body: dict[str, object] = {"phc": out_of_policy_phc}
+        elif operation["operation"] == "corruptSignature":
+            return {"status": 401, "milliseconds": 1.0, "body": {}, "transportOk": True}
+        else:
+            body = {"verified": False}
+        return {"status": 200, "milliseconds": 1.0, "body": body, "transportOk": True}
+
+    monkeypatch.setattr("scripts.run_remote_probe._call_probe", successful_call)
+
+    evidence = run_probe("https://probe.example/probe", "configured-test-token")
+    scenarios = evidence["scenarios"]
+    assert isinstance(scenarios, dict)
+    hash_scenario = scenarios["hash"]
+    assert isinstance(hash_scenario, dict)
+    assert hash_scenario["semantics"] == [False]
 
 
 def test_complete_status_only_evidence_is_accepted() -> None:
