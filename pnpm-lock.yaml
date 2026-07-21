@@ -51,6 +51,12 @@ importers:
 
   apps/worker:
     dependencies:
+      '@event-roster/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
+      '@event-roster/domain':
+        specifier: workspace:*
+        version: link:../../packages/domain
       hono:
         specifier: ^4.12.31
         version: 4.12.31

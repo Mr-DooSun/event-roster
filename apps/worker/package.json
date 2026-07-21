@@ -8,6 +8,8 @@
     "types": "wrangler types"
   },
   "dependencies": {
+    "@event-roster/contracts": "workspace:*",
+    "@event-roster/domain": "workspace:*",
     "hono": "^4.12.31"
   },
   "devDependencies": {
