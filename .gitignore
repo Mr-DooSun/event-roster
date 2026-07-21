@@ -2,6 +2,11 @@
 .worktrees/
 node_modules/
 .wrangler/
+.dev.vars
+.bootstrap-token.tmp
+apps/web/e2e/.local-e2e-env.json
+apps/web/test-results/
+apps/web/playwright-report/
 dist/
 *.tsbuildinfo
 __pycache__/

@@ -1,8 +1,7 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "event-roster",
+  "name": "event-roster-e2e",
   "main": "src/index.ts",
-  "workers_dev": true,
   "compatibility_date": "2026-07-21",
   "compatibility_flags": ["nodejs_compat"],
   "assets": {
@@ -10,5 +9,12 @@
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
     "run_worker_first": ["/api/*"]
-  }
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "event-roster-e2e",
+      "database_id": "00000000-0000-0000-0000-000000000000"
+    }
+  ]
 }
