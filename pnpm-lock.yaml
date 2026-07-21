@@ -14,6 +14,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@event-roster/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
       react:
         specifier: ^19.2.4
         version: 19.2.7

@@ -1,7 +1,10 @@
+import { AuthProvider } from "../features/auth/AuthProvider";
+import { AuthBoundary } from "./router";
+
 export function App() {
   return (
-    <main>
-      <h1>행사 참가자 명단</h1>
-    </main>
+    <AuthProvider>
+      <AuthBoundary />
+    </AuthProvider>
   );
 }

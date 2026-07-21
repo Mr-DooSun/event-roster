@@ -1,0 +1,320 @@
+import "@testing-library/jest-dom/vitest";
+import type { AuthSuccess } from "@event-roster/contracts";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
+import { afterEach, expect, it, vi } from "vitest";
+import { AuthBoundary } from "../../app/router";
+import { createApiClient } from "../../lib/api";
+import { AuthProvider, useAuth } from "./AuthProvider";
+import { LoginPage } from "./LoginPage";
+
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+  localStorage.clear();
+  sessionStorage.clear();
+  window.history.replaceState(null, "", "/");
+});
+
+it("keeps access and CSRF tokens only in memory", async () => {
+  window.history.replaceState(null, "", "/events/event-1");
+  const auth = authSuccess("MUST_CHANGE_PASSWORD");
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue(Response.json(auth, { status: 200 })),
+  );
+  render(
+    <AuthProvider restoreOnMount={false}>
+      <AuthBoundary />
+    </AuthProvider>,
+  );
+
+  fireEvent.change(screen.getByLabelText("로그인 ID"), {
+    target: { value: "manager-01" },
+  });
+  fireEvent.change(screen.getByLabelText("비밀번호"), {
+    target: { value: "temporary-password-123" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "로그인" }));
+
+  expect(await screen.findByText("새 비밀번호를 설정하세요.")).toBeVisible();
+  expect(localStorage.length).toBe(0);
+  expect(sessionStorage.length).toBe(0);
+});
+
+it("does not retry a temporarily unavailable login", async () => {
+  const fetchMock = vi
+    .fn()
+    .mockResolvedValue(
+      Response.json(
+        { code: "AUTH_TEMPORARILY_UNAVAILABLE", message: "unavailable" },
+        { status: 503 },
+      ),
+    );
+  vi.stubGlobal("fetch", fetchMock);
+  render(
+    <AuthProvider restoreOnMount={false}>
+      <AuthBoundary />
+    </AuthProvider>,
+  );
+
+  fireEvent.change(screen.getByLabelText("로그인 ID"), {
+    target: { value: "manager-01" },
+  });
+  fireEvent.change(screen.getByLabelText("비밀번호"), {
+    target: { value: "temporary-password-123" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "로그인" }));
+
+  expect(
+    await screen.findByText("잠시 후 다시 로그인해 주세요."),
+  ).toBeVisible();
+  expect(fetchMock).toHaveBeenCalledOnce();
+});
+
+it("rejects passwords over 72 UTF-8 bytes before a network request", async () => {
+  const fetchMock = vi.fn();
+  vi.stubGlobal("fetch", fetchMock);
+  render(
+    <AuthProvider restoreOnMount={false}>
+      <AuthBoundary />
+    </AuthProvider>,
+  );
+  fireEvent.change(screen.getByLabelText("로그인 ID"), {
+    target: { value: "manager-01" },
+  });
+  fireEvent.change(screen.getByLabelText("비밀번호"), {
+    target: { value: "가".repeat(25) },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "로그인" }));
+  expect(
+    await screen.findByText("비밀번호는 UTF-8 기준 72바이트 이하여야 합니다."),
+  ).toBeVisible();
+  expect(fetchMock).not.toHaveBeenCalled();
+});
+
+it("attempts the startup refresh exactly once", async () => {
+  const fetchMock = vi
+    .fn()
+    .mockResolvedValue(new Response(null, { status: 401 }));
+  vi.stubGlobal("fetch", fetchMock);
+  render(
+    <AuthProvider>
+      <AuthBoundary />
+    </AuthProvider>,
+  );
+  expect(await screen.findByRole("button", { name: "로그인" })).toBeVisible();
+  expect(fetchMock).toHaveBeenCalledOnce();
+});
+
+it("shares one refresh across concurrent 401 retries", async () => {
+  let auth: AuthSuccess | null = authSuccess("FULL");
+  const refreshed = authSuccess("FULL", "new-access");
+  const fetchMock = vi
+    .fn()
+    .mockResolvedValueOnce(new Response(null, { status: 401 }))
+    .mockResolvedValueOnce(new Response(null, { status: 401 }))
+    .mockResolvedValueOnce(Response.json(refreshed))
+    .mockResolvedValueOnce(Response.json({ ok: 1 }))
+    .mockResolvedValueOnce(Response.json({ ok: 2 }));
+  vi.stubGlobal("fetch", fetchMock);
+  const client = createApiClient({
+    getAuth: () => auth,
+    refresh: async () => {
+      const response = await fetch("/api/v1/auth/refresh", {
+        method: "POST",
+        credentials: "include",
+      });
+      auth = (await response.json()) as AuthSuccess;
+      return auth;
+    },
+  });
+
+  await Promise.all([client.get("/one"), client.get("/two")]);
+
+  expect(
+    fetchMock.mock.calls.filter(([url]) =>
+      String(url).includes("/auth/refresh"),
+    ),
+  ).toHaveLength(1);
+  expect(fetchMock).toHaveBeenCalledTimes(5);
+});
+
+it("does not retry a failed mutation on a 5xx response", async () => {
+  const fetchMock = vi
+    .fn()
+    .mockResolvedValue(
+      Response.json(
+        { code: "INTERNAL_ERROR", message: "failed", requestId: "request-1" },
+        { status: 500 },
+      ),
+    );
+  vi.stubGlobal("fetch", fetchMock);
+  const client = createApiClient({
+    getAuth: () => authSuccess("FULL"),
+    refresh: async () => authSuccess("FULL", "new-access"),
+  });
+
+  await expect(client.post("/mutation", { value: 1 })).rejects.toMatchObject({
+    status: 500,
+  });
+  expect(fetchMock).toHaveBeenCalledOnce();
+});
+
+it("clears memory auth even when logout fails", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi
+      .fn()
+      .mockResolvedValueOnce(Response.json(authSuccess("FULL")))
+      .mockRejectedValueOnce(new Error("offline")),
+  );
+  render(
+    <AuthProvider restoreOnMount={false}>
+      <AuthBoundary />
+    </AuthProvider>,
+  );
+  fireEvent.change(screen.getByLabelText("로그인 ID"), {
+    target: { value: "manager-01" },
+  });
+  fireEvent.change(screen.getByLabelText("비밀번호"), {
+    target: { value: "temporary-password-123" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "로그인" }));
+  expect(await screen.findByText("행사 운영 홈")).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "로그아웃" }));
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "로그인" })).toBeVisible(),
+  );
+});
+
+it("uses cookie-only logout even when the access token may be expired", async () => {
+  const fetchMock = vi
+    .fn()
+    .mockResolvedValueOnce(Response.json(authSuccess("FULL")))
+    .mockResolvedValueOnce(new Response(null, { status: 204 }));
+  vi.stubGlobal("fetch", fetchMock);
+  render(
+    <AuthProvider restoreOnMount={false}>
+      <AuthBoundary />
+    </AuthProvider>,
+  );
+  await submitLogin();
+  expect(await screen.findByText("행사 운영 홈")).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "로그아웃" }));
+  expect(await screen.findByRole("button", { name: "로그인" })).toBeVisible();
+
+  const logoutInit = fetchMock.mock.calls[1]?.[1] as RequestInit;
+  const headers = new Headers(logoutInit.headers);
+  expect(headers.has("Authorization")).toBe(false);
+  expect(headers.has("X-ER-CSRF")).toBe(false);
+  expect(logoutInit.credentials).toBe("include");
+});
+
+it("does not restore auth or retry an old mutation after logout during refresh", async () => {
+  let resolveRefresh: ((response: Response) => void) | undefined;
+  const refreshResponse = new Promise<Response>((resolve) => {
+    resolveRefresh = resolve;
+  });
+  const fetchMock = vi.fn((input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.endsWith("/auth/login")) {
+      return Promise.resolve(Response.json(authSuccess("FULL", "old-access")));
+    }
+    if (url.endsWith("/protected-mutation")) {
+      return Promise.resolve(new Response(null, { status: 401 }));
+    }
+    if (url.endsWith("/auth/refresh")) return refreshResponse;
+    if (url.endsWith("/auth/logout")) {
+      return Promise.resolve(new Response(null, { status: 204 }));
+    }
+    throw new Error(`unexpected request: ${url}`);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  render(
+    <AuthProvider restoreOnMount={false}>
+      <RaceHarness />
+    </AuthProvider>,
+  );
+  await submitLogin();
+  fireEvent.click(await screen.findByRole("button", { name: "변경 요청" }));
+  await waitFor(() =>
+    expect(
+      fetchMock.mock.calls.some(([url]) =>
+        String(url).endsWith("/auth/refresh"),
+      ),
+    ).toBe(true),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "로그아웃" }));
+  resolveRefresh?.(Response.json(authSuccess("FULL", "late-access")));
+
+  expect(await screen.findByRole("button", { name: "로그인" })).toBeVisible();
+  expect(
+    fetchMock.mock.calls.filter(([url]) =>
+      String(url).endsWith("/protected-mutation"),
+    ),
+  ).toHaveLength(1);
+  expect(
+    fetchMock.mock.calls.filter(([url]) =>
+      String(url).endsWith("/auth/logout"),
+    ),
+  ).toHaveLength(1);
+});
+
+function authSuccess(
+  sessionKind: "FULL" | "MUST_CHANGE_PASSWORD",
+  accessToken = "access-token",
+): AuthSuccess {
+  return {
+    accessToken,
+    csrfToken: "csrf-token",
+    session: {
+      sessionKind,
+      user: {
+        id: "user-1",
+        loginId: "manager-01",
+        displayName: "운영자",
+        role: "OPERATOR",
+        organizationIds: [],
+        isBootstrap: false,
+      },
+    },
+  };
+}
+
+function RaceHarness() {
+  const { api, auth, logout, status } = useAuth();
+  if (status === "RESTORING") return <p>처리 중</p>;
+  if (!auth) return <LoginPage />;
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => {
+          void api.post("/protected-mutation", {}).catch(() => undefined);
+        }}
+      >
+        변경 요청
+      </button>
+      <button type="button" onClick={() => void logout()}>
+        로그아웃
+      </button>
+    </>
+  );
+}
+
+async function submitLogin() {
+  fireEvent.change(screen.getByLabelText("로그인 ID"), {
+    target: { value: "manager-01" },
+  });
+  fireEvent.change(screen.getByLabelText("비밀번호"), {
+    target: { value: "temporary-password-123" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "로그인" }));
+}
