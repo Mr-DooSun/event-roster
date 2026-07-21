@@ -30,9 +30,7 @@ it("uses a caller-provided acknowledgement label", () => {
     </Dialog>,
   );
 
-  fireEvent.click(
-    screen.getByRole("button", { name: "기록했고 로그아웃" }),
-  );
+  fireEvent.click(screen.getByRole("button", { name: "기록했고 로그아웃" }));
 
   expect(onClose).toHaveBeenCalledOnce();
 });
