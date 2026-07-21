@@ -64,7 +64,7 @@ event-roster.<account>.workers.dev
 
 로그아웃, 비밀번호 변경, 비밀번호 재설정, 계정 비활성화, 역할 변경, 조직 연결 변경은 D1 세션을 폐기하거나 세션 버전을 올린다. 비밀번호 변경은 현재 쿠키도 삭제하고 모든 기존 세션을 폐기하므로 새 비밀번호로 다시 로그인해야 한다.
 
-상태 변경 요청은 정확한 `Origin`과 세션별 `X-ER-CSRF`를 요구한다. CSRF 원문은 로그인 또는 `GET /api/v1/auth/csrf`에서만 반환하고 React provider 메모리에만 둔다. D1은 SHA-256 hash만 저장하며 응답에는 `Cache-Control: no-store`를 준다.
+상태 변경 요청은 정확한 `Origin`과 세션별 `X-ER-CSRF`를 요구한다. CSRF 원문은 로그인 성공의 `LoginSuccess.csrfToken` 또는 인증된 `POST /api/v1/auth/csrf`에서만 반환하고 React provider 메모리에만 둔다. 로그인 성공과 CSRF 회전 응답은 모두 `Cache-Control: no-store`다. `POST /api/v1/auth/csrf`는 정확한 `Origin`과 인증 쿠키만으로 현재 세션의 hash를 원자적으로 회전하며, 기존 CSRF header는 요구하지 않는다. D1은 SHA-256 hash만 저장한다.
 
 ## 5. 계정 인수인계와 복구
 
@@ -92,6 +92,8 @@ Cloud Run 설계의 `password_credentials.phc`와 `kdf_version`은 사용하지 
 | `security_events` | 자격 증명 없는 보안 이벤트, append-only |
 
 상태·revision·복구 코드·bootstrap 인수인계에 영향을 주는 모든 D1 쓰기는 `operation_guards`를 첫 batch statement로 사용한다. false guard는 도메인 오류로 변환하고 guard·도메인 쓰기·세션 폐기·감사·보안 이벤트를 함께 rollback한다. 영향 행 수 0을 성공으로 취급하지 않는다.
+
+무료 D1의 요청당 50-query, statement당 100-bound-parameter 제약 안에서 1–130행 import를 처리한다. validate와 commit은 행별 D1 호출을 금지하고, parameter-bound `VALUES` bulk statement와 UPSERT를 chunked planner로 생성한다. planner는 worst-case 130행의 읽기·guard·participant/roster/audit bulk write·import run·revision·cleanup을 합쳐 50 query 미만, 각 statement 100 bindings 이하로 보장하며 이 예산을 자동화 테스트로 검증한다. JSON1 지원 여부에 의존하지 않는다.
 
 ## 7. 실제 bcrypt capability gate
 
@@ -130,7 +132,7 @@ Cloudflare 운영 설정에는 `JWT_SIGNING_KEY`, `DUMMY_BCRYPT_HASH`, `BOOTSTRA
 
 ## 10. 완료 기준
 
-- `https://event-roster.event-roster.workers.dev`에서 HTTPS same-origin으로 동작한다.
+- 실제 Worker deploy 출력으로 확정한 HTTPS same-origin URL에서 동작한다.
 - 운영자가 발급한 영문 로그인 ID·bcrypt cost 12 비밀번호·JWT/D1 세션으로 로그인한다.
 - 임시 비밀번호 변경, bootstrap 인수인계, 세션 즉시 폐기, 단회 복구가 원자적으로 동작한다.
 - Cloud Run이나 Google Cloud 리소스 없이 행사·조직·명단·집계·감사·브라우저 Excel 기능을 제공한다.
