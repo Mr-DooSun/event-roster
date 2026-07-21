@@ -1,6 +1,7 @@
 # Event Roster Cloud Run Auth MVP Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Status:** Superseded by 2026-07-21 Workers bcrypt design; no remote Cloud Run gate was run.
 
 **Goal:** D1이 소유한 영문 로그인 ID·권한·JWT 세션과 Cloud Run Argon2id 비밀번호 KDF를 바탕으로, 행사별 사전 명단·당일 변동·집계·감사 이력·엑셀 이관/내보내기를 제공하는 내부 운영 도구를 만든다.
 

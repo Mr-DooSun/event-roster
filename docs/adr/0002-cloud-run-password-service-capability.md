@@ -1,7 +1,7 @@
 # ADR 0002: Cloud Run password-service capability gate
 
 - Date: 2026-07-21
-- Status: Pending remote verification
+- Status: Superseded by 2026-07-21 Workers bcrypt design; no remote Cloud Run gate was run.
 - Decision: No PASS/FAIL decision has been made
 
 ## Context

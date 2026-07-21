@@ -1,0 +1,15 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "event-roster-bcrypt-capability",
+  "main": "src/index.ts",
+  "workers_dev": true,
+  "compatibility_date": "2026-07-21",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  },
+  "secrets": {
+    "required": ["DUMMY_BCRYPT_HASH", "CAPABILITY_PROBE_TOKEN"]
+  }
+}

@@ -1,6 +1,6 @@
 # Event Roster: D1 직접 계정 관리와 Cloud Run 비밀번호 KDF 설계
 
-**상태:** 사용자 승인 완료 (2026-07-20)
+**상태:** Superseded by 2026-07-21 Workers bcrypt design; no remote Cloud Run gate was run.
 
 ## 1. 목적과 대체 범위
 
