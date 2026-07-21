@@ -1,10 +1,16 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { Button } from "../components/ui/Button";
 import { OrganizationsPage } from "../features/admin/OrganizationsPage";
 import { UsersPage } from "../features/admin/UsersPage";
 import { useAuth } from "../features/auth/AuthProvider";
 import { EventsPage } from "../features/events/EventsPage";
 import { RosterPage } from "../features/roster/RosterPage";
+
+const ImportWizard = lazy(() =>
+  import("../features/imports/ImportWizard").then((module) => ({
+    default: module.ImportWizard,
+  })),
+);
 
 export function AppShell() {
   const { auth, logout } = useAuth();
@@ -47,6 +53,14 @@ function route(path: string, operator: boolean) {
   }
   if (path === "/organizations" && operator) return <OrganizationsPage />;
   if (path === "/users" && operator) return <UsersPage />;
+  const importMatch = path.match(/^\/events\/([^/]+)\/import$/);
+  if (importMatch?.[1] && operator) {
+    return (
+      <Suspense fallback={<p className="er-muted">엑셀 도구 불러오는 중…</p>}>
+        <ImportWizard eventId={decodeURIComponent(importMatch[1])} />
+      </Suspense>
+    );
+  }
   const eventMatch = path.match(/^\/events\/([^/]+)$/);
   if (eventMatch?.[1])
     return <RosterPage eventId={decodeURIComponent(eventMatch[1])} />;

@@ -4,6 +4,7 @@ import { Button } from "../../components/ui/Button";
 import { Card } from "../../components/ui/Card";
 import { StatusMessage } from "../../components/ui/StatusMessage";
 import { ApiError } from "../../lib/api";
+import type { ExportData } from "../../lib/excel/download-workbook";
 import type { OrganizationView } from "../admin/UserForm";
 import { useAuth } from "../auth/AuthProvider";
 import type { EventView } from "../events/EventsPage";
@@ -216,6 +217,21 @@ export function RosterPage({ eventId }: { eventId: string }) {
       auditLoading.current = false;
     }
   }
+
+  async function exportRoster() {
+    try {
+      const data = await api.get<ExportData>(`/events/${eventId}/export-data`);
+      const safeName = (event?.name ?? "행사")
+        .replace(/[\\/:*?"<>|]/g, "-")
+        .trim();
+      const { downloadExportWorkbook } = await import(
+        "../../lib/excel/download-workbook"
+      );
+      downloadExportWorkbook(data, `${safeName}-명단.xlsx`);
+    } catch {
+      setMessage("엑셀 명단을 내보내지 못했습니다.");
+    }
+  }
   return (
     <div className="er-page-stack">
       <header className="er-page-heading">
@@ -226,18 +242,32 @@ export function RosterPage({ eventId }: { eventId: string }) {
             {event ? statusLabel(event.status) : "불러오는 중"}
           </p>
         </div>
-        {canMutate ? (
-          <Button
-            type="button"
-            variant="primary"
-            onClick={() => {
-              setPendingCreatedParticipantId(null);
-              setShowAdd(true);
-            }}
-          >
-            참가자 추가
+        <div className="er-action-row">
+          {auth?.session.user.role === "OPERATOR" &&
+          event?.status === "PRE_REGISTRATION" ? (
+            <a
+              className="er-button er-button--secondary"
+              href={`/events/${eventId}/import`}
+            >
+              엑셀 가져오기
+            </a>
+          ) : null}
+          <Button type="button" onClick={() => void exportRoster()}>
+            엑셀 내보내기
           </Button>
-        ) : null}
+          {canMutate ? (
+            <Button
+              type="button"
+              variant="primary"
+              onClick={() => {
+                setPendingCreatedParticipantId(null);
+                setShowAdd(true);
+              }}
+            >
+              참가자 추가
+            </Button>
+          ) : null}
+        </div>
       </header>
       {message ? (
         <StatusMessage tone={message.includes("최신") ? "info" : "error"}>
