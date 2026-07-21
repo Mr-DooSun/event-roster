@@ -1,5 +1,6 @@
 import { expect, it, vi } from "vitest";
 import {
+  collectProbeAttempt,
   collectProbeAttempts,
   type ProbeDriverOptions,
 } from "../src/remote-probe";
@@ -127,4 +128,39 @@ it("records actual HTTP and transport failures without retries or padded attempt
     status: 503,
     response: { hashed: true },
   });
+});
+
+it("calls the default performance clock with its receiver", async () => {
+  let ticks = 0;
+  const fakePerformance = {
+    now(this: unknown): number {
+      if (this !== fakePerformance) {
+        throw new Error("performance receiver was lost");
+      }
+      ticks += 10;
+      return ticks;
+    },
+  };
+  vi.stubGlobal("performance", fakePerformance);
+
+  try {
+    const attempt = await collectProbeAttempt(
+      {
+        baseUrl: "https://probe.example.test",
+        probeToken: "test-probe-token",
+        runId,
+        fetch: vi.fn(async () => responseFor("hash")),
+      },
+      "warmup",
+      "hash",
+    );
+
+    expect(attempt).toMatchObject({
+      status: 200,
+      milliseconds: 10,
+      response: { hashed: true },
+    });
+  } finally {
+    vi.unstubAllGlobals();
+  }
 });

@@ -35,7 +35,7 @@ export async function collectProbeAttempt(
 ): Promise<EvidenceAttempt> {
   const url = new URL("/probe", options.baseUrl);
   url.searchParams.set("run", options.runId);
-  const now = options.now ?? performance.now;
+  const now = options.now ?? (() => performance.now());
   const startedAt = now();
   try {
     const response = await options.fetch(url, {
