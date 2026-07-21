@@ -4,10 +4,12 @@ import { Button } from "./Button";
 export function Dialog({
   title,
   children,
+  closeLabel = "닫기",
   onClose,
 }: {
   title: string;
   children: ReactNode;
+  closeLabel?: string;
   onClose: () => void;
 }) {
   return (
@@ -21,7 +23,7 @@ export function Dialog({
         <h2>{title}</h2>
         {children}
         <Button type="button" onClick={onClose}>
-          닫기
+          {closeLabel}
         </Button>
       </section>
     </div>
