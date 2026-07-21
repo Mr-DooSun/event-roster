@@ -62,9 +62,19 @@ a {
   gap: var(--er-space-2);
   font-weight: var(--er-font-weight-medium);
 }
-.er-control,
-.er-field input,
-.er-field select {
+.er-field input {
+  width: 100%;
+  border: 1px solid var(--er-color-border);
+  border-radius: var(--er-radius-sm);
+  padding: 0.75rem 0.875rem;
+  color: var(--er-color-ink);
+  background: var(--er-color-surface);
+}
+.er-field input:focus {
+  border-color: var(--er-color-primary);
+  outline: 3px solid rgb(37 87 214 / 15%);
+}
+.er-control {
   min-height: 2.75rem;
   width: 100%;
   border: 1px solid var(--er-color-border);
@@ -73,9 +83,7 @@ a {
   color: var(--er-color-ink);
   background: var(--er-color-surface);
 }
-.er-control:focus-visible,
-.er-field input:focus-visible,
-.er-field select:focus-visible {
+.er-control:focus-visible {
   border-color: var(--er-color-primary);
   outline: 3px solid rgb(37 87 214 / 15%);
 }

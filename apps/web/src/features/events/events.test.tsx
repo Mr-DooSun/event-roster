@@ -13,13 +13,15 @@ afterEach(() => {
   window.history.replaceState(null, "", "/");
 });
 
-it("limits the custom select arrow to management controls", () => {
+it("keeps field selects outside the account-control styling", () => {
   const styles = readFileSync("src/styles/global.css", "utf8");
-
-  expect(styles).not.toMatch(
-    /\.er-control--select\s*,\s*\.er-field select\s*\{[^}]*appearance: none;/,
+  const rules = [...styles.matchAll(/([^{}]+)\{[^{}]*\}/g)].map(
+    (match) => match[1] ?? "",
   );
-  expect(styles).not.toMatch(/\.er-field select\s*\{[^}]*appearance: none;/);
+
+  expect(
+    rules.some((selectors) => selectors.includes(".er-field select")),
+  ).toBe(false);
 });
 
 it("does not render account controls for a manager opening the URL directly", async () => {

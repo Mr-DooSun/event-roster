@@ -83,6 +83,56 @@ it("does not change a password when the confirmation differs", async () => {
   expect(fetchMock).toHaveBeenCalledOnce();
 });
 
+it("changes a password when the confirmation matches and returns to login", async () => {
+  const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.endsWith("/auth/login")) {
+      return Promise.resolve(
+        Response.json(authSuccess("MUST_CHANGE_PASSWORD")),
+      );
+    }
+    if (url.endsWith("/auth/change-password") && init?.method === "POST") {
+      return Promise.resolve(new Response(null, { status: 204 }));
+    }
+    if (url.endsWith("/auth/logout")) {
+      return Promise.resolve(new Response(null, { status: 204 }));
+    }
+    throw new Error(`unexpected request: ${url}`);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  render(
+    <AuthProvider restoreOnMount={false}>
+      <AuthBoundary />
+    </AuthProvider>,
+  );
+
+  await submitLogin();
+  await screen.findByText("새 비밀번호를 설정하세요.");
+  fireEvent.change(screen.getByLabelText("현재 비밀번호"), {
+    target: { value: "temporary-password-123" },
+  });
+  fireEvent.change(screen.getByLabelText(/새 비밀번호.*10자 이상/), {
+    target: { value: "new-password-123" },
+  });
+  fireEvent.change(screen.getByLabelText("새 비밀번호 확인"), {
+    target: { value: "new-password-123" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "비밀번호 변경" }));
+
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "로그인" })).toBeVisible(),
+  );
+  const changePasswordCall = fetchMock.mock.calls.find(
+    ([url, init]) =>
+      String(url).endsWith("/auth/change-password") && init?.method === "POST",
+  );
+  expect(JSON.parse(String(changePasswordCall?.[1]?.body))).toEqual({
+    currentPassword: "temporary-password-123",
+    newPassword: "new-password-123",
+  });
+  expect(window.location.pathname).toBe("/login");
+});
+
 it("does not recover an account when the confirmation differs", async () => {
   window.history.replaceState(null, "", "/recover");
   const fetchMock = vi.fn();
