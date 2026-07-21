@@ -42,6 +42,10 @@ export function createProbeApp(
 ) {
   const app = new Hono();
 
+  app.onError((_error, context) =>
+    context.json({ error: "capability probe unavailable" }, 500),
+  );
+
   app.post("/probe", async (context) => {
     try {
       dependencies.password.assertCostTwelveHash(env.DUMMY_BCRYPT_HASH);

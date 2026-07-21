@@ -220,3 +220,54 @@ it("returns a generic 500 without bcrypt error details", async () => {
   expect(response.status).toBe(500);
   expect(await response.text()).not.toContain(bcryptError);
 });
+
+it("returns a generic 500 without logging thrown bcrypt secrets", async () => {
+  const validDummyHash = await hashPassword("event-roster-dummy-account-v1");
+  const configuredToken = "probe-token-must-not-be-logged";
+  const bcryptError = "bcrypt-throw-marker-must-not-be-logged";
+  const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+  const app = createProbeApp(
+    {
+      DUMMY_BCRYPT_HASH: validDummyHash,
+      CAPABILITY_PROBE_TOKEN: configuredToken,
+    },
+    {
+      password: {
+        hash: vi.fn(async () => {
+          throw new Error(bcryptError);
+        }),
+        verify: vi.fn(),
+        assertCostTwelveHash: vi.fn(assertCostTwelveHash),
+      },
+    },
+  );
+
+  try {
+    const response = await app.request(
+      "https://probe.test/probe?run=00000000-0000-4000-8000-000000000001",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "X-ER-Probe-Token": configuredToken,
+        },
+        body: JSON.stringify({ operation: "hash" }),
+      },
+    );
+
+    expect(response.status).toBe(500);
+    const body = await response.text();
+    const capturedLogs = consoleError.mock.calls
+      .flat()
+      .map((value) => String(value))
+      .join("\n");
+    expect(consoleError).not.toHaveBeenCalled();
+    expect(body).toBe('{"error":"capability probe unavailable"}');
+    for (const secret of [bcryptError, configuredToken, validDummyHash]) {
+      expect(body).not.toContain(secret);
+      expect(capturedLogs).not.toContain(secret);
+    }
+  } finally {
+    consoleError.mockRestore();
+  }
+});
