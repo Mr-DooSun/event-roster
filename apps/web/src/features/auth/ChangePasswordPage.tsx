@@ -10,6 +10,7 @@ export function ChangePasswordPage() {
   const { changePassword, logout, error, clearError } = useAuth();
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
+  const [confirmNewPassword, setConfirmNewPassword] = useState("");
   const [validation, setValidation] = useState<string | null>(null);
 
   async function submit(event: FormEvent) {
@@ -19,6 +20,10 @@ export function ChangePasswordPage() {
       setValidation(
         parsed.error.issues[0]?.message ?? "새 비밀번호를 확인해 주세요.",
       );
+      return;
+    }
+    if (newPassword !== confirmNewPassword) {
+      setValidation("새 비밀번호가 일치하지 않습니다.");
       return;
     }
     await changePassword(currentPassword, parsed.data);
@@ -55,6 +60,16 @@ export function ChangePasswordPage() {
             hint="10자 이상, UTF-8 기준 72바이트 이하"
             value={newPassword}
             onChange={(event) => setNewPassword(event.currentTarget.value)}
+          />
+          <TextInput
+            label="새 비밀번호 확인"
+            type="password"
+            autoComplete="new-password"
+            required
+            value={confirmNewPassword}
+            onChange={(event) =>
+              setConfirmNewPassword(event.currentTarget.value)
+            }
           />
           {validation || error ? (
             <StatusMessage tone="error">{validation ?? error}</StatusMessage>

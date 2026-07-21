@@ -48,6 +48,103 @@ it("keeps access and CSRF tokens only in memory", async () => {
   expect(sessionStorage.length).toBe(0);
 });
 
+it("does not change a password when the confirmation differs", async () => {
+  const fetchMock = vi.fn((input: RequestInfo | URL) => {
+    if (String(input).endsWith("/auth/login")) {
+      return Promise.resolve(Response.json(authSuccess("MUST_CHANGE_PASSWORD")));
+    }
+    throw new Error(`unexpected request: ${input}`);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  render(
+    <AuthProvider restoreOnMount={false}>
+      <AuthBoundary />
+    </AuthProvider>,
+  );
+
+  await submitLogin();
+  await screen.findByText("새 비밀번호를 설정하세요.");
+  fireEvent.change(screen.getByLabelText("현재 비밀번호"), {
+    target: { value: "temporary-password-123" },
+  });
+  fireEvent.change(screen.getByLabelText(/새 비밀번호.*10자 이상/), {
+    target: { value: "new-password-123" },
+  });
+  fireEvent.change(screen.getByLabelText("새 비밀번호 확인"), {
+    target: { value: "different-password-123" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "비밀번호 변경" }));
+
+  expect(
+    await screen.findByText("새 비밀번호가 일치하지 않습니다."),
+  ).toBeVisible();
+  expect(fetchMock).toHaveBeenCalledOnce();
+});
+
+it("does not recover an account when the confirmation differs", async () => {
+  window.history.replaceState(null, "", "/recover");
+  const fetchMock = vi.fn();
+  vi.stubGlobal("fetch", fetchMock);
+  render(
+    <AuthProvider restoreOnMount={false}>
+      <AuthBoundary />
+    </AuthProvider>,
+  );
+
+  fireEvent.change(screen.getByLabelText("로그인 ID"), {
+    target: { value: "operator-01" },
+  });
+  fireEvent.change(screen.getByLabelText("복구 코드"), {
+    target: { value: "recovery-code-123" },
+  });
+  fireEvent.change(screen.getByLabelText(/새 비밀번호.*10자 이상/), {
+    target: { value: "new-password-123" },
+  });
+  fireEvent.change(screen.getByLabelText("새 비밀번호 확인"), {
+    target: { value: "different-password-123" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "비밀번호 재설정" }));
+
+  expect(
+    await screen.findByText("새 비밀번호가 일치하지 않습니다."),
+  ).toBeVisible();
+  expect(fetchMock).not.toHaveBeenCalled();
+});
+
+it("sends the existing recovery request when the confirmation matches", async () => {
+  window.history.replaceState(null, "", "/recover");
+  const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+  vi.stubGlobal("fetch", fetchMock);
+  render(
+    <AuthProvider restoreOnMount={false}>
+      <AuthBoundary />
+    </AuthProvider>,
+  );
+
+  fireEvent.change(screen.getByLabelText("로그인 ID"), {
+    target: { value: "operator-01" },
+  });
+  fireEvent.change(screen.getByLabelText("복구 코드"), {
+    target: { value: "recovery-code-123" },
+  });
+  fireEvent.change(screen.getByLabelText(/새 비밀번호.*10자 이상/), {
+    target: { value: "new-password-123" },
+  });
+  fireEvent.change(screen.getByLabelText("새 비밀번호 확인"), {
+    target: { value: "new-password-123" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "비밀번호 재설정" }));
+
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "로그인" })).toBeVisible(),
+  );
+  expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
+    loginId: "operator-01",
+    recoveryCode: "recovery-code-123",
+    newPassword: "new-password-123",
+  });
+});
+
 it("shows both first-operator credentials and logs out after acknowledgement", async () => {
   const fetchMock = vi.fn((input: RequestInfo | URL) => {
     const url = String(input);
