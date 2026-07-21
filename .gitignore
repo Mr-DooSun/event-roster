@@ -2,6 +2,8 @@
 .worktrees/
 node_modules/
 .wrangler/
+dist/
+*.tsbuildinfo
 __pycache__/
 *.py[cod]
 .pytest_cache/

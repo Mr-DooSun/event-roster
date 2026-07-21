@@ -3,9 +3,10 @@
   "files": {
     "includes": [
       "**",
-      "!!**/dist/**",
-      "!!**/.wrangler/**",
-      "!!**/playwright-report/**",
+      "!!**/dist",
+      "!!**/.wrangler",
+      "!!**/.venv",
+      "!!**/playwright-report",
       "!!**/worker-configuration.d.ts"
     ]
   },
