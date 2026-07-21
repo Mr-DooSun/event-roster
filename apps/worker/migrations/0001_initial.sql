@@ -148,6 +148,7 @@ CREATE TABLE event_roster_entries (
   organization_name_snapshot TEXT NOT NULL,
   source TEXT NOT NULL CHECK (source IN ('PRE_EVENT', 'DAY_OF')),
   status TEXT NOT NULL CHECK (status IN ('ACTIVE', 'CANCELLED')),
+  was_expected_at_day_of INTEGER NOT NULL DEFAULT 0 CHECK (was_expected_at_day_of IN (0, 1)),
   revision INTEGER NOT NULL DEFAULT 0 CHECK (revision >= 0),
   created_by TEXT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
   updated_by TEXT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,

@@ -9,6 +9,7 @@ import { eventRoutes } from "./routes/events";
 import { healthRoutes } from "./routes/health";
 import { organizationRoutes } from "./routes/organizations";
 import { participantRoutes } from "./routes/participants";
+import { rosterRoutes } from "./routes/roster";
 import { userRoutes } from "./routes/users";
 
 export function createApp() {
@@ -21,6 +22,7 @@ export function createApp() {
   app.route("/api/v1", userRoutes);
   app.route("/api/v1", eventRoutes);
   app.route("/api/v1", participantRoutes);
+  app.route("/api/v1", rosterRoutes);
   app.all("/api/*", (_c) =>
     problemResponse(
       new HttpProblem("NOT_FOUND", 404, "요청한 API를 찾을 수 없습니다."),
@@ -76,6 +78,7 @@ function toHttpProblem(error: Error): HttpProblem {
       STALE_REVISION: [409, "다른 변경이 먼저 반영되었습니다."],
       EVENT_CLOSED: [409, "종료된 행사는 변경할 수 없습니다."],
       NOT_FOUND: [404, "요청한 데이터를 찾을 수 없습니다."],
+      VALIDATION_FAILED: [422, "입력값을 확인해 주세요."],
     } as const;
     const definition = definitions[error.code as keyof typeof definitions];
     if (definition) {

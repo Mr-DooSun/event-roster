@@ -130,6 +130,10 @@ export async function changeEventStatus(
          GROUP BY o.id
          ON CONFLICT(event_id, organization_id) DO NOTHING`,
       ).bind(id, now, id, id),
+      env.DB.prepare(
+        `UPDATE event_roster_entries SET was_expected_at_day_of = 1
+         WHERE event_id = ? AND source = 'PRE_EVENT' AND status = 'ACTIVE'`,
+      ).bind(id),
     );
   }
   statements.push(
