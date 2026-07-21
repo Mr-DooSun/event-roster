@@ -144,6 +144,8 @@ CREATE TABLE event_roster_entries (
   event_id TEXT NOT NULL REFERENCES events(id) ON DELETE RESTRICT,
   participant_id TEXT NOT NULL REFERENCES participants(id) ON DELETE RESTRICT,
   organization_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE RESTRICT,
+  participant_name_snapshot TEXT NOT NULL,
+  organization_name_snapshot TEXT NOT NULL,
   source TEXT NOT NULL CHECK (source IN ('PRE_EVENT', 'DAY_OF')),
   status TEXT NOT NULL CHECK (status IN ('ACTIVE', 'CANCELLED')),
   revision INTEGER NOT NULL DEFAULT 0 CHECK (revision >= 0),

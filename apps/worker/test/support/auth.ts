@@ -88,6 +88,17 @@ export function authenticatedHeaders(
 
 export async function resetAuthState(): Promise<void> {
   await env.DB.batch([
+    env.DB.prepare("DROP TRIGGER IF EXISTS audit_logs_no_update"),
+    env.DB.prepare("DROP TRIGGER IF EXISTS audit_logs_no_delete"),
+    env.DB.prepare("DROP TRIGGER IF EXISTS security_events_no_update"),
+    env.DB.prepare("DROP TRIGGER IF EXISTS security_events_no_delete"),
+    env.DB.prepare("DELETE FROM import_runs"),
+    env.DB.prepare("DELETE FROM audit_logs"),
+    env.DB.prepare("DELETE FROM security_events"),
+    env.DB.prepare("DELETE FROM event_expected_snapshots"),
+    env.DB.prepare("DELETE FROM event_roster_entries"),
+    env.DB.prepare("DELETE FROM events"),
+    env.DB.prepare("DELETE FROM participants"),
     env.DB.prepare("DELETE FROM refresh_tokens"),
     env.DB.prepare("DELETE FROM auth_sessions"),
     env.DB.prepare("DELETE FROM recovery_codes"),
@@ -96,5 +107,22 @@ export async function resetAuthState(): Promise<void> {
     env.DB.prepare("DELETE FROM password_credentials"),
     env.DB.prepare("DELETE FROM user_organizations"),
     env.DB.prepare("DELETE FROM users"),
+    env.DB.prepare("DELETE FROM organizations"),
+    env.DB.prepare(
+      `CREATE TRIGGER audit_logs_no_update BEFORE UPDATE ON audit_logs
+       BEGIN SELECT RAISE(ABORT, 'APPEND_ONLY'); END`,
+    ),
+    env.DB.prepare(
+      `CREATE TRIGGER audit_logs_no_delete BEFORE DELETE ON audit_logs
+       BEGIN SELECT RAISE(ABORT, 'APPEND_ONLY'); END`,
+    ),
+    env.DB.prepare(
+      `CREATE TRIGGER security_events_no_update BEFORE UPDATE ON security_events
+       BEGIN SELECT RAISE(ABORT, 'APPEND_ONLY'); END`,
+    ),
+    env.DB.prepare(
+      `CREATE TRIGGER security_events_no_delete BEFORE DELETE ON security_events
+       BEGIN SELECT RAISE(ABORT, 'APPEND_ONLY'); END`,
+    ),
   ]);
 }

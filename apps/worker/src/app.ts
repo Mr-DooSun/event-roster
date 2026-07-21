@@ -5,7 +5,11 @@ import type { Env } from "./env";
 import { HttpProblem, problemResponse } from "./http/problem";
 import { authRoutes } from "./routes/auth";
 import { bootstrapRoutes } from "./routes/bootstrap";
+import { eventRoutes } from "./routes/events";
 import { healthRoutes } from "./routes/health";
+import { organizationRoutes } from "./routes/organizations";
+import { participantRoutes } from "./routes/participants";
+import { userRoutes } from "./routes/users";
 
 export function createApp() {
   const app = new Hono<{ Bindings: Env }>();
@@ -13,6 +17,10 @@ export function createApp() {
   app.route("/api/v1/health", healthRoutes);
   app.route("/api/v1", bootstrapRoutes);
   app.route("/api/v1", authRoutes);
+  app.route("/api/v1", organizationRoutes);
+  app.route("/api/v1", userRoutes);
+  app.route("/api/v1", eventRoutes);
+  app.route("/api/v1", participantRoutes);
   app.all("/api/*", (_c) =>
     problemResponse(
       new HttpProblem("NOT_FOUND", 404, "요청한 API를 찾을 수 없습니다."),
@@ -64,6 +72,10 @@ function toHttpProblem(error: Error): HttpProblem {
       INVALID_RECOVERY_CODE: [401, "복구 코드를 확인해 주세요."],
       RATE_LIMITED: [429, "로그인 시도가 잠시 제한되었습니다."],
       CONFLICT: [409, "이미 처리되었거나 충돌하는 요청입니다."],
+      INVALID_TRANSITION: [409, "허용되지 않은 행사 상태 변경입니다."],
+      STALE_REVISION: [409, "다른 변경이 먼저 반영되었습니다."],
+      EVENT_CLOSED: [409, "종료된 행사는 변경할 수 없습니다."],
+      NOT_FOUND: [404, "요청한 데이터를 찾을 수 없습니다."],
     } as const;
     const definition = definitions[error.code as keyof typeof definitions];
     if (definition) {
