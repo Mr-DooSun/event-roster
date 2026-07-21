@@ -35,6 +35,7 @@ CREATE TABLE user_organizations (
 CREATE TABLE password_credentials (
   user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE RESTRICT,
   password_hash TEXT NOT NULL,
+  must_change_password INTEGER NOT NULL DEFAULT 0 CHECK (must_change_password IN (0, 1)),
   changed_at TEXT NOT NULL
 );
 
