@@ -48,6 +48,59 @@ it("keeps access and CSRF tokens only in memory", async () => {
   expect(sessionStorage.length).toBe(0);
 });
 
+it("shows both first-operator credentials and logs out after acknowledgement", async () => {
+  const fetchMock = vi.fn((input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.endsWith("/auth/login")) {
+      return Promise.resolve(
+        Response.json(authSuccess("FULL", "bootstrap-access", true)),
+      );
+    }
+    if (url.endsWith("/bootstrap/first-operator")) {
+      return Promise.resolve(
+        Response.json({
+          temporaryPassword: "temporary-password-123",
+          recoveryCode: "recovery-code-123",
+        }),
+      );
+    }
+    if (url.endsWith("/auth/logout")) {
+      return Promise.resolve(new Response(null, { status: 204 }));
+    }
+    throw new Error(`unexpected fetch: ${url}`);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  render(
+    <AuthProvider restoreOnMount={false}>
+      <AuthBoundary />
+    </AuthProvider>,
+  );
+
+  await submitLogin();
+  expect(
+    await screen.findByRole("heading", { name: "첫 운영자 계정 인계" }),
+  ).toBeVisible();
+
+  fireEvent.change(screen.getByLabelText("영문 로그인 ID"), {
+    target: { value: "operator-01" },
+  });
+  fireEvent.change(screen.getByLabelText("표시 이름"), {
+    target: { value: "첫 운영자" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "운영자 계정 만들기" }));
+
+  expect(await screen.findByText("temporary-password-123")).toBeVisible();
+  expect(screen.getByText("recovery-code-123")).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "기록했고 로그아웃" }));
+
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "로그인" })).toBeVisible(),
+  );
+  expect(
+    fetchMock.mock.calls.some(([url]) => String(url).endsWith("/auth/logout")),
+  ).toBe(true);
+});
+
 it("does not retry a temporarily unavailable login", async () => {
   const fetchMock = vi
     .fn()
@@ -270,6 +323,7 @@ it("does not restore auth or retry an old mutation after logout during refresh",
 function authSuccess(
   sessionKind: "FULL" | "MUST_CHANGE_PASSWORD",
   accessToken = "access-token",
+  isBootstrap = false,
 ): AuthSuccess {
   return {
     accessToken,
@@ -282,7 +336,7 @@ function authSuccess(
         displayName: "운영자",
         role: "OPERATOR",
         organizationIds: [],
-        isBootstrap: false,
+        isBootstrap,
       },
     },
   };
