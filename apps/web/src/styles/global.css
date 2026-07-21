@@ -82,8 +82,15 @@ a {
 .er-control--inline {
   min-width: 11.5rem;
 }
-.er-control--select,
-.er-field select {
+.er-control:not(:disabled):hover {
+  border-color: var(--er-color-primary);
+}
+.er-control:disabled {
+  cursor: not-allowed;
+  color: var(--er-color-muted);
+  background: var(--er-color-canvas);
+}
+.er-control--select {
   appearance: none;
   padding-right: 2.5rem;
   background-image:
@@ -161,6 +168,26 @@ a {
 .er-toggle__input:focus-visible + .er-toggle__track {
   outline: 3px solid rgb(37 87 214 / 15%);
   outline-offset: 2px;
+}
+.er-checkbox:hover:not(:has(.er-checkbox__input:disabled)) .er-checkbox__box {
+  border-color: var(--er-color-primary);
+}
+.er-toggle:hover:not(:has(.er-toggle__input:disabled)) .er-toggle__track {
+  background: var(--er-color-muted);
+}
+.er-toggle:hover:not(:has(.er-toggle__input:disabled))
+  .er-toggle__input:checked
+  + .er-toggle__track {
+  background: var(--er-color-primary-hover);
+}
+.er-checkbox:has(.er-checkbox__input:disabled),
+.er-toggle:has(.er-toggle__input:disabled) {
+  cursor: not-allowed;
+  color: var(--er-color-muted);
+}
+.er-checkbox__input:disabled + .er-checkbox__box,
+.er-toggle__input:disabled + .er-toggle__track {
+  opacity: 0.65;
 }
 .er-field small {
   color: var(--er-color-muted);

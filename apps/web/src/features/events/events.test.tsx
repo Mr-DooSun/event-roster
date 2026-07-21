@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import "@testing-library/jest-dom/vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
@@ -10,6 +11,15 @@ afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
   window.history.replaceState(null, "", "/");
+});
+
+it("limits the custom select arrow to management controls", () => {
+  const styles = readFileSync("src/styles/global.css", "utf8");
+
+  expect(styles).not.toMatch(
+    /\.er-control--select\s*,\s*\.er-field select\s*\{[^}]*appearance: none;/,
+  );
+  expect(styles).not.toMatch(/\.er-field select\s*\{[^}]*appearance: none;/);
 });
 
 it("does not render account controls for a manager opening the URL directly", async () => {
