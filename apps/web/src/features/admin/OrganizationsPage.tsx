@@ -90,6 +90,7 @@ function OrganizationRow({
   return (
     <li>
       <input
+        className="er-control er-control--inline"
         aria-label={`${item.name} 조직 이름`}
         value={name}
         onChange={(event) => setName(event.currentTarget.value)}

@@ -42,6 +42,10 @@ it("shows a generated password once and removes it after close", async () => {
     </AuthProvider>,
   );
   await login();
+  expect(await screen.findByLabelText("역할")).toHaveClass(
+    "er-control",
+    "er-control--select",
+  );
   fireEvent.change(await screen.findByLabelText("영문 로그인 ID"), {
     target: { value: "staff-01" },
   });
@@ -93,6 +97,17 @@ it("updates an existing account role, organizations, and active state", async ()
     </AuthProvider>,
   );
   await login();
+  expect(await screen.findByLabelText("staff-01 표시 이름")).toHaveClass(
+    "er-control",
+    "er-control--inline",
+  );
+  expect(screen.getByLabelText("staff-01 역할")).toHaveClass(
+    "er-control",
+    "er-control--select",
+  );
+  expect(screen.getByLabelText("staff-01 활성")).toHaveClass(
+    "er-toggle__input",
+  );
   fireEvent.change(await screen.findByLabelText("staff-01 역할"), {
     target: { value: "ORGANIZATION_MANAGER" },
   });

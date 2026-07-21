@@ -33,6 +33,7 @@ export function UserEditRow({
     <tr>
       <td>
         <input
+          className="er-control er-control--inline"
           aria-label={`${user.loginId} 표시 이름`}
           value={displayName}
           onChange={(event) => setDisplayName(event.currentTarget.value)}
@@ -41,6 +42,7 @@ export function UserEditRow({
       <td>{user.loginId}</td>
       <td>
         <select
+          className="er-control er-control--select"
           aria-label={`${user.loginId} 역할`}
           value={role}
           onChange={(event) => {
@@ -57,8 +59,9 @@ export function UserEditRow({
             {organizations
               .filter((item) => item.isActive)
               .map((organization) => (
-                <label key={organization.id}>
+                <label className="er-checkbox" key={organization.id}>
                   <input
+                    className="er-checkbox__input"
                     type="checkbox"
                     checked={organizationIds.includes(organization.id)}
                     onChange={(event) => {
@@ -70,21 +73,26 @@ export function UserEditRow({
                       );
                     }}
                   />
-                  {organization.name}
+                  <span className="er-checkbox__box" aria-hidden="true" />
+                  <span>{organization.name}</span>
                 </label>
               ))}
           </div>
         ) : null}
       </td>
       <td>
-        <label>
+        <label className="er-toggle">
           <input
+            className="er-toggle__input"
             aria-label={`${user.loginId} 활성`}
             type="checkbox"
             checked={isActive}
             onChange={(event) => setIsActive(event.currentTarget.checked)}
-          />{" "}
-          {isActive ? "사용" : "중지"}
+          />
+          <span className="er-toggle__track" aria-hidden="true">
+            <span className="er-toggle__thumb" />
+          </span>
+          <span>{isActive ? "사용" : "중지"}</span>
         </label>
       </td>
       <td>

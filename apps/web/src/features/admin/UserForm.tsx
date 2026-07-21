@@ -53,6 +53,7 @@ export function UserForm({
       <label className="er-field">
         <span>역할</span>
         <select
+          className="er-control er-control--select"
           value={role}
           onChange={(event) => setRole(event.currentTarget.value as Role)}
         >
@@ -66,8 +67,9 @@ export function UserForm({
           {organizations
             .filter((item) => item.isActive)
             .map((organization) => (
-              <label key={organization.id}>
+              <label className="er-checkbox" key={organization.id}>
                 <input
+                  className="er-checkbox__input"
                   type="checkbox"
                   checked={organizationIds.includes(organization.id)}
                   onChange={(event) =>
@@ -78,7 +80,8 @@ export function UserForm({
                     )
                   }
                 />
-                {organization.name}
+                <span className="er-checkbox__box" aria-hidden="true" />
+                <span>{organization.name}</span>
               </label>
             ))}
         </fieldset>
