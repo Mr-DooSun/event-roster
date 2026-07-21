@@ -51,7 +51,9 @@ it("keeps access and CSRF tokens only in memory", async () => {
 it("does not change a password when the confirmation differs", async () => {
   const fetchMock = vi.fn((input: RequestInfo | URL) => {
     if (String(input).endsWith("/auth/login")) {
-      return Promise.resolve(Response.json(authSuccess("MUST_CHANGE_PASSWORD")));
+      return Promise.resolve(
+        Response.json(authSuccess("MUST_CHANGE_PASSWORD")),
+      );
     }
     throw new Error(`unexpected request: ${input}`);
   });
@@ -113,7 +115,9 @@ it("does not recover an account when the confirmation differs", async () => {
 
 it("sends the existing recovery request when the confirmation matches", async () => {
   window.history.replaceState(null, "", "/recover");
-  const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+  const fetchMock = vi
+    .fn()
+    .mockResolvedValue(new Response(null, { status: 204 }));
   vi.stubGlobal("fetch", fetchMock);
   render(
     <AuthProvider restoreOnMount={false}>
