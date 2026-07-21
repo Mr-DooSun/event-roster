@@ -7,6 +7,7 @@ import { authRoutes } from "./routes/auth";
 import { bootstrapRoutes } from "./routes/bootstrap";
 import { eventRoutes } from "./routes/events";
 import { healthRoutes } from "./routes/health";
+import { importRoutes } from "./routes/imports";
 import { organizationRoutes } from "./routes/organizations";
 import { participantRoutes } from "./routes/participants";
 import { rosterRoutes } from "./routes/roster";
@@ -23,6 +24,7 @@ export function createApp() {
   app.route("/api/v1", eventRoutes);
   app.route("/api/v1", participantRoutes);
   app.route("/api/v1", rosterRoutes);
+  app.route("/api/v1", importRoutes);
   app.all("/api/*", (_c) =>
     problemResponse(
       new HttpProblem("NOT_FOUND", 404, "요청한 API를 찾을 수 없습니다."),
@@ -82,7 +84,12 @@ function toHttpProblem(error: Error): HttpProblem {
     } as const;
     const definition = definitions[error.code as keyof typeof definitions];
     if (definition) {
-      return new HttpProblem(error.code, definition[0], definition[1]);
+      return new HttpProblem(
+        error.code,
+        definition[0],
+        definition[1],
+        error.details,
+      );
     }
   }
 

@@ -33,10 +33,15 @@ export async function addRosterEntry(
 ) {
   const event = await requireMutableEvent(env.DB, eventId);
   const participant = await env.DB.prepare(
-    "SELECT id, name, organization_id FROM participants WHERE id = ?",
+    "SELECT id, participant_id, name, organization_id FROM participants WHERE id = ?",
   )
     .bind(participantId)
-    .first<{ id: string; name: string; organization_id: string }>();
+    .first<{
+      id: string;
+      participant_id: string;
+      name: string;
+      organization_id: string;
+    }>();
   if (!participant) throw new DomainError("NOT_FOUND");
   assertActorScope(actor, participant.organization_id, event.status);
   const organization = await findOrganization(
@@ -134,7 +139,11 @@ export async function addRosterEntry(
     statements,
     failureCode: "STALE_REVISION",
   });
-  const committed = mapReturnedRoster(results[1]?.results[0]);
+  const committed = mapReturnedRoster(
+    results[1]?.results[0],
+    participant.participant_id,
+    now,
+  );
   return {
     ...committed,
     eventRevision: expectedRevision + 1,
@@ -208,6 +217,7 @@ export async function updateRosterEntry(
     status: input.status,
     source: nextSource,
     revision: input.expectedEntryRevision + 1,
+    updatedAt: now,
     eventRevision: input.expectedRevision + 1,
   };
 }
@@ -508,7 +518,11 @@ function sanitizeAuditDetails(raw: string): Record<string, string> {
   }
 }
 
-function mapReturnedRoster(value: unknown): RosterRecord {
+function mapReturnedRoster(
+  value: unknown,
+  participantNumber: string,
+  updatedAt: string,
+): RosterRecord {
   if (!value || typeof value !== "object") {
     throw new DomainError("INTERNAL_ERROR");
   }
@@ -531,6 +545,7 @@ function mapReturnedRoster(value: unknown): RosterRecord {
     id: row.id,
     eventId: row.event_id,
     participantId: row.participant_id,
+    participantNumber,
     organizationId: row.organization_id,
     participantName: row.participant_name_snapshot,
     organizationName: row.organization_name_snapshot,
@@ -538,6 +553,7 @@ function mapReturnedRoster(value: unknown): RosterRecord {
     status: row.status,
     wasExpectedAtDayOf: row.was_expected_at_day_of === 1,
     revision: row.revision,
+    updatedAt,
   };
 }
 

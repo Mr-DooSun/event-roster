@@ -3,8 +3,8 @@ import { ParticipantIdSchema } from "./participants";
 
 export const NormalizedImportRowSchema = z.object({
   rowNumber: z.number().int().positive(),
-  name: z.string(),
-  organizationName: z.string(),
+  name: z.string().max(100),
+  organizationName: z.string().max(100),
   resolvedParticipantId: ParticipantIdSchema.optional(),
 });
 

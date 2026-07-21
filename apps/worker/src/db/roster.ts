@@ -4,6 +4,7 @@ export interface RosterRecord {
   id: string;
   eventId: string;
   participantId: string;
+  participantNumber: string;
   organizationId: string;
   participantName: string;
   organizationName: string;
@@ -11,12 +12,14 @@ export interface RosterRecord {
   status: RosterStatus;
   wasExpectedAtDayOf: boolean;
   revision: number;
+  updatedAt: string;
 }
 
 interface RosterRow {
   id: string;
   event_id: string;
   participant_id: string;
+  participant_number: string;
   organization_id: string;
   participant_name_snapshot: string;
   organization_name_snapshot: string;
@@ -24,11 +27,15 @@ interface RosterRow {
   status: RosterStatus;
   was_expected_at_day_of: number;
   revision: number;
+  updated_at: string;
 }
 
 const SELECT_ROSTER = `SELECT id, event_id, participant_id, organization_id,
   participant_name_snapshot, organization_name_snapshot, source, status,
-  was_expected_at_day_of, revision FROM event_roster_entries`;
+  was_expected_at_day_of, revision, updated_at,
+  (SELECT participant_id FROM participants p
+   WHERE p.id = event_roster_entries.participant_id) AS participant_number
+  FROM event_roster_entries`;
 
 export async function findRosterByParticipant(
   db: D1Database,
@@ -66,7 +73,9 @@ export async function listRoster(
   const rows = (
     await db
       .prepare(
-        `${SELECT_ROSTER} WHERE event_id = ?${scope} ORDER BY participant_name_snapshot`,
+        `${SELECT_ROSTER} WHERE event_id = ?${scope}
+         ORDER BY participant_name_snapshot, organization_name_snapshot,
+                  participant_number, id`,
       )
       .bind(eventId, ...(organizationIds ?? []))
       .all<RosterRow>()
@@ -79,6 +88,7 @@ function mapRoster(row: RosterRow): RosterRecord {
     id: row.id,
     eventId: row.event_id,
     participantId: row.participant_id,
+    participantNumber: row.participant_number,
     organizationId: row.organization_id,
     participantName: row.participant_name_snapshot,
     organizationName: row.organization_name_snapshot,
@@ -86,5 +96,6 @@ function mapRoster(row: RosterRow): RosterRecord {
     status: row.status,
     wasExpectedAtDayOf: row.was_expected_at_day_of === 1,
     revision: row.revision,
+    updatedAt: row.updated_at,
   };
 }
