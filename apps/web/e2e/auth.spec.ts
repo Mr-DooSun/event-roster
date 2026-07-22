@@ -11,7 +11,13 @@ test("temporary user changes password, is logged out, and logs in again", async 
     page.getByRole("heading", { name: "새 비밀번호를 설정하세요." }),
   ).toBeVisible();
   await page.getByLabel("현재 비밀번호").fill(data.temporaryUser.password);
-  await page.getByLabel("새 비밀번호").fill(nextPassword);
+  await page
+    .getByRole("textbox", {
+      name: "새 비밀번호 10자 이상, UTF-8 기준 72바이트 이하",
+      exact: true,
+    })
+    .fill(nextPassword);
+  await page.getByLabel("새 비밀번호 확인").fill(nextPassword);
   await page.getByRole("button", { name: "비밀번호 변경" }).click();
   await expect(
     page.getByRole("heading", { name: "행사 참가자 명단" }),
