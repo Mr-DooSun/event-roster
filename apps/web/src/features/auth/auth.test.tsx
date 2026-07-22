@@ -22,8 +22,20 @@ afterEach(() => {
   window.history.replaceState(null, "", "/");
 });
 
+it("uses project branding on the login screen", () => {
+  render(
+    <AuthProvider restoreOnMount={false}>
+      <LoginPage />
+    </AuthProvider>,
+  );
+
+  expect(screen.getByText("PROJECT ROSTER")).toBeVisible();
+  const retiredBrand = ["EVENT", "ROSTER"].join(" ");
+  expect(screen.queryByText(retiredBrand)).not.toBeInTheDocument();
+});
+
 it("keeps access and CSRF tokens only in memory", async () => {
-  window.history.replaceState(null, "", "/events/event-1");
+  window.history.replaceState(null, "", "/projects/project-1");
   const auth = authSuccess("MUST_CHANGE_PASSWORD");
   vi.stubGlobal(
     "fetch",
@@ -391,7 +403,9 @@ it("clears memory auth even when logout fails", async () => {
     target: { value: "temporary-password-123" },
   });
   fireEvent.click(screen.getByRole("button", { name: "로그인" }));
-  expect(await screen.findByText("행사 운영 홈")).toBeVisible();
+  expect(
+    await screen.findByRole("heading", { name: "프로젝트" }),
+  ).toBeVisible();
   fireEvent.click(screen.getByRole("button", { name: "로그아웃" }));
   await waitFor(() =>
     expect(screen.getByRole("button", { name: "로그인" })).toBeVisible(),
@@ -402,6 +416,7 @@ it("uses cookie-only logout even when the access token may be expired", async ()
   const fetchMock = vi
     .fn()
     .mockResolvedValueOnce(Response.json(authSuccess("FULL")))
+    .mockResolvedValueOnce(Response.json([]))
     .mockResolvedValueOnce(new Response(null, { status: 204 }));
   vi.stubGlobal("fetch", fetchMock);
   render(
@@ -410,11 +425,13 @@ it("uses cookie-only logout even when the access token may be expired", async ()
     </AuthProvider>,
   );
   await submitLogin();
-  expect(await screen.findByText("행사 운영 홈")).toBeVisible();
+  expect(
+    await screen.findByRole("heading", { name: "프로젝트" }),
+  ).toBeVisible();
   fireEvent.click(screen.getByRole("button", { name: "로그아웃" }));
   expect(await screen.findByRole("button", { name: "로그인" })).toBeVisible();
 
-  const logoutInit = fetchMock.mock.calls[1]?.[1] as RequestInit;
+  const logoutInit = fetchMock.mock.calls[2]?.[1] as RequestInit;
   const headers = new Headers(logoutInit.headers);
   expect(headers.has("Authorization")).toBe(false);
   expect(headers.has("X-ER-CSRF")).toBe(false);

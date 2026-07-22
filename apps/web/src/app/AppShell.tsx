@@ -1,10 +1,9 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 import { Button } from "../components/ui/Button";
-import { OrganizationsPage } from "../features/admin/OrganizationsPage";
 import { UsersPage } from "../features/admin/UsersPage";
 import { useAuth } from "../features/auth/AuthProvider";
-import { EventsPage } from "../features/events/EventsPage";
-import { RosterPage } from "../features/roster/RosterPage";
+import { ProjectsPage } from "../features/projects/ProjectsPage";
+import { ProjectRosterPage } from "../features/roster/ProjectRosterPage";
 
 const ImportWizard = lazy(() =>
   import("../features/imports/ImportWizard").then((module) => ({
@@ -20,8 +19,8 @@ export function AppShell() {
     <div className="er-app-shell">
       <header className="er-app-header">
         <div>
-          <p className="er-eyebrow">EVENT ROSTER</p>
-          <strong>행사 참가자 명단</strong>
+          <p className="er-eyebrow">PROJECT ROSTER</p>
+          <strong>프로젝트 참가자 명단</strong>
         </div>
         <div className="er-user-actions">
           <span>{auth?.session.user.displayName}</span>
@@ -32,8 +31,7 @@ export function AppShell() {
       </header>
       <div className="er-app-body">
         <nav className="er-nav" aria-label="주 메뉴">
-          <NavLink href="/events">행사</NavLink>
-          {operator ? <NavLink href="/organizations">조직</NavLink> : null}
+          <NavLink href="/projects">프로젝트</NavLink>
           {operator ? <NavLink href="/users">계정</NavLink> : null}
         </nav>
         <main className="er-content">{route(path, operator)}</main>
@@ -43,28 +41,23 @@ export function AppShell() {
 }
 
 function route(path: string, operator: boolean) {
-  if (path === "/") {
-    return (
-      <div>
-        <h1>행사 운영 홈</h1>
-        <p className="er-muted">행사와 참가 명단을 한곳에서 관리합니다.</p>
-      </div>
-    );
-  }
-  if (path === "/organizations" && operator) return <OrganizationsPage />;
+  if (path === "/" || path === "/projects") return <ProjectsPage />;
   if (path === "/users" && operator) return <UsersPage />;
-  const importMatch = path.match(/^\/events\/([^/]+)\/import$/);
+  const importMatch = path.match(/^\/projects\/([^/]+)\/import$/);
   if (importMatch?.[1] && operator) {
     return (
       <Suspense fallback={<p className="er-muted">엑셀 도구 불러오는 중…</p>}>
-        <ImportWizard eventId={decodeURIComponent(importMatch[1])} />
+        <ImportWizard projectId={decodeURIComponent(importMatch[1])} />
       </Suspense>
     );
   }
-  const eventMatch = path.match(/^\/events\/([^/]+)$/);
-  if (eventMatch?.[1])
-    return <RosterPage eventId={decodeURIComponent(eventMatch[1])} />;
-  return <EventsPage />;
+  const projectMatch = path.match(/^\/projects\/([^/]+)$/);
+  if (projectMatch?.[1]) {
+    return (
+      <ProjectRosterPage projectId={decodeURIComponent(projectMatch[1])} />
+    );
+  }
+  return <ProjectsPage />;
 }
 
 function NavLink({ href, children }: { href: string; children: string }) {

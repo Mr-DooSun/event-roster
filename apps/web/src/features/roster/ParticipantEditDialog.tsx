@@ -51,7 +51,7 @@ export function ParticipantEditDialog({
         </select>
       </label>
       {!allowOrganizationChange ? (
-        <p className="er-muted">당일 운영 중에는 조직을 이동할 수 없습니다.</p>
+        <p className="er-muted">진행 중에는 조직을 이동할 수 없습니다.</p>
       ) : null}
       <Button
         type="button"

@@ -5,7 +5,8 @@ import type { Page } from "@playwright/test";
 export interface E2eFixture {
   operator: { loginId: string; password: string };
   temporaryUser: { loginId: string; password: string };
-  eventId: string;
+  projectRosterProjectId: string;
+  importProjectId: string;
 }
 
 export function fixture() {

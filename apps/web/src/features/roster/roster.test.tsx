@@ -3,14 +3,14 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { AuthProvider, useAuth } from "../auth/AuthProvider";
 import { LoginPage } from "../auth/LoginPage";
-import { RosterPage } from "./RosterPage";
+import { ProjectRosterPage } from "./ProjectRosterPage";
 
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
 });
 
-it("updates expected and actual totals after a day-of cancellation", async () => {
+it("updates expected and actual totals after an in-progress cancellation", async () => {
   let summaryReads = 0;
   let rosterReads = 0;
   vi.stubGlobal(
@@ -19,8 +19,8 @@ it("updates expected and actual totals after a day-of cancellation", async () =>
       const url = String(input);
       if (url.endsWith("/auth/login"))
         return Promise.resolve(Response.json(auth()));
-      if (url.endsWith("/events"))
-        return Promise.resolve(Response.json([event()]));
+      if (url.endsWith("/projects/project-1"))
+        return Promise.resolve(Response.json(project()));
       if (url.endsWith("/summary")) {
         summaryReads += 1;
         return Promise.resolve(
@@ -35,18 +35,27 @@ it("updates expected and actual totals after a day-of cancellation", async () =>
       }
       if (url.endsWith("/participants"))
         return Promise.resolve(Response.json([]));
-      if (url.endsWith("/organizations"))
+      if (url.endsWith("/projects/project-1/organizations"))
         return Promise.resolve(
-          Response.json([{ id: "org-1", name: "1팀", isActive: true }]),
+          Response.json([
+            {
+              organizationId: "org-1",
+              name: "1팀",
+              isActive: true,
+              masterIsActive: true,
+              activeProjectCount: 1,
+              hasHistory: false,
+            },
+          ]),
         );
-      if (url.includes("/audit-logs"))
+      if (url.includes("/audit"))
         return Promise.resolve(Response.json({ items: [], nextCursor: null }));
       if (url.endsWith("/roster/entry-1") && init?.method === "PATCH") {
         return Promise.resolve(
           Response.json({
             ...entry("CANCELLED"),
             revision: 1,
-            eventRevision: 3,
+            projectRevision: 3,
           }),
         );
       }
@@ -56,7 +65,7 @@ it("updates expected and actual totals after a day-of cancellation", async () =>
   render(
     <AuthProvider restoreOnMount={false}>
       <Gate>
-        <RosterPage eventId="event-1" />
+        <ProjectRosterPage projectId="project-1" />
       </Gate>
     </AuthProvider>,
   );
@@ -75,8 +84,8 @@ it("reloads a stale roster without replaying the mutation", async () => {
     if (url.endsWith("/auth/login")) {
       return Promise.resolve(Response.json(auth()));
     }
-    if (url.endsWith("/events")) {
-      return Promise.resolve(Response.json([{ ...event(), revision: 3 }]));
+    if (url.endsWith("/projects/project-1")) {
+      return Promise.resolve(Response.json({ ...project(), revision: 3 }));
     }
     if (url.endsWith("/summary")) {
       return Promise.resolve(Response.json(summary(99)));
@@ -90,12 +99,21 @@ it("reloads a stale roster without replaying the mutation", async () => {
     if (url.endsWith("/participants")) {
       return Promise.resolve(Response.json([]));
     }
-    if (url.endsWith("/organizations")) {
+    if (url.endsWith("/projects/project-1/organizations")) {
       return Promise.resolve(
-        Response.json([{ id: "org-1", name: "1팀", isActive: true }]),
+        Response.json([
+          {
+            organizationId: "org-1",
+            name: "1팀",
+            isActive: true,
+            masterIsActive: true,
+            activeProjectCount: 1,
+            hasHistory: false,
+          },
+        ]),
       );
     }
-    if (url.includes("/audit-logs")) {
+    if (url.includes("/audit")) {
       return Promise.resolve(Response.json({ items: [], nextCursor: null }));
     }
     if (url.endsWith("/roster/entry-1") && init?.method === "PATCH") {
@@ -116,7 +134,7 @@ it("reloads a stale roster without replaying the mutation", async () => {
   render(
     <AuthProvider restoreOnMount={false}>
       <Gate>
-        <RosterPage eventId="event-1" />
+        <ProjectRosterPage projectId="project-1" />
       </Gate>
     </AuthProvider>,
   );
@@ -135,68 +153,39 @@ it("reloads a stale roster without replaying the mutation", async () => {
   ).toHaveLength(1);
 });
 
-it("reuses a participant when creating succeeds but roster insertion is stale", async () => {
-  let rosterWrites = 0;
+it("creates and adds a participant with one atomic roster request", async () => {
   const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     if (url.endsWith("/auth/login"))
       return Promise.resolve(Response.json(auth()));
-    if (url.endsWith("/events"))
-      return Promise.resolve(Response.json([event()]));
+    if (url.endsWith("/projects/project-1"))
+      return Promise.resolve(Response.json(project()));
     if (url.endsWith("/summary"))
       return Promise.resolve(Response.json(summary(100)));
     if (url.endsWith("/roster") && (!init?.method || init.method === "GET")) {
       return Promise.resolve(Response.json([]));
     }
-    if (url.endsWith("/participants") && init?.method === "POST") {
-      return Promise.resolve(
-        Response.json(
-          {
-            id: "person-new",
-            participantId: "P-002",
-            name: "김신규",
-            organizationId: "org-1",
-            revision: 0,
-          },
-          { status: 201 },
-        ),
-      );
-    }
     if (url.endsWith("/participants")) {
+      return Promise.resolve(Response.json([]));
+    }
+    if (url.endsWith("/projects/project-1/organizations")) {
       return Promise.resolve(
         Response.json([
           {
-            id: "person-new",
-            participantId: "P-002",
-            name: "김신규",
             organizationId: "org-1",
-            revision: 0,
+            name: "1팀",
+            isActive: true,
+            masterIsActive: true,
+            activeProjectCount: 1,
+            hasHistory: false,
           },
         ]),
       );
     }
-    if (url.endsWith("/organizations")) {
-      return Promise.resolve(
-        Response.json([{ id: "org-1", name: "1팀", isActive: true }]),
-      );
-    }
-    if (url.includes("/audit-logs")) {
+    if (url.includes("/audit")) {
       return Promise.resolve(Response.json({ items: [], nextCursor: null }));
     }
     if (url.endsWith("/roster") && init?.method === "POST") {
-      rosterWrites += 1;
-      if (rosterWrites === 1) {
-        return Promise.resolve(
-          Response.json(
-            {
-              code: "STALE_REVISION",
-              message: "stale",
-              requestId: "request-2",
-            },
-            { status: 409 },
-          ),
-        );
-      }
       return Promise.resolve(
         Response.json({ id: "entry-new" }, { status: 201 }),
       );
@@ -207,7 +196,7 @@ it("reuses a participant when creating succeeds but roster insertion is stale", 
   render(
     <AuthProvider restoreOnMount={false}>
       <Gate>
-        <RosterPage eventId="event-1" />
+        <ProjectRosterPage projectId="project-1" />
       </Gate>
     </AuthProvider>,
   );
@@ -219,22 +208,23 @@ it("reuses a participant when creating succeeds but roster insertion is stale", 
   });
   fireEvent.click(screen.getByRole("button", { name: "참가자 생성 후 추가" }));
 
-  expect(
-    await screen.findByText(
-      "참가자는 생성됐지만 명단 반영이 충돌했습니다. 생성된 참가자를 선택해 다시 추가해 주세요.",
-    ),
-  ).toBeVisible();
-  expect(screen.getByLabelText("참가자")).toHaveValue("person-new");
-  fireEvent.click(screen.getByRole("button", { name: "명단에 추가" }));
-
   await screen.findByText("아직 기록이 없습니다.");
+  const rosterWrites = fetchMock.mock.calls.filter(
+    ([url, init]) =>
+      String(url).endsWith("/projects/project-1/roster") &&
+      init?.method === "POST",
+  );
+  expect(rosterWrites).toHaveLength(1);
+  expect(JSON.parse(String(rosterWrites[0]?.[1]?.body))).toEqual({
+    newParticipant: { name: "김신규", organizationId: "org-1" },
+    expectedRevision: 2,
+  });
   expect(
-    fetchMock.mock.calls.filter(
+    fetchMock.mock.calls.some(
       ([url, init]) =>
         String(url).endsWith("/participants") && init?.method === "POST",
     ),
-  ).toHaveLength(1);
-  expect(rosterWrites).toBe(2);
+  ).toBe(false);
 });
 
 it("closes participant editing after a stale revision reload", async () => {
@@ -242,14 +232,17 @@ it("closes participant editing after a stale revision reload", async () => {
     const url = String(input);
     if (url.endsWith("/auth/login"))
       return Promise.resolve(Response.json(auth()));
-    if (url.endsWith("/events"))
-      return Promise.resolve(Response.json([event()]));
+    if (url.endsWith("/projects/project-1"))
+      return Promise.resolve(Response.json(project()));
     if (url.endsWith("/summary"))
       return Promise.resolve(Response.json(summary(100)));
     if (url.endsWith("/roster") && (!init?.method || init.method === "GET")) {
       return Promise.resolve(Response.json([entry("ACTIVE")]));
     }
-    if (url.endsWith("/participants/person-1") && init?.method === "PATCH") {
+    if (
+      url.endsWith("/projects/project-1/participants/person-1") &&
+      init?.method === "PATCH"
+    ) {
       return Promise.resolve(
         Response.json(
           {
@@ -274,12 +267,21 @@ it("closes participant editing after a stale revision reload", async () => {
         ]),
       );
     }
-    if (url.endsWith("/organizations")) {
+    if (url.endsWith("/projects/project-1/organizations")) {
       return Promise.resolve(
-        Response.json([{ id: "org-1", name: "1팀", isActive: true }]),
+        Response.json([
+          {
+            organizationId: "org-1",
+            name: "1팀",
+            isActive: true,
+            masterIsActive: true,
+            activeProjectCount: 1,
+            hasHistory: false,
+          },
+        ]),
       );
     }
-    if (url.includes("/audit-logs")) {
+    if (url.includes("/audit")) {
       return Promise.resolve(Response.json({ items: [], nextCursor: null }));
     }
     throw new Error(`unexpected request: ${url}`);
@@ -288,7 +290,7 @@ it("closes participant editing after a stale revision reload", async () => {
   render(
     <AuthProvider restoreOnMount={false}>
       <Gate>
-        <RosterPage eventId="event-1" />
+        <ProjectRosterPage projectId="project-1" />
       </Gate>
     </AuthProvider>,
   );
@@ -307,6 +309,87 @@ it("closes participant editing after a stale revision reload", async () => {
   expect(
     screen.queryByRole("dialog", { name: "참가자 정보 수정" }),
   ).not.toBeInTheDocument();
+  const participantWrite = fetchMock.mock.calls.find(
+    ([url, init]) =>
+      String(url).endsWith("/projects/project-1/participants/person-1") &&
+      init?.method === "PATCH",
+  );
+  expect(JSON.parse(String(participantWrite?.[1]?.body))).toEqual({
+    name: "박민수 수정",
+    organizationId: "org-1",
+    expectedRevision: 1,
+    expectedProjectRevision: 2,
+  });
+});
+
+it("shows a project-closed message and reloads after a rejected mutation", async () => {
+  let projectReads = 0;
+  const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.endsWith("/auth/login"))
+      return Promise.resolve(Response.json(auth()));
+    if (url.endsWith("/projects/project-1")) {
+      projectReads += 1;
+      return Promise.resolve(
+        Response.json({
+          ...project(),
+          status: projectReads === 1 ? "IN_PROGRESS" : "CLOSED",
+        }),
+      );
+    }
+    if (url.endsWith("/summary"))
+      return Promise.resolve(Response.json(summary(100)));
+    if (url.endsWith("/roster") && (!init?.method || init.method === "GET")) {
+      return Promise.resolve(Response.json([entry("ACTIVE")]));
+    }
+    if (url.endsWith("/participants"))
+      return Promise.resolve(Response.json([]));
+    if (url.endsWith("/projects/project-1/organizations")) {
+      return Promise.resolve(
+        Response.json([
+          {
+            organizationId: "org-1",
+            name: "1팀",
+            isActive: true,
+            masterIsActive: true,
+            activeProjectCount: 1,
+            hasHistory: false,
+          },
+        ]),
+      );
+    }
+    if (url.includes("/audit")) {
+      return Promise.resolve(Response.json({ items: [], nextCursor: null }));
+    }
+    if (url.endsWith("/roster/entry-1") && init?.method === "PATCH") {
+      return Promise.resolve(
+        Response.json(
+          {
+            code: "PROJECT_CLOSED",
+            message: "closed",
+            requestId: "request-closed",
+          },
+          { status: 409 },
+        ),
+      );
+    }
+    throw new Error(`unexpected request: ${url}`);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  render(
+    <AuthProvider restoreOnMount={false}>
+      <Gate>
+        <ProjectRosterPage projectId="project-1" />
+      </Gate>
+    </AuthProvider>,
+  );
+  await login();
+  fireEvent.click(await screen.findByRole("button", { name: "박민수 취소" }));
+
+  expect(
+    await screen.findByText("프로젝트가 종료되어 변경할 수 없습니다."),
+  ).toBeVisible();
+  expect(projectReads).toBe(2);
 });
 
 function Gate({ children }: { children: React.ReactNode }) {
@@ -341,29 +424,35 @@ function auth() {
   };
 }
 
-function event() {
+function project() {
   return {
-    id: "event-1",
-    year: 2029,
-    half: "H1",
-    name: "상반기 행사",
-    status: "DAY_OF",
+    id: "project-1",
+    name: "상반기 프로젝트",
+    startDate: "2029-05-01",
+    endDate: "2029-05-02",
+    status: "IN_PROGRESS",
     revision: 2,
+    createdAt: "2029-01-01T00:00:00.000Z",
+    createdBy: "user-1",
+    updatedAt: "2029-01-01T00:00:00.000Z",
+    closedAt: null,
+    closedBy: null,
+    closeReason: null,
   };
 }
 
 function entry(status: "ACTIVE" | "CANCELLED") {
   return {
     id: "entry-1",
-    eventId: "event-1",
+    projectId: "project-1",
     participantId: "person-1",
     participantNumber: "P-001",
     organizationId: "org-1",
     participantName: "박민수",
     organizationName: "1팀",
-    source: "PRE_EVENT",
+    source: "PRE_REGISTRATION",
     status,
-    wasExpectedAtDayOf: true,
+    wasExpectedAtStart: true,
     revision: 0,
     updatedAt: "2026-07-21T00:00:00.000Z",
   };
@@ -371,7 +460,7 @@ function entry(status: "ACTIVE" | "CANCELLED") {
 
 function summary(final: number) {
   return {
-    eventId: "event-1",
+    projectId: "project-1",
     expectedTotal: 100,
     finalTotal: final,
     deltaTotal: final - 100,
@@ -380,8 +469,8 @@ function summary(final: number) {
         organizationId: "org-1",
         organizationName: "1팀",
         expected: 100,
-        dayOfAdded: 0,
-        dayOfCancelled: 100 - final,
+        inProgressAdded: 0,
+        inProgressCancelled: 100 - final,
         final,
         delta: final - 100,
       },

@@ -4,15 +4,15 @@ import { TextInput } from "../../components/ui/TextInput";
 
 export interface RosterView {
   id: string;
-  eventId: string;
+  projectId: string;
   participantId: string;
   participantNumber: string;
   organizationId: string;
   participantName: string;
   organizationName: string;
-  source: "PRE_EVENT" | "DAY_OF";
+  source: "PRE_REGISTRATION" | "IN_PROGRESS";
   status: "ACTIVE" | "CANCELLED";
-  wasExpectedAtDayOf: boolean;
+  wasExpectedAtStart: boolean;
   revision: number;
   updatedAt: string;
 }
@@ -112,7 +112,9 @@ export function RosterTable({
                 <td>{row.participantNumber}</td>
                 <td>{row.participantName}</td>
                 <td>{row.organizationName}</td>
-                <td>{row.source === "PRE_EVENT" ? "사전" : "당일 추가"}</td>
+                <td>
+                  {row.source === "PRE_REGISTRATION" ? "사전" : "진행 중 추가"}
+                </td>
                 <td>{row.status === "ACTIVE" ? "참석" : "취소"}</td>
                 <td>
                   {canMutate ? (

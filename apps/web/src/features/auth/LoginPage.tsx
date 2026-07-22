@@ -30,8 +30,8 @@ export function LoginPage() {
   return (
     <main className="er-auth-layout">
       <Card className="er-auth-card">
-        <p className="er-eyebrow">EVENT ROSTER</p>
-        <h1>행사 참가자 명단</h1>
+        <p className="er-eyebrow">PROJECT ROSTER</p>
+        <h1>프로젝트 참가자 명단</h1>
         <p className="er-muted">운영 계정으로 로그인해 주세요.</p>
         <form
           onSubmit={submit}

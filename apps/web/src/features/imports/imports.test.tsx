@@ -22,10 +22,10 @@ it("sends normalized rows without uploading the source workbook", async () => {
     const url = String(input);
     if (url.endsWith("/auth/login"))
       return Promise.resolve(Response.json(auth()));
-    if (url.endsWith("/events/event-1/imports/validate")) {
+    if (url.endsWith("/projects/project-1/imports/validate")) {
       return Promise.resolve(
         Response.json({
-          eventRevision: 4,
+          projectRevision: 4,
           rows: [
             {
               rowNumber: 2,
@@ -44,7 +44,7 @@ it("sends normalized rows without uploading the source workbook", async () => {
   render(
     <AuthProvider restoreOnMount={false}>
       <Gate>
-        <ImportWizard eventId="event-1" />
+        <ImportWizard projectId="project-1" />
       </Gate>
     </AuthProvider>,
   );
@@ -57,7 +57,7 @@ it("sends normalized rows without uploading the source workbook", async () => {
 
   expect(await screen.findByText("검증 완료")).toBeVisible();
   const validateCall = fetchMock.mock.calls.find(([url]) =>
-    String(url).endsWith("/events/event-1/imports/validate"),
+    String(url).endsWith("/projects/project-1/imports/validate"),
   );
   expect(JSON.parse(String(validateCall?.[1]?.body))).toEqual([
     { rowNumber: 2, name: "박민수", organizationName: "1팀" },
@@ -71,11 +71,11 @@ it("revalidates an ambiguous participant selection before atomic commit", async 
     const url = String(input);
     if (url.endsWith("/auth/login"))
       return Promise.resolve(Response.json(auth()));
-    if (url.endsWith("/events/event-1/imports/validate")) {
+    if (url.endsWith("/projects/project-1/imports/validate")) {
       validationReads += 1;
       return Promise.resolve(
         Response.json({
-          eventRevision: 4,
+          projectRevision: 4,
           rows: [
             {
               rowNumber: 2,
@@ -99,9 +99,12 @@ it("revalidates an ambiguous participant selection before atomic commit", async 
         }),
       );
     }
-    if (url.endsWith("/events/event-1/imports/commit")) {
+    if (url.endsWith("/projects/project-1/imports/commit")) {
       return Promise.resolve(
-        Response.json({ importedCount: 1, eventRevision: 5 }, { status: 201 }),
+        Response.json(
+          { importedCount: 1, projectRevision: 5 },
+          { status: 201 },
+        ),
       );
     }
     throw new Error(`unexpected request: ${url}`);
@@ -110,7 +113,7 @@ it("revalidates an ambiguous participant selection before atomic commit", async 
   render(
     <AuthProvider restoreOnMount={false}>
       <Gate>
-        <ImportWizard eventId="event-1" />
+        <ImportWizard projectId="project-1" />
       </Gate>
     </AuthProvider>,
   );
@@ -131,7 +134,7 @@ it("revalidates an ambiguous participant selection before atomic commit", async 
 
   expect(await screen.findByText("1개 행을 확정했습니다.")).toBeVisible();
   const commitCall = fetchMock.mock.calls.find(([url]) =>
-    String(url).endsWith("/events/event-1/imports/commit"),
+    String(url).endsWith("/projects/project-1/imports/commit"),
   );
   expect(JSON.parse(String(commitCall?.[1]?.body))).toEqual({
     rows: [
@@ -142,7 +145,7 @@ it("revalidates an ambiguous participant selection before atomic commit", async 
         resolvedParticipantId: "person-2",
       },
     ],
-    expectedEventRevision: 4,
+    expectedProjectRevision: 4,
   });
   expect(screen.queryByLabelText("시트")).not.toBeInTheDocument();
 });
@@ -159,7 +162,7 @@ it("ignores a validation response from an obsolete column mapping", async () => 
       if (url.endsWith("/auth/login")) {
         return Promise.resolve(Response.json(auth()));
       }
-      if (url.endsWith("/events/event-1/imports/validate")) {
+      if (url.endsWith("/projects/project-1/imports/validate")) {
         return pendingValidation;
       }
       throw new Error(`unexpected request: ${url}`);
@@ -168,7 +171,7 @@ it("ignores a validation response from an obsolete column mapping", async () => 
   render(
     <AuthProvider restoreOnMount={false}>
       <Gate>
-        <ImportWizard eventId="event-1" />
+        <ImportWizard projectId="project-1" />
       </Gate>
     </AuthProvider>,
   );
@@ -183,7 +186,7 @@ it("ignores a validation response from an obsolete column mapping", async () => 
   await act(async () => {
     resolveValidation(
       Response.json({
-        eventRevision: 4,
+        projectRevision: 4,
         rows: [
           {
             rowNumber: 2,
@@ -219,10 +222,10 @@ it("locks workflow controls until an atomic commit response arrives", async () =
       if (url.endsWith("/auth/login")) {
         return Promise.resolve(Response.json(auth()));
       }
-      if (url.endsWith("/events/event-1/imports/validate")) {
+      if (url.endsWith("/projects/project-1/imports/validate")) {
         return Promise.resolve(
           Response.json({
-            eventRevision: 4,
+            projectRevision: 4,
             rows: [
               {
                 rowNumber: 2,
@@ -235,14 +238,15 @@ it("locks workflow controls until an atomic commit response arrives", async () =
           }),
         );
       }
-      if (url.endsWith("/events/event-1/imports/commit")) return pendingCommit;
+      if (url.endsWith("/projects/project-1/imports/commit"))
+        return pendingCommit;
       throw new Error(`unexpected request: ${url}`);
     }),
   );
   render(
     <AuthProvider restoreOnMount={false}>
       <Gate>
-        <ImportWizard eventId="event-1" />
+        <ImportWizard projectId="project-1" />
       </Gate>
     </AuthProvider>,
   );
@@ -264,7 +268,7 @@ it("locks workflow controls until an atomic commit response arrives", async () =
 
   await act(async () => {
     resolveCommit(
-      Response.json({ importedCount: 1, eventRevision: 5 }, { status: 201 }),
+      Response.json({ importedCount: 1, projectRevision: 5 }, { status: 201 }),
     );
     await pendingCommit;
   });

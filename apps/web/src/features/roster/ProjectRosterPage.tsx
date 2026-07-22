@@ -1,3 +1,8 @@
+import type {
+  Project,
+  ProjectOrganization,
+  ProjectSummary,
+} from "@event-roster/contracts";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "../../components/ui/Button";
 import { Card } from "../../components/ui/Card";
@@ -6,36 +11,32 @@ import { ApiError } from "../../lib/api";
 import type { ExportData } from "../../lib/excel/download-workbook";
 import type { OrganizationView } from "../admin/UserForm";
 import { useAuth } from "../auth/AuthProvider";
-import type { EventView } from "../events/EventsPage";
-import type { EventSummary } from "../events/legacy-event-contracts";
 import { AuditPanel, type AuditView } from "./AuditPanel";
 import { ParticipantDialog, type ParticipantView } from "./ParticipantDialog";
 import { ParticipantEditDialog } from "./ParticipantEditDialog";
 import { RosterTable, type RosterView } from "./RosterTable";
 import { SummaryCards } from "./SummaryCards";
 
-const EMPTY_SUMMARY = (eventId: string): EventSummary => ({
-  eventId,
+const EMPTY_SUMMARY = (projectId: string): ProjectSummary => ({
+  projectId,
   expectedTotal: 0,
   finalTotal: 0,
   deltaTotal: 0,
   organizations: [],
 });
 
-export function RosterPage({ eventId }: { eventId: string }) {
+export function ProjectRosterPage({ projectId }: { projectId: string }) {
   const { api, auth } = useAuth();
-  const [event, setEvent] = useState<EventView | null>(null);
+  const [project, setProject] = useState<Project | null>(null);
   const [rows, setRows] = useState<RosterView[]>([]);
-  const [summary, setSummary] = useState<EventSummary>(() =>
-    EMPTY_SUMMARY(eventId),
+  const [summary, setSummary] = useState<ProjectSummary>(() =>
+    EMPTY_SUMMARY(projectId),
   );
   const [participants, setParticipants] = useState<ParticipantView[]>([]);
   const [organizations, setOrganizations] = useState<OrganizationView[]>([]);
   const [audit, setAudit] = useState<AuditView[]>([]);
   const [auditNextCursor, setAuditNextCursor] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
-  const [pendingCreatedParticipantId, setPendingCreatedParticipantId] =
-    useState<string | null>(null);
   const [editingParticipant, setEditingParticipant] =
     useState<ParticipantView | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -45,40 +46,46 @@ export function RosterPage({ eventId }: { eventId: string }) {
     const generation = ++loadGeneration.current;
     try {
       const [
-        events,
+        nextProject,
         nextRows,
         nextSummary,
         nextParticipants,
         nextOrganizations,
         auditPage,
       ] = await Promise.all([
-        api.get<EventView[]>("/events"),
-        api.get<RosterView[]>(`/events/${eventId}/roster`),
-        api.get<EventSummary>(`/events/${eventId}/summary`),
+        api.get<Project>(`/projects/${projectId}`),
+        api.get<RosterView[]>(`/projects/${projectId}/roster`),
+        api.get<ProjectSummary>(`/projects/${projectId}/summary`),
         api.get<ParticipantView[]>("/participants"),
-        api.get<OrganizationView[]>("/organizations"),
+        api.get<ProjectOrganization[]>(`/projects/${projectId}/organizations`),
         api.get<{ items: AuditView[]; nextCursor: string | null }>(
-          `/events/${eventId}/audit-logs?limit=50`,
+          `/projects/${projectId}/audit?limit=50`,
         ),
       ]);
       if (generation !== loadGeneration.current) return;
-      setEvent(events.find((item) => item.id === eventId) ?? null);
+      setProject(nextProject);
       setRows(nextRows);
       setSummary(nextSummary);
       setParticipants(nextParticipants);
-      setOrganizations(nextOrganizations);
+      setOrganizations(
+        nextOrganizations.map((organization) => ({
+          id: organization.organizationId,
+          name: organization.name,
+          isActive: organization.isActive && organization.masterIsActive,
+        })),
+      );
       setAudit(auditPage.items);
       setAuditNextCursor(auditPage.nextCursor);
     } catch {
       if (generation === loadGeneration.current) {
-        setMessage("행사 명단을 불러오지 못했습니다.");
+        setMessage("프로젝트 명단을 불러오지 못했습니다.");
       }
     }
-  }, [api, eventId]);
+  }, [api, projectId]);
   useEffect(() => {
-    setEvent(null);
+    setProject(null);
     setRows([]);
-    setSummary(EMPTY_SUMMARY(eventId));
+    setSummary(EMPTY_SUMMARY(projectId));
     setAudit([]);
     setAuditNextCursor(null);
     setShowAdd(false);
@@ -87,13 +94,13 @@ export function RosterPage({ eventId }: { eventId: string }) {
     return () => {
       loadGeneration.current += 1;
     };
-  }, [eventId, load]);
+  }, [projectId, load]);
   const canMutate =
-    event !== null &&
-    event.status !== "CLOSED" &&
-    event.status !== "DRAFT" &&
+    project !== null &&
+    project.status !== "CLOSED" &&
+    project.status !== "PREPARING" &&
     (auth?.session.user.role === "OPERATOR" ||
-      event.status === "PRE_REGISTRATION");
+      project.status === "PRE_REGISTRATION");
   const availableParticipants = useMemo(
     () =>
       participants.filter(
@@ -122,16 +129,22 @@ export function RosterPage({ eventId }: { eventId: string }) {
         onStale?.();
         setMessage("다른 변경이 먼저 반영되어 최신 명단을 다시 불러왔습니다.");
         await load();
+      } else if (
+        error instanceof ApiError &&
+        error.problem?.code === "PROJECT_CLOSED"
+      ) {
+        setMessage("프로젝트가 종료되어 변경할 수 없습니다.");
+        await load();
       } else setMessage("명단 변경을 반영하지 못했습니다.");
       return false;
     }
   }
   async function changeStatus(row: RosterView, status: "ACTIVE" | "CANCELLED") {
-    if (!event) return;
+    if (!project) return;
     await handleMutation(() =>
-      api.patch(`/events/${eventId}/roster/${row.id}`, {
+      api.patch(`/projects/${projectId}/roster/${row.id}`, {
         status,
-        expectedRevision: event.revision,
+        expectedRevision: project.revision,
         expectedEntryRevision: row.revision,
       }),
     );
@@ -149,50 +162,38 @@ export function RosterPage({ eventId }: { eventId: string }) {
     organizationId: string;
     expectedRevision: number;
   }) {
-    if (!editingParticipant) return;
+    if (!project || !editingParticipant) return;
     const completed = await handleMutation(
-      () => api.patch(`/participants/${editingParticipant.id}`, input),
+      () =>
+        api.patch(
+          `/projects/${projectId}/participants/${editingParticipant.id}`,
+          { ...input, expectedProjectRevision: project.revision },
+        ),
       () => setEditingParticipant(null),
     );
     if (completed) setEditingParticipant(null);
   }
   async function add(participantId: string) {
-    if (!event) return;
+    if (!project) return;
     const completed = await handleMutation(() =>
-      api.post(`/events/${eventId}/roster`, {
+      api.post(`/projects/${projectId}/roster`, {
         participantId,
-        expectedRevision: event.revision,
+        expectedRevision: project.revision,
       }),
     );
     if (completed) {
-      setPendingCreatedParticipantId(null);
       setShowAdd(false);
     }
   }
   async function createAndAdd(input: { name: string; organizationId: string }) {
-    if (!event) return;
-    setMessage(null);
-    let created: { id: string } | null = null;
-    try {
-      created = await api.post<{ id: string }>("/participants", input);
-      await api.post(`/events/${eventId}/roster`, {
-        participantId: created.id,
-        expectedRevision: event.revision,
-      });
-      setPendingCreatedParticipantId(null);
-      setShowAdd(false);
-      await load();
-    } catch {
-      if (created) {
-        setPendingCreatedParticipantId(created.id);
-        setMessage(
-          "참가자는 생성됐지만 명단 반영이 충돌했습니다. 생성된 참가자를 선택해 다시 추가해 주세요.",
-        );
-        await load();
-      } else {
-        setMessage("참가자를 만들지 못했습니다.");
-      }
-    }
+    if (!project) return;
+    const completed = await handleMutation(() =>
+      api.post(`/projects/${projectId}/roster`, {
+        newParticipant: input,
+        expectedRevision: project.revision,
+      }),
+    );
+    if (completed) setShowAdd(false);
   }
 
   async function loadMoreAudit() {
@@ -204,7 +205,7 @@ export function RosterPage({ eventId }: { eventId: string }) {
         items: AuditView[];
         nextCursor: string | null;
       }>(
-        `/events/${eventId}/audit-logs?limit=50&cursor=${encodeURIComponent(auditNextCursor)}`,
+        `/projects/${projectId}/audit?limit=50&cursor=${encodeURIComponent(auditNextCursor)}`,
       );
       if (generation !== loadGeneration.current) return;
       setAudit((current) => [...current, ...page.items]);
@@ -220,8 +221,10 @@ export function RosterPage({ eventId }: { eventId: string }) {
 
   async function exportRoster() {
     try {
-      const data = await api.get<ExportData>(`/events/${eventId}/export-data`);
-      const safeName = (event?.name ?? "행사")
+      const data = await api.get<ExportData>(
+        `/projects/${projectId}/exports/roster`,
+      );
+      const safeName = (project?.name ?? "프로젝트")
         .replace(/[\\/:*?"<>|]/g, "-")
         .trim();
       const { downloadExportWorkbook } = await import(
@@ -237,17 +240,17 @@ export function RosterPage({ eventId }: { eventId: string }) {
       <header className="er-page-heading">
         <div>
           <p className="er-eyebrow">ROSTER</p>
-          <h1>{event?.name ?? "행사 명단"}</h1>
+          <h1>{project?.name ?? "프로젝트 명단"}</h1>
           <p className="er-muted">
-            {event ? statusLabel(event.status) : "불러오는 중"}
+            {project ? statusLabel(project.status) : "불러오는 중"}
           </p>
         </div>
         <div className="er-action-row">
           {auth?.session.user.role === "OPERATOR" &&
-          event?.status === "PRE_REGISTRATION" ? (
+          project?.status === "PRE_REGISTRATION" ? (
             <a
               className="er-button er-button--secondary"
-              href={`/events/${eventId}/import`}
+              href={`/projects/${projectId}/import`}
             >
               엑셀 가져오기
             </a>
@@ -259,10 +262,7 @@ export function RosterPage({ eventId }: { eventId: string }) {
             <Button
               type="button"
               variant="primary"
-              onClick={() => {
-                setPendingCreatedParticipantId(null);
-                setShowAdd(true);
-              }}
+              onClick={() => setShowAdd(true)}
             >
               참가자 추가
             </Button>
@@ -295,11 +295,7 @@ export function RosterPage({ eventId }: { eventId: string }) {
           organizations={organizations}
           onAdd={add}
           onCreateAndAdd={createAndAdd}
-          initialParticipantId={pendingCreatedParticipantId}
-          onClose={() => {
-            setPendingCreatedParticipantId(null);
-            setShowAdd(false);
-          }}
+          onClose={() => setShowAdd(false)}
         />
       ) : null}
       {editingParticipant && canMutate ? (
@@ -307,7 +303,7 @@ export function RosterPage({ eventId }: { eventId: string }) {
           participant={editingParticipant}
           organizations={organizations}
           allowOrganizationChange={
-            event?.status === "PRE_REGISTRATION" &&
+            project?.status === "PRE_REGISTRATION" &&
             auth?.session.user.role === "OPERATOR"
           }
           onSave={updateParticipant}
@@ -318,11 +314,11 @@ export function RosterPage({ eventId }: { eventId: string }) {
   );
 }
 
-function statusLabel(status: EventView["status"]) {
+function statusLabel(status: Project["status"]) {
   return {
-    DRAFT: "초안",
+    PREPARING: "준비 중",
     PRE_REGISTRATION: "사전 등록",
-    DAY_OF: "당일 운영",
+    IN_PROGRESS: "진행 중",
     CLOSED: "종료",
   }[status];
 }

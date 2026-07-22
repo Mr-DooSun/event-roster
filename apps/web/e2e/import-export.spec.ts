@@ -5,7 +5,7 @@ import { fixture, login } from "./support";
 test("imports 130 rows and downloads two-sheet Excel", async ({ page }) => {
   const data = fixture();
   await login(page, data.operator.loginId, data.operator.password);
-  await page.goto(`/events/${data.eventId}/import`);
+  await page.goto(`/projects/${data.importProjectId}/import`);
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(
     workbook,
@@ -29,7 +29,7 @@ test("imports 130 rows and downloads two-sheet Excel", async ({ page }) => {
   await expect(page.getByText("검증 완료")).toBeVisible();
   await page.getByRole("button", { name: "명단 확정" }).click();
   await expect(page.getByText("130개 행을 확정했습니다.")).toBeVisible();
-  await page.goto(`/events/${data.eventId}`);
+  await page.goto(`/projects/${data.importProjectId}`);
   const downloadPromise = page.waitForEvent("download");
   await page.getByRole("button", { name: "엑셀 내보내기" }).click();
   const download = await downloadPromise;

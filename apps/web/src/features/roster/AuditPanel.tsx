@@ -65,7 +65,7 @@ function actionLabel(action: string) {
     ROSTER_CANCELLED: "참석 취소",
     ROSTER_REACTIVATED: "참석 복원",
     ROSTER_IMPORTED: "엑셀 명단 반영",
-    EVENT_REOPENED: "행사 재개",
+    PROJECT_REOPENED: "프로젝트 재개",
   };
   return labels[action] ?? action;
 }

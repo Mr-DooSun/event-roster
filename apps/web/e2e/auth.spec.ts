@@ -20,8 +20,8 @@ test("temporary user changes password, is logged out, and logs in again", async 
   await page.getByLabel("새 비밀번호 확인").fill(nextPassword);
   await page.getByRole("button", { name: "비밀번호 변경" }).click();
   await expect(
-    page.getByRole("heading", { name: "행사 참가자 명단" }),
+    page.getByRole("heading", { name: "프로젝트 참가자 명단" }),
   ).toBeVisible();
   await login(page, data.temporaryUser.loginId, nextPassword);
-  await expect(page.getByText("행사 운영 홈")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "프로젝트" })).toBeVisible();
 });

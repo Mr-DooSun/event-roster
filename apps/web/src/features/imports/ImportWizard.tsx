@@ -15,11 +15,11 @@ import { ColumnMapping } from "./ColumnMapping";
 import { type ValidatedImportRow, ValidationTable } from "./ValidationTable";
 
 interface ValidationResult {
-  eventRevision: number;
+  projectRevision: number;
   rows: ValidatedImportRow[];
 }
 
-export function ImportWizard({ eventId }: { eventId: string }) {
+export function ImportWizard({ projectId }: { projectId: string }) {
   const { api } = useAuth();
   const [parsed, setParsed] = useState<ParsedWorkbook | null>(null);
   const [sheetName, setSheetName] = useState("");
@@ -108,7 +108,7 @@ export function ImportWizard({ eventId }: { eventId: string }) {
     setBusy(true);
     try {
       const result = await api.post<ValidationResult>(
-        `/events/${eventId}/imports/validate`,
+        `/projects/${projectId}/imports/validate`,
         rows,
       );
       if (generation !== workflowGeneration.current) return;
@@ -148,10 +148,10 @@ export function ImportWizard({ eventId }: { eventId: string }) {
     setBusy(true);
     try {
       const result = await api.post<{ importedCount: number }>(
-        `/events/${eventId}/imports/commit`,
+        `/projects/${projectId}/imports/commit`,
         {
           rows: normalizedRows,
-          expectedEventRevision: validation.eventRevision,
+          expectedProjectRevision: validation.projectRevision,
         },
       );
       if (generation !== workflowGeneration.current) return;
@@ -207,7 +207,7 @@ export function ImportWizard({ eventId }: { eventId: string }) {
         ) : (
           <a
             className="er-button er-button--secondary"
-            href={`/events/${eventId}`}
+            href={`/projects/${projectId}`}
           >
             명단으로 돌아가기
           </a>

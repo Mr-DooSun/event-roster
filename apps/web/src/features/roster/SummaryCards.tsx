@@ -1,7 +1,7 @@
+import type { ProjectSummary } from "@event-roster/contracts";
 import { Card } from "../../components/ui/Card";
-import type { EventSummary } from "../events/legacy-event-contracts";
 
-export function SummaryCards({ summary }: { summary: EventSummary }) {
+export function SummaryCards({ summary }: { summary: ProjectSummary }) {
   return (
     <>
       <div className="er-summary-grid">
@@ -29,8 +29,8 @@ export function SummaryCards({ summary }: { summary: EventSummary }) {
               <tr>
                 <th>조직</th>
                 <th>예상</th>
-                <th>당일 추가</th>
-                <th>당일 취소</th>
+                <th>진행 중 추가</th>
+                <th>진행 중 취소</th>
                 <th>실제</th>
               </tr>
             </thead>
@@ -39,8 +39,8 @@ export function SummaryCards({ summary }: { summary: EventSummary }) {
                 <tr key={row.organizationId}>
                   <td>{row.organizationName}</td>
                   <td>{row.expected}</td>
-                  <td>{row.dayOfAdded}</td>
-                  <td>{row.dayOfCancelled}</td>
+                  <td>{row.inProgressAdded}</td>
+                  <td>{row.inProgressCancelled}</td>
                   <td>{row.final}</td>
                 </tr>
               ))}
