@@ -98,6 +98,9 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
   const [participants, setParticipants] = useState<ParticipantView[]>([]);
   const [audit, setAudit] = useState<AuditView[]>([]);
   const [auditNextCursor, setAuditNextCursor] = useState<string | null>(null);
+  const [auditPaginationError, setAuditPaginationError] = useState<
+    string | null
+  >(null);
   const [loading, setLoading] = useState(true);
   const [projectLoadError, setProjectLoadError] = useState<string | null>(null);
   const [resourceErrors, setResourceErrors] = useState<DetailErrors>({});
@@ -106,7 +109,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
   const [showTransition, setShowTransition] = useState(false);
   const loadGeneration = useRef(0);
   const currentProjectId = useRef(projectId);
-  const auditLoading = useRef(false);
+  const auditPaginationRequest = useRef<RequestContext | null>(null);
   currentProjectId.current = projectId;
 
   const isCurrent = useCallback(
@@ -122,9 +125,12 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
       generation: ++loadGeneration.current,
     };
     if (!isCurrent(context)) return;
+    auditPaginationRequest.current = null;
+    setAuditNextCursor(null);
     setLoading(true);
     setProjectLoadError(null);
     setResourceErrors({});
+    setAuditPaginationError(null);
     setMessage(null);
 
     const loadResource = async <T,>(
@@ -211,13 +217,14 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
     setParticipants([]);
     setAudit([]);
     setAuditNextCursor(null);
+    setAuditPaginationError(null);
     setProjectLoadError(null);
     setResourceErrors({});
     setMessage(null);
     setShowEdit(false);
     setShowTransition(false);
     setLoading(true);
-    auditLoading.current = false;
+    auditPaginationRequest.current = null;
     void load();
     return () => {
       loadGeneration.current += 1;
@@ -317,9 +324,10 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
   }
 
   async function loadMoreAudit() {
-    if (!auditNextCursor || auditLoading.current) return;
-    auditLoading.current = true;
+    if (!auditNextCursor || auditPaginationRequest.current) return;
     const context = { projectId, generation: loadGeneration.current };
+    auditPaginationRequest.current = context;
+    setAuditPaginationError(null);
     try {
       const page = await api.get<{
         items: AuditView[];
@@ -334,13 +342,12 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
       setAuditNextCursor(page.nextCursor);
     } catch {
       if (isCurrent(context)) {
-        setResourceErrors((current) => ({
-          ...current,
-          audit: "변경 이력을 더 불러오지 못했습니다.",
-        }));
+        setAuditPaginationError("변경 이력을 더 불러오지 못했습니다.");
       }
     } finally {
-      if (isCurrent(context)) auditLoading.current = false;
+      if (auditPaginationRequest.current === context) {
+        auditPaginationRequest.current = null;
+      }
     }
   }
 
@@ -490,11 +497,16 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
           />
         ) : null}
         {selectedTabErrors.length === 0 && selectedTab === "audit" ? (
-          <AuditPanel
-            items={audit}
-            nextCursor={auditNextCursor}
-            onLoadMore={loadMoreAudit}
-          />
+          <div className="er-page-stack">
+            {auditPaginationError ? (
+              <StatusMessage tone="error">{auditPaginationError}</StatusMessage>
+            ) : null}
+            <AuditPanel
+              items={audit}
+              nextCursor={auditNextCursor}
+              onLoadMore={loadMoreAudit}
+            />
+          </div>
         ) : null}
       </div>
       {showEdit ? (

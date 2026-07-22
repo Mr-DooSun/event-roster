@@ -225,6 +225,58 @@ it("confirms the global impact before renaming", async () => {
   );
 });
 
+it("discards a hidden rename confirmation before administration returns", async () => {
+  const membership = {
+    organizationId: "org-1",
+    name: "1팀",
+    isActive: true,
+    masterIsActive: true,
+    activeProjectCount: 2,
+    hasHistory: true,
+  };
+  const onChanged = vi.fn().mockResolvedValue(undefined);
+  const view = render(
+    <ProjectOrganizationsPanel
+      projectId="project-1"
+      memberships={[membership]}
+      allOrganizations={[]}
+      canAdminister
+      onChanged={onChanged}
+    />,
+  );
+  fireEvent.change(screen.getByLabelText("1팀 조직 이름"), {
+    target: { value: "변경 조직" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "이름 저장" }));
+  expect(screen.getByRole("button", { name: "변경 확인" })).toBeVisible();
+
+  view.rerender(
+    <ProjectOrganizationsPanel
+      projectId="project-1"
+      memberships={[membership]}
+      allOrganizations={[]}
+      canAdminister={false}
+      onChanged={onChanged}
+    />,
+  );
+  expect(
+    screen.queryByRole("button", { name: "변경 확인" }),
+  ).not.toBeInTheDocument();
+
+  view.rerender(
+    <ProjectOrganizationsPanel
+      projectId="project-1"
+      memberships={[membership]}
+      allOrganizations={[]}
+      canAdminister
+      onChanged={onChanged}
+    />,
+  );
+  expect(
+    screen.queryByRole("button", { name: "변경 확인" }),
+  ).not.toBeInTheDocument();
+});
+
 it("confirms the exhaustive next transition action", async () => {
   mockApi.post.mockResolvedValueOnce({
     ...project,
@@ -367,6 +419,120 @@ it("keeps the project shell and overview when participant loading fails", async 
   expect(screen.getByRole("heading", { name: "프로젝트 개요" })).toBeVisible();
   fireEvent.click(screen.getByRole("tab", { name: "참가 명단" }));
   expect(screen.getByText("참가자 정보를 불러오지 못했습니다.")).toBeVisible();
+});
+
+it("invalidates the audit cursor and preserves a newer request lock across a full reload", async () => {
+  const oldPage = deferred<{
+    items: ReturnType<typeof auditItem>[];
+    nextCursor: string | null;
+  }>();
+  const reloadedAudit = deferred<{
+    items: ReturnType<typeof auditItem>[];
+    nextCursor: string | null;
+  }>();
+  const newPage = deferred<{
+    items: ReturnType<typeof auditItem>[];
+    nextCursor: string | null;
+  }>();
+  let initialAuditReads = 0;
+  mockApi.get.mockImplementation(async (path: string) => {
+    if (path === "/projects/project-1/audit?limit=50") {
+      initialAuditReads += 1;
+      return initialAuditReads === 1
+        ? { items: [auditItem("초기 이력")], nextCursor: "old-cursor" }
+        : reloadedAudit.promise;
+    }
+    if (path.endsWith("cursor=old-cursor")) return oldPage.promise;
+    if (path.endsWith("cursor=new-cursor")) return newPage.promise;
+    return defaultGet(path);
+  });
+
+  render(<ProjectDetailPage projectId="project-1" />);
+  fireEvent.click(await screen.findByRole("tab", { name: "변경 이력" }));
+  expect(await screen.findByText("초기 이력")).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "이력 더 보기" }));
+  await waitFor(() =>
+    expect(
+      mockApi.get.mock.calls.some(([path]) =>
+        path.endsWith("cursor=old-cursor"),
+      ),
+    ).toBe(true),
+  );
+
+  fireEvent.click(screen.getByRole("button", { name: "진행 시작" }));
+  fireEvent.click(screen.getByRole("button", { name: "변경 확인" }));
+  await waitFor(() => expect(initialAuditReads).toBe(2));
+  expect(
+    screen.queryByRole("button", { name: "이력 더 보기" }),
+  ).not.toBeInTheDocument();
+
+  await act(async () => {
+    reloadedAudit.resolve({
+      items: [auditItem("재조회 기준")],
+      nextCursor: "new-cursor",
+    });
+    await reloadedAudit.promise;
+  });
+  expect(screen.getByText("재조회 기준")).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "이력 더 보기" }));
+  await waitFor(() =>
+    expect(
+      mockApi.get.mock.calls.filter(([path]) =>
+        path.endsWith("cursor=new-cursor"),
+      ),
+    ).toHaveLength(1),
+  );
+
+  await act(async () => {
+    oldPage.resolve({ items: [auditItem("무효 이력")], nextCursor: null });
+    await oldPage.promise;
+  });
+  expect(screen.queryByText("무효 이력")).not.toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "이력 더 보기" }));
+  expect(
+    mockApi.get.mock.calls.filter(([path]) =>
+      path.endsWith("cursor=new-cursor"),
+    ),
+  ).toHaveLength(1);
+
+  await act(async () => {
+    newPage.resolve({ items: [auditItem("새 페이지")], nextCursor: null });
+    await newPage.promise;
+  });
+  expect(screen.getByText("새 페이지")).toBeVisible();
+});
+
+it("keeps audit items and retries after pagination fails", async () => {
+  let paginationReads = 0;
+  mockApi.get.mockImplementation(async (path: string) => {
+    if (path === "/projects/project-1/audit?limit=50") {
+      return { items: [auditItem("기존 이력")], nextCursor: "retry-cursor" };
+    }
+    if (path.endsWith("cursor=retry-cursor")) {
+      paginationReads += 1;
+      if (paginationReads === 1) throw new Error("pagination unavailable");
+      return { items: [auditItem("재시도 이력")], nextCursor: null };
+    }
+    return defaultGet(path);
+  });
+
+  render(<ProjectDetailPage projectId="project-1" />);
+  fireEvent.click(await screen.findByRole("tab", { name: "변경 이력" }));
+  expect(await screen.findByText("기존 이력")).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "이력 더 보기" }));
+
+  expect(
+    await screen.findByText("변경 이력을 더 불러오지 못했습니다."),
+  ).toBeVisible();
+  expect(screen.getByText("기존 이력")).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "이력 더 보기" }));
+
+  expect(await screen.findByText("재시도 이력")).toBeVisible();
+  expect(paginationReads).toBe(2);
+  expect(
+    screen.queryByText("변경 이력을 더 불러오지 못했습니다."),
+  ).not.toBeInTheDocument();
 });
 
 it("ignores a successful transition response after switching projects", async () => {
@@ -631,6 +797,17 @@ function projectClosedError() {
     message: "closed",
     requestId: "request-closed",
   });
+}
+
+function auditItem(action: string) {
+  return {
+    id: `audit-${action}`,
+    actorUserId: "operator-1",
+    action,
+    entityType: "PROJECT",
+    entityId: "project-1",
+    occurredAt: "2026-07-22T00:00:00.000Z",
+  };
 }
 
 function deferred<T>() {

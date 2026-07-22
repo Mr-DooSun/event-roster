@@ -54,6 +54,10 @@ export function ProjectOrganizationsPanel({
     setExistingId(availableOrganizations[0]?.id ?? "");
   }, [availableOrganizations, existingId]);
 
+  useEffect(() => {
+    if (!canAdminister) setRenameConfirmation(null);
+  }, [canAdminister]);
+
   async function mutate(operation: () => Promise<unknown>) {
     if (busy) return false;
     setBusy(true);
