@@ -1,6 +1,12 @@
 import { readFileSync } from "node:fs";
 import "@testing-library/jest-dom/vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { AuthBoundary } from "../../app/router";
 import { AuthProvider, useAuth } from "../auth/AuthProvider";
@@ -268,9 +274,11 @@ it("replaces a stale event name draft with the latest server value", async () =>
   });
   fireEvent.click(screen.getByRole("button", { name: "이름 저장" }));
 
-  expect(
-    await screen.findByLabelText("서버 최신 행사명 행사 이름"),
-  ).toHaveValue("서버 최신 행사명");
+  await waitFor(() => {
+    expect(screen.getByLabelText("서버 최신 행사명 행사 이름")).toHaveValue(
+      "서버 최신 행사명",
+    );
+  });
 });
 
 function Gate({ children }: { children: React.ReactNode }) {
