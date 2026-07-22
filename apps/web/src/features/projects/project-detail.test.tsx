@@ -1,5 +1,7 @@
 import "@testing-library/jest-dom/vitest";
+import type { Project } from "@event-roster/contracts";
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -43,29 +45,7 @@ beforeEach(() => {
   mockApi.patch.mockReset();
   mockApi.post.mockResolvedValue(undefined);
   mockApi.patch.mockResolvedValue(undefined);
-  mockApi.get.mockImplementation(async (path: string) => {
-    if (path === "/projects/project-1") return project;
-    if (path === "/projects/project-1/organizations") return [];
-    if (path === "/organizations") {
-      return [{ id: "org-1", name: "1팀", isActive: true }];
-    }
-    if (path === "/projects/project-1/summary") {
-      return {
-        projectId: "project-1",
-        expectedTotal: 0,
-        finalTotal: 0,
-        deltaTotal: 0,
-        organizations: [],
-      };
-    }
-    if (path.startsWith("/projects/project-1/audit")) {
-      return { items: [], nextCursor: null };
-    }
-    if (path === "/projects/project-1/roster" || path === "/participants") {
-      return [];
-    }
-    throw new Error(`unexpected path: ${path}`);
-  });
+  mockApi.get.mockImplementation(defaultGet);
 });
 
 afterEach(cleanup);
@@ -354,3 +334,311 @@ it("requires a past end date to be cleared before reopen", async () => {
     await screen.findByRole("button", { name: "프로젝트 재개" }),
   ).toBeEnabled();
 });
+
+it("keeps the project shell and overview when audit loading fails", async () => {
+  mockApi.get.mockImplementation(async (path: string) => {
+    if (path.startsWith("/projects/project-1/audit")) {
+      throw new Error("audit unavailable");
+    }
+    return defaultGet(path);
+  });
+
+  render(<ProjectDetailPage projectId="project-1" />);
+
+  expect(
+    await screen.findByRole("heading", { name: "리더십 캠프" }),
+  ).toBeVisible();
+  expect(screen.getByRole("heading", { name: "프로젝트 개요" })).toBeVisible();
+  fireEvent.click(screen.getByRole("tab", { name: "변경 이력" }));
+  expect(screen.getByText("변경 이력을 불러오지 못했습니다.")).toBeVisible();
+});
+
+it("keeps the project shell and overview when participant loading fails", async () => {
+  mockApi.get.mockImplementation(async (path: string) => {
+    if (path === "/participants") throw new Error("participants unavailable");
+    return defaultGet(path);
+  });
+
+  render(<ProjectDetailPage projectId="project-1" />);
+
+  expect(
+    await screen.findByRole("heading", { name: "리더십 캠프" }),
+  ).toBeVisible();
+  expect(screen.getByRole("heading", { name: "프로젝트 개요" })).toBeVisible();
+  fireEvent.click(screen.getByRole("tab", { name: "참가 명단" }));
+  expect(screen.getByText("참가자 정보를 불러오지 못했습니다.")).toBeVisible();
+});
+
+it("ignores a successful transition response after switching projects", async () => {
+  const transition = deferred<unknown>();
+  const lateProjectOne = deferred<Project>();
+  let projectOneReads = 0;
+  mockApi.post.mockReturnValueOnce(transition.promise);
+  mockApi.get.mockImplementation(async (path: string) => {
+    if (path === "/projects/project-1") {
+      projectOneReads += 1;
+      return projectOneReads === 1 ? project : lateProjectOne.promise;
+    }
+    return multiProjectGet(path);
+  });
+
+  const view = render(<ProjectDetailPage projectId="project-1" />);
+  fireEvent.click(await screen.findByRole("button", { name: "진행 시작" }));
+  fireEvent.click(screen.getByRole("button", { name: "변경 확인" }));
+  view.rerender(<ProjectDetailPage projectId="project-2" />);
+  expect(
+    await screen.findByRole("heading", { name: "신규 프로젝트" }),
+  ).toBeVisible();
+
+  await act(async () => {
+    transition.resolve(undefined);
+    await transition.promise;
+    await Promise.resolve();
+  });
+  await act(async () => {
+    lateProjectOne.resolve({ ...project, status: "IN_PROGRESS", revision: 2 });
+    await lateProjectOne.promise;
+    await Promise.resolve();
+  });
+
+  expect(screen.getByRole("heading", { name: "신규 프로젝트" })).toBeVisible();
+  expect(screen.getByText("준비 중")).toBeVisible();
+  expect(
+    screen.queryByRole("heading", { name: "리더십 캠프" }),
+  ).not.toBeInTheDocument();
+});
+
+it("ignores a stale reload response after switching projects", async () => {
+  const staleReload = deferred<Project>();
+  let projectOneReads = 0;
+  mockApi.post.mockRejectedValueOnce(
+    new ApiError(409, {
+      code: "STALE_REVISION",
+      message: "stale",
+      requestId: "request-switch",
+    }),
+  );
+  mockApi.get.mockImplementation(async (path: string) => {
+    if (path === "/projects/project-1") {
+      projectOneReads += 1;
+      return projectOneReads === 1 ? project : staleReload.promise;
+    }
+    return multiProjectGet(path);
+  });
+
+  const view = render(<ProjectDetailPage projectId="project-1" />);
+  fireEvent.click(await screen.findByRole("button", { name: "진행 시작" }));
+  fireEvent.click(screen.getByRole("button", { name: "변경 확인" }));
+  await waitFor(() => expect(projectOneReads).toBe(2));
+  view.rerender(<ProjectDetailPage projectId="project-2" />);
+  expect(
+    await screen.findByRole("heading", { name: "신규 프로젝트" }),
+  ).toBeVisible();
+
+  await act(async () => {
+    staleReload.resolve({ ...project, revision: 2 });
+    await staleReload.promise;
+  });
+
+  expect(screen.getByRole("heading", { name: "신규 프로젝트" })).toBeVisible();
+  expect(screen.getByText("준비 중")).toBeVisible();
+});
+
+it("refreshes a project edit once when the project closed concurrently", async () => {
+  let projectReads = 0;
+  mockApi.get.mockImplementation(async (path: string) => {
+    if (path === "/projects/project-1") {
+      projectReads += 1;
+      return projectReads === 1 ? project : closedProject();
+    }
+    return defaultGet(path);
+  });
+  mockApi.patch.mockRejectedValueOnce(projectClosedError());
+
+  render(<ProjectDetailPage projectId="project-1" />);
+  fireEvent.click(await screen.findByRole("button", { name: "프로젝트 수정" }));
+  fireEvent.change(screen.getByLabelText("프로젝트 이름"), {
+    target: { value: "수정 시도" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "저장" }));
+
+  expect(
+    await screen.findByText("프로젝트가 종료되어 변경할 수 없습니다."),
+  ).toBeVisible();
+  expect(screen.getByText("종료")).toBeVisible();
+  expect(projectReads).toBe(2);
+});
+
+it("refreshes once and hides organization controls when the project closes", async () => {
+  let projectReads = 0;
+  mockApi.get.mockImplementation(async (path: string) => {
+    if (path === "/projects/project-1") {
+      projectReads += 1;
+      return projectReads === 1 ? project : closedProject();
+    }
+    if (path === "/projects/project-1/organizations") {
+      return [
+        {
+          organizationId: "org-1",
+          name: "1팀",
+          isActive: true,
+          masterIsActive: true,
+          activeProjectCount: 1,
+          hasHistory: true,
+        },
+      ];
+    }
+    return defaultGet(path);
+  });
+  mockApi.post.mockRejectedValueOnce(projectClosedError());
+
+  render(<ProjectDetailPage projectId="project-1" />);
+  fireEvent.click(await screen.findByRole("tab", { name: "조직" }));
+  fireEvent.change(screen.getByLabelText("새 조직 이름"), {
+    target: { value: "종료 중 조직" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "새 조직 추가" }));
+
+  expect(
+    await screen.findByText("프로젝트가 종료되어 변경할 수 없습니다."),
+  ).toBeVisible();
+  expect(screen.getByText("종료")).toBeVisible();
+  expect(projectReads).toBe(2);
+  expect(
+    screen.queryByRole("button", { name: /새 조직 추가|사용 중지|이름 저장/ }),
+  ).not.toBeInTheDocument();
+});
+
+it("closes an organization rename dialog when the project closes", async () => {
+  let projectReads = 0;
+  mockApi.get.mockImplementation(async (path: string) => {
+    if (path === "/projects/project-1") {
+      projectReads += 1;
+      return projectReads === 1 ? project : closedProject();
+    }
+    if (path === "/projects/project-1/organizations") {
+      return [
+        {
+          organizationId: "org-1",
+          name: "1팀",
+          isActive: true,
+          masterIsActive: true,
+          activeProjectCount: 1,
+          hasHistory: true,
+        },
+      ];
+    }
+    return defaultGet(path);
+  });
+  mockApi.patch.mockRejectedValueOnce(projectClosedError());
+
+  render(<ProjectDetailPage projectId="project-1" />);
+  fireEvent.click(await screen.findByRole("tab", { name: "조직" }));
+  fireEvent.change(screen.getByLabelText("1팀 조직 이름"), {
+    target: { value: "변경 시도" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "이름 저장" }));
+  fireEvent.click(screen.getByRole("button", { name: "변경 확인" }));
+
+  expect(
+    await screen.findByText("프로젝트가 종료되어 변경할 수 없습니다."),
+  ).toBeVisible();
+  expect(projectReads).toBe(2);
+  expect(
+    screen.queryByRole("button", { name: "변경 확인" }),
+  ).not.toBeInTheDocument();
+});
+
+async function defaultGet(path: string) {
+  if (path === "/projects/project-1") return project;
+  if (path === "/projects/project-1/organizations") return [];
+  if (path === "/organizations") {
+    return [{ id: "org-1", name: "1팀", isActive: true }];
+  }
+  if (path === "/projects/project-1/summary") return emptySummary("project-1");
+  if (path.startsWith("/projects/project-1/audit")) {
+    return { items: [], nextCursor: null };
+  }
+  if (path === "/projects/project-1/roster" || path === "/participants") {
+    return [];
+  }
+  throw new Error(`unexpected path: ${path}`);
+}
+
+async function multiProjectGet(path: string) {
+  if (path === "/projects/project-2") return projectTwo();
+  if (path === "/projects/project-2/summary") return emptySummary("project-2");
+  if (
+    path === "/projects/project-2/organizations" ||
+    path === "/projects/project-2/roster"
+  ) {
+    return [];
+  }
+  if (path.startsWith("/projects/project-2/audit")) {
+    return { items: [], nextCursor: null };
+  }
+  if (
+    path === "/projects/project-1/summary" ||
+    path === "/projects/project-1/organizations" ||
+    path === "/projects/project-1/roster" ||
+    path === "/participants" ||
+    path === "/organizations"
+  ) {
+    if (path.endsWith("/summary")) return emptySummary("project-1");
+    return [];
+  }
+  if (path.startsWith("/projects/project-1/audit")) {
+    return { items: [], nextCursor: null };
+  }
+  throw new Error(`unexpected path: ${path}`);
+}
+
+function emptySummary(projectId: string) {
+  return {
+    projectId,
+    expectedTotal: 0,
+    finalTotal: 0,
+    deltaTotal: 0,
+    organizations: [],
+  };
+}
+
+function projectTwo() {
+  return {
+    ...project,
+    id: "project-2",
+    name: "신규 프로젝트",
+    status: "PREPARING" as const,
+    revision: 0,
+  };
+}
+
+function closedProject() {
+  return {
+    ...project,
+    status: "CLOSED" as const,
+    revision: 2,
+    endDate: null,
+    closedAt: "2026-07-22T00:00:00.000Z",
+    closedBy: "operator-1",
+    closeReason: "MANUAL" as const,
+  };
+}
+
+function projectClosedError() {
+  return new ApiError(409, {
+    code: "PROJECT_CLOSED",
+    message: "closed",
+    requestId: "request-closed",
+  });
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+  return { promise, resolve, reject };
+}

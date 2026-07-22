@@ -8,6 +8,7 @@ import { Card } from "../../components/ui/Card";
 import { Dialog } from "../../components/ui/Dialog";
 import { StatusMessage } from "../../components/ui/StatusMessage";
 import { TextInput } from "../../components/ui/TextInput";
+import { ApiError } from "../../lib/api";
 import { useAuth } from "../auth/AuthProvider";
 
 export interface ProjectOrganizationsPanelProps {
@@ -16,6 +17,7 @@ export interface ProjectOrganizationsPanelProps {
   allOrganizations: Organization[];
   canAdminister: boolean;
   onChanged(): Promise<void>;
+  onProjectClosed?(): Promise<void>;
 }
 
 interface RenameConfirmation {
@@ -29,6 +31,7 @@ export function ProjectOrganizationsPanel({
   allOrganizations,
   canAdminister,
   onChanged,
+  onProjectClosed,
 }: ProjectOrganizationsPanelProps) {
   const { api } = useAuth();
   const availableOrganizations = useMemo(() => {
@@ -59,7 +62,16 @@ export function ProjectOrganizationsPanel({
       await operation();
       await onChanged();
       return true;
-    } catch {
+    } catch (error) {
+      if (
+        error instanceof ApiError &&
+        error.problem?.code === "PROJECT_CLOSED" &&
+        onProjectClosed
+      ) {
+        setRenameConfirmation(null);
+        await onProjectClosed();
+        return false;
+      }
       setMessage("조직 변경을 반영하지 못했습니다.");
       return false;
     } finally {
@@ -181,7 +193,7 @@ export function ProjectOrganizationsPanel({
           </ul>
         )}
       </Card>
-      {renameConfirmation ? (
+      {canAdminister && renameConfirmation ? (
         <Dialog
           title="조직 이름 변경"
           onClose={() => setRenameConfirmation(null)}
