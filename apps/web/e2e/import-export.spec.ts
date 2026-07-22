@@ -84,8 +84,49 @@ test("imports 130 rows and downloads two-sheet Excel", async ({ page }) => {
   expect(download.suggestedFilename()).toContain("프로젝트-명단");
   const downloadPath = await download.path();
   expect(downloadPath).not.toBeNull();
+  const exportedWorkbook = XLSX.read(readFileSync(downloadPath as string), {
+    type: "buffer",
+  });
+  expect(exportedWorkbook.SheetNames).toEqual(["프로젝트 집계", "참가 명단"]);
+  const rosterSheet = exportedWorkbook.Sheets["참가 명단"];
+  expect(rosterSheet).toBeDefined();
+  const rosterRows = XLSX.utils.sheet_to_json<Record<string, string | number>>(
+    rosterSheet as XLSX.WorkSheet,
+  );
+  expect(rosterRows).toHaveLength(130);
+  const firstImported = rosterRows.find((row) => row.이름 === "E2E 참가자 1");
+  const lastImported = rosterRows.find((row) => row.이름 === "E2E 참가자 130");
+  expect(firstImported).toMatchObject({
+    이름: "E2E 참가자 1",
+    조직: "E2E 1팀",
+    구분: "PRE_REGISTRATION",
+    상태: "ACTIVE",
+  });
+  expect(lastImported).toMatchObject({
+    이름: "E2E 참가자 130",
+    조직: "E2E 1팀",
+    구분: "PRE_REGISTRATION",
+    상태: "ACTIVE",
+  });
+  expect(firstImported?.["고유 ID"]).toMatch(
+    /^P-[0-9A-F]{8}(?:-[0-9A-F]{4}){3}-[0-9A-F]{12}$/,
+  );
+  expect(lastImported?.["고유 ID"]).toMatch(
+    /^P-[0-9A-F]{8}(?:-[0-9A-F]{4}){3}-[0-9A-F]{12}$/,
+  );
+  expect(firstImported?.["고유 ID"]).not.toBe(lastImported?.["고유 ID"]);
+
+  const summarySheet = exportedWorkbook.Sheets["프로젝트 집계"];
+  expect(summarySheet).toBeDefined();
   expect(
-    XLSX.read(readFileSync(downloadPath as string), { type: "buffer" })
-      .SheetNames,
-  ).toEqual(["프로젝트 집계", "참가 명단"]);
+    XLSX.utils.sheet_to_json<Record<string, string | number>>(
+      summarySheet as XLSX.WorkSheet,
+    ),
+  ).toEqual([
+    expect.objectContaining({
+      조직: "E2E 1팀",
+      예상: 130,
+      최종: 130,
+    }),
+  ]);
 });

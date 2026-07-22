@@ -6,7 +6,19 @@ test("operator opens the project roster and sees server summary", async ({
 }) => {
   const data = fixture();
   await login(page, data.operator.loginId, data.operator.password);
+  const summaryUrl = `${data.baseUrl}/api/v1/projects/${data.projectId}/summary`;
+  const summaryResponsePromise = page.waitForResponse(
+    (response) =>
+      response.url() === summaryUrl && response.request().method() === "GET",
+  );
   await page.goto(`/projects/${data.projectId}`);
+  const summaryResponse = await summaryResponsePromise;
+  expect(summaryResponse.url()).toBe(summaryUrl);
+  expect(summaryResponse.ok()).toBe(true);
+  expect(await summaryResponse.json()).toMatchObject({
+    projectId: data.projectId,
+    expectedTotal: 0,
+  });
   await expect(
     page.getByRole("heading", { name: "E2E 상반기 프로젝트" }),
   ).toBeVisible();
