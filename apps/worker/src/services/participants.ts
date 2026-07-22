@@ -198,7 +198,7 @@ export async function updateProjectParticipant(
   assertActorScope(actor, entry.organizationId, project.status);
   if (
     actor.session.user.role === "ORGANIZATION_MANAGER" &&
-    current.organizationId !== entry.organizationId
+    !actor.session.user.organizationIds.includes(current.organizationId)
   ) {
     throw new DomainError("FORBIDDEN");
   }
@@ -254,13 +254,21 @@ export async function updateProjectParticipant(
          ) AND EXISTS (
            SELECT 1 FROM users scoped_user
            WHERE scoped_user.id = ? AND (
-             scoped_user.role = 'OPERATOR' OR EXISTS (
-               SELECT 1 FROM participants scoped_participant
-               JOIN project_roster_entries scoped_roster
-                 ON scoped_roster.participant_id = scoped_participant.id
-               WHERE scoped_participant.id = ?
-                 AND scoped_roster.project_id = ?
-                 AND scoped_participant.organization_id = scoped_roster.organization_id
+             scoped_user.role = 'OPERATOR' OR (
+               EXISTS (
+                 SELECT 1 FROM participants scoped_participant
+                 JOIN user_organizations master_scope
+                   ON master_scope.organization_id = scoped_participant.organization_id
+                 WHERE scoped_participant.id = ?
+                   AND master_scope.user_id = scoped_user.id
+               ) AND EXISTS (
+                 SELECT 1 FROM project_roster_entries scoped_roster
+                 JOIN user_organizations roster_scope
+                   ON roster_scope.organization_id = scoped_roster.organization_id
+                 WHERE scoped_roster.project_id = ?
+                   AND scoped_roster.participant_id = ?
+                   AND roster_scope.user_id = scoped_user.id
+               )
              )
            )
          ) AND ${membershipPredicate}`,
@@ -272,6 +280,7 @@ export async function updateProjectParticipant(
           actor.session.user.id,
           participantId,
           projectId,
+          participantId,
           ...membershipBindings,
         ],
       ),

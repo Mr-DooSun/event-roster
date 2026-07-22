@@ -172,3 +172,60 @@ it("prevents a snapshot organization manager from editing a moved participant ma
     )?.name,
   ).toBe("첫 참가자");
 });
+
+it("allows a manager scoped to both snapshot and master organizations to edit a moved participant", async () => {
+  const fixture = await setupPreRegistration();
+  await seedOrganization("org-2", "2팀");
+  await authedRequest(
+    fixture.operator,
+    `/api/v1/projects/${fixture.project.id}/organizations`,
+    {
+      method: "POST",
+      body: JSON.stringify({ organizationId: "org-2" }),
+    },
+  );
+  const added = await addRoster(fixture, fixture.firstParticipant.id);
+  const entry = await added.json<{ projectRevision: number }>();
+  const moved = await authedRequest(
+    fixture.operator,
+    `/api/v1/projects/${fixture.project.id}/participants/${fixture.firstParticipant.id}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        organizationId: "org-2",
+        expectedRevision: fixture.firstParticipant.revision,
+        expectedProjectRevision: entry.projectRevision,
+      }),
+    },
+  );
+  const movedParticipant = await moved.json<{
+    revision: number;
+    projectRevision: number;
+  }>();
+  const manager = await seedManager("org-1");
+  await env.DB.prepare(
+    "INSERT INTO user_organizations (user_id, organization_id) VALUES ('manager-user', 'org-2')",
+  ).run();
+
+  const response = await authedRequest(
+    manager,
+    `/api/v1/projects/${fixture.project.id}/participants/${fixture.firstParticipant.id}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        name: "양쪽 범위 변경",
+        expectedRevision: movedParticipant.revision,
+        expectedProjectRevision: movedParticipant.projectRevision,
+      }),
+    },
+  );
+
+  expect(response.status).toBe(200);
+  expect(
+    (
+      await env.DB.prepare("SELECT name FROM participants WHERE id=?")
+        .bind(fixture.firstParticipant.id)
+        .first<{ name: string }>()
+    )?.name,
+  ).toBe("양쪽 범위 변경");
+});

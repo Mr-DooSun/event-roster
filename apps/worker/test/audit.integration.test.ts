@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, expect, it } from "vitest";
-import { authedRequest } from "./support/admin";
+import { authedRequest, seedManager } from "./support/admin";
 import { resetAuthState } from "./support/auth";
 import { addRoster, setupPreRegistration } from "./support/roster";
 
@@ -67,4 +67,33 @@ it("allowlists audit details and never exposes credential-like fields", async ()
   );
   const body = await response.json();
   expect(JSON.stringify(body)).not.toContain("must-not-leak");
+});
+
+it("safely returns project audit rows with malformed details JSON", async () => {
+  const fixture = await setupPreRegistration();
+  await env.DB.prepare(
+    `INSERT INTO audit_logs
+     (id, actor_user_id, action, entity_type, entity_id, occurred_at, details_json)
+     VALUES ('malformed-project-audit', 'user-1', 'TEST', 'PROJECT', ?,
+             '2099-01-01T00:00:00.000Z', 'not-json')`,
+  )
+    .bind(fixture.project.id)
+    .run();
+  const manager = await seedManager("org-1");
+
+  const response = await authedRequest(
+    manager,
+    `/api/v1/projects/${fixture.project.id}/audit?limit=10`,
+  );
+  const body = await response.json<{
+    items: Array<{ id: string; details: Record<string, string> }>;
+  }>();
+
+  expect(response.status).toBe(200);
+  expect(body.items).toContainEqual(
+    expect.objectContaining({
+      id: "malformed-project-audit",
+      details: {},
+    }),
+  );
 });

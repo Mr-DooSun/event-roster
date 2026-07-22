@@ -372,8 +372,10 @@ export async function getAuditPage(
     ? " AND (occurred_at < ? OR (occurred_at = ? AND id < ?))"
     : "";
   const scopeSql = scope
-    ? ` AND (json_extract(details_json, '$.organizationId') IS NULL
-             OR json_extract(details_json, '$.organizationId') IN (${scope.map(() => "?").join(",")}))`
+    ? ` AND CASE WHEN json_valid(details_json) THEN
+             (json_extract(details_json, '$.organizationId') IS NULL
+              OR json_extract(details_json, '$.organizationId') IN (${scope.map(() => "?").join(",")}))
+           ELSE 1 END`
     : "";
   const bindings: Array<string | number> = [projectId, projectId];
   if (decoded)
@@ -384,7 +386,9 @@ export async function getAuditPage(
       `SELECT id, actor_user_id, action, entity_type, entity_id, occurred_at, details_json
        FROM audit_logs
        WHERE ((entity_type = 'PROJECT' AND entity_id = ?)
-          OR json_extract(details_json, '$.projectId') = ?)${cursorSql}${scopeSql}
+          OR CASE WHEN json_valid(details_json) THEN
+               json_extract(details_json, '$.projectId') = ?
+             ELSE 0 END)${cursorSql}${scopeSql}
        ORDER BY occurred_at DESC, id DESC LIMIT ?`,
     )
       .bind(...bindings)
