@@ -213,6 +213,9 @@ export function ProjectRosterPage({
         <ParticipantDialog
           participants={availableParticipants}
           organizations={organizations}
+          allowExistingOrganizationChange={
+            auth?.session.user.role === "OPERATOR"
+          }
           onAdd={add}
           onCreateAndAdd={createAndAdd}
           onClose={() => setShowAdd(false)}

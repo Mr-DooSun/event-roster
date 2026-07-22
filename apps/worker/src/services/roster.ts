@@ -60,6 +60,12 @@ export async function addRosterEntry(
       revision: number;
     }>();
   if (!participant) throw new DomainError("NOT_FOUND");
+  if (
+    actor.session.user.role === "ORGANIZATION_MANAGER" &&
+    participant.organization_id !== confirmedParticipant.organizationId
+  ) {
+    throw new DomainError("FORBIDDEN");
+  }
   const existing = await findRosterByParticipant(
     env.DB,
     projectId,
@@ -70,6 +76,19 @@ export async function addRosterEntry(
     existing?.organizationId ?? confirmedParticipant.organizationId;
   assertActorScope(actor, organizationId, project.status);
   await assertActiveManagerMembership(env, actor, projectId, organizationId);
+  if (confirmedParticipant.organizationId !== organizationId) {
+    assertActorScope(
+      actor,
+      confirmedParticipant.organizationId,
+      project.status,
+    );
+    await assertActiveManagerMembership(
+      env,
+      actor,
+      projectId,
+      confirmedParticipant.organizationId,
+    );
+  }
   if (!existing) {
     const membership = await findProjectOrganization(
       env.DB,
@@ -90,38 +109,39 @@ export async function addRosterEntry(
   const timestamp = now.toISOString();
   const id = existing?.id ?? crypto.randomUUID();
   const guardId = crypto.randomUUID();
+  const participantStatePredicate = `EXISTS (
+    SELECT 1 FROM participants guarded_participant
+    JOIN users guarded_actor ON guarded_actor.id = ?
+    WHERE guarded_participant.id = ? AND guarded_participant.revision = ?
+      AND (guarded_actor.role = 'OPERATOR'
+        OR guarded_participant.organization_id = ?)
+  )`;
+  const participantStateBindings = [
+    actor.session.user.id,
+    participantId,
+    expectedParticipantRevision,
+    confirmedParticipant.organizationId,
+  ];
   const operationPredicate = existing
     ? `EXISTS (
          SELECT 1 FROM project_roster_entries
          WHERE id = ? AND project_id = ? AND status = 'CANCELLED' AND revision = ?
-       ) AND EXISTS (
-         SELECT 1 FROM participants WHERE id = ? AND revision = ?
-       )`
+       ) AND ${participantStatePredicate}`
     : `NOT EXISTS (
          SELECT 1 FROM project_roster_entries
          WHERE project_id = ? AND participant_id = ?
-       ) AND EXISTS (
-         SELECT 1 FROM participants
-         WHERE id = ? AND revision = ?
-       ) AND EXISTS (
+       ) AND ${participantStatePredicate} AND EXISTS (
          SELECT 1 FROM project_organizations po
          JOIN organizations o ON o.id = po.organization_id
          WHERE po.project_id = ? AND po.organization_id = ?
            AND po.is_active = 1 AND o.is_active = 1
        )`;
   const operationBindings = existing
-    ? [
-        existing.id,
-        projectId,
-        existing.revision,
-        participantId,
-        expectedParticipantRevision,
-      ]
+    ? [existing.id, projectId, existing.revision, ...participantStateBindings]
     : [
         projectId,
         participantId,
-        participantId,
-        expectedParticipantRevision,
+        ...participantStateBindings,
         projectId,
         confirmedParticipant.organizationId,
       ];
@@ -215,6 +235,7 @@ export async function addRosterEntry(
         guardId,
         actor,
         organizationId,
+        confirmedParticipant.organizationId,
         projectId,
         project.status,
         expectedRevision,
@@ -277,6 +298,7 @@ export async function updateRosterEntry(
         env.DB,
         guardId,
         actor,
+        entry.organizationId,
         entry.organizationId,
         projectId,
         project.status,
@@ -528,6 +550,7 @@ function rosterGuard(
   guardId: string,
   actor: Actor,
   organizationId: string,
+  confirmedOrganizationId: string,
   projectId: string,
   projectStatus: ProjectStatus,
   expectedRevision: number,
@@ -553,6 +576,18 @@ function rosterGuard(
                AND scoped_membership.organization_id = ?
                AND scoped_membership.is_active = 1
                AND scoped_master.is_active = 1
+           ) AND EXISTS (
+             SELECT 1 FROM user_organizations confirmed_scope
+             WHERE confirmed_scope.user_id = u.id
+               AND confirmed_scope.organization_id = ?
+           ) AND EXISTS (
+             SELECT 1 FROM project_organizations confirmed_membership
+             JOIN organizations confirmed_master
+               ON confirmed_master.id = confirmed_membership.organization_id
+             WHERE confirmed_membership.project_id = ?
+               AND confirmed_membership.organization_id = ?
+               AND confirmed_membership.is_active = 1
+               AND confirmed_master.is_active = 1
            )))
        ) AND EXISTS (
          SELECT 1 FROM projects
@@ -570,6 +605,9 @@ function rosterGuard(
       organizationId,
       projectId,
       organizationId,
+      confirmedOrganizationId,
+      projectId,
+      confirmedOrganizationId,
       projectId,
       projectStatus,
       expectedRevision,

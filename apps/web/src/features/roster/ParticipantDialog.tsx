@@ -24,6 +24,7 @@ export function ParticipantDialog({
   organizations,
   onAdd,
   onCreateAndAdd,
+  allowExistingOrganizationChange = true,
   initialParticipantId,
   onClose,
 }: {
@@ -34,6 +35,7 @@ export function ParticipantDialog({
     name: string;
     organizationId: string;
   }) => Promise<void>;
+  allowExistingOrganizationChange?: boolean;
   initialParticipantId?: string | null;
   onClose: () => void;
 }) {
@@ -50,13 +52,16 @@ export function ParticipantDialog({
     initialParticipant?.name ?? "",
   );
   const [confirmedOrganizationId, setConfirmedOrganizationId] = useState(
-    organizations.some(
-      (organization) =>
-        organization.isActive &&
-        organization.id === initialParticipant?.organizationId,
-    )
-      ? (initialParticipant?.organizationId ?? "")
-      : (organizations.find((organization) => organization.isActive)?.id ?? ""),
+    !allowExistingOrganizationChange && initialParticipant
+      ? initialParticipant.organizationId
+      : organizations.some(
+            (organization) =>
+              organization.isActive &&
+              organization.id === initialParticipant?.organizationId,
+          )
+        ? (initialParticipant?.organizationId ?? "")
+        : (organizations.find((organization) => organization.isActive)?.id ??
+          ""),
   );
   const [organizationId, setOrganizationId] = useState(
     organizations.find((organization) => organization.isActive)?.id ?? "",
@@ -72,16 +77,23 @@ export function ParticipantDialog({
     const participant = participants.find((item) => item.id === participantId);
     setConfirmedName(participant?.name ?? "");
     setConfirmedOrganizationId(
-      organizations.some(
-        (organization) =>
-          organization.isActive &&
-          organization.id === participant?.organizationId,
-      )
-        ? (participant?.organizationId ?? "")
-        : (organizations.find((organization) => organization.isActive)?.id ??
+      !allowExistingOrganizationChange && participant
+        ? participant.organizationId
+        : organizations.some(
+              (organization) =>
+                organization.isActive &&
+                organization.id === participant?.organizationId,
+            )
+          ? (participant?.organizationId ?? "")
+          : (organizations.find((organization) => organization.isActive)?.id ??
             ""),
     );
-  }, [organizations, participantId, participants]);
+  }, [
+    allowExistingOrganizationChange,
+    organizations,
+    participantId,
+    participants,
+  ]);
 
   const selectedParticipant = participants.find(
     (participant) => participant.id === participantId,
@@ -129,12 +141,20 @@ export function ParticipantDialog({
             <span>확정 소속 조직</span>
             <select
               value={confirmedOrganizationId}
-              onChange={(event) =>
-                setConfirmedOrganizationId(event.currentTarget.value)
+              disabled={!allowExistingOrganizationChange}
+              onChange={
+                allowExistingOrganizationChange
+                  ? (event) =>
+                      setConfirmedOrganizationId(event.currentTarget.value)
+                  : undefined
               }
             >
               {organizations
-                .filter((organization) => organization.isActive)
+                .filter((organization) =>
+                  allowExistingOrganizationChange
+                    ? organization.isActive
+                    : organization.id === selectedParticipant?.organizationId,
+                )
                 .map((organization) => (
                   <option key={organization.id} value={organization.id}>
                     {organization.name}

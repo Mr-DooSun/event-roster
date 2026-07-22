@@ -376,6 +376,7 @@ it("confirms reusable participant details in one existing-roster request", async
   await openRosterTab();
   fireEvent.click(await screen.findByRole("button", { name: "참가자 추가" }));
   expect(screen.getByLabelText("확정 소속 조직")).toHaveValue("org-1");
+  expect(screen.getByLabelText("확정 소속 조직")).toBeEnabled();
   fireEvent.change(screen.getByLabelText("확정 이름"), {
     target: { value: "확정 이름" },
   });
@@ -414,6 +415,118 @@ it("confirms reusable participant details in one existing-roster request", async
         init?.method === "POST",
     ),
   ).toHaveLength(1);
+});
+
+it("keeps a manager reuse confirmation in the participant master organization", async () => {
+  const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.endsWith("/auth/login")) {
+      return Promise.resolve(
+        Response.json(auth("ORGANIZATION_MANAGER", ["org-1", "org-2"])),
+      );
+    }
+    if (url.endsWith("/projects/project-1")) {
+      return Promise.resolve(
+        Response.json({ ...project(), status: "PRE_REGISTRATION" }),
+      );
+    }
+    if (url.endsWith("/summary")) {
+      return Promise.resolve(Response.json(summary(0)));
+    }
+    if (url.endsWith("/roster") && (!init?.method || init.method === "GET")) {
+      return Promise.resolve(Response.json([]));
+    }
+    if (url.endsWith("/participants")) {
+      return Promise.resolve(
+        Response.json([
+          {
+            id: "person-1",
+            participantId: "P-001",
+            name: "담당자 확인 전 이름",
+            organizationId: "org-1",
+            revision: 5,
+          },
+        ]),
+      );
+    }
+    if (url.endsWith("/projects/project-1/organizations")) {
+      return Promise.resolve(
+        Response.json([
+          {
+            organizationId: "org-1",
+            name: "1팀",
+            isActive: true,
+            masterIsActive: true,
+            activeProjectCount: 1,
+            hasHistory: false,
+          },
+          {
+            organizationId: "org-2",
+            name: "2팀",
+            isActive: true,
+            masterIsActive: true,
+            activeProjectCount: 1,
+            hasHistory: false,
+          },
+        ]),
+      );
+    }
+    if (url.endsWith("/organizations")) {
+      return Promise.resolve(Response.json([]));
+    }
+    if (url.includes("/audit")) {
+      return Promise.resolve(Response.json({ items: [], nextCursor: null }));
+    }
+    if (url.endsWith("/roster") && init?.method === "POST") {
+      return Promise.resolve(Response.json({ id: "entry-1" }, { status: 201 }));
+    }
+    throw new Error(`unexpected request: ${url}`);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  render(
+    <AuthProvider restoreOnMount={false}>
+      <Gate>
+        <ProjectDetailPage projectId="project-1" />
+      </Gate>
+    </AuthProvider>,
+  );
+  await login();
+  await openRosterTab();
+  fireEvent.click(await screen.findByRole("button", { name: "참가자 추가" }));
+
+  const organization = screen.getByLabelText("확정 소속 조직");
+  expect(organization).toBeDisabled();
+  expect(organization).toHaveValue("org-1");
+  fireEvent.change(organization, { target: { value: "org-2" } });
+  expect(organization).toHaveValue("org-1");
+  fireEvent.change(screen.getByLabelText("확정 이름"), {
+    target: { value: "담당자 확인 이름" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "명단에 추가" }));
+
+  await vi.waitFor(() =>
+    expect(
+      fetchMock.mock.calls.filter(
+        ([url, request]) =>
+          String(url).endsWith("/projects/project-1/roster") &&
+          request?.method === "POST",
+      ),
+    ).toHaveLength(1),
+  );
+  const write = fetchMock.mock.calls.find(
+    ([url, request]) =>
+      String(url).endsWith("/projects/project-1/roster") &&
+      request?.method === "POST",
+  );
+  expect(JSON.parse(String(write?.[1]?.body))).toEqual({
+    participantId: "person-1",
+    confirmedParticipant: {
+      name: "담당자 확인 이름",
+      organizationId: "org-1",
+    },
+    expectedParticipantRevision: 5,
+    expectedRevision: 2,
+  });
 });
 
 it("closes participant editing after a stale revision reload", async () => {
@@ -612,7 +725,10 @@ async function openRosterTab() {
   await screen.findByRole("heading", { name: "참가 명단" });
 }
 
-function auth() {
+function auth(
+  role: "OPERATOR" | "ORGANIZATION_MANAGER" = "OPERATOR",
+  organizationIds: string[] = [],
+) {
   return {
     accessToken: "access",
     csrfToken: "csrf",
@@ -622,8 +738,8 @@ function auth() {
         id: "user-1",
         loginId: "manager-01",
         displayName: "운영자",
-        role: "OPERATOR",
-        organizationIds: [],
+        role,
+        organizationIds,
         isBootstrap: false,
       },
     },
