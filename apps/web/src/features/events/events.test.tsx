@@ -13,15 +13,21 @@ afterEach(() => {
   window.history.replaceState(null, "", "/");
 });
 
-it("keeps field selects outside the account-control styling", () => {
+it("preserves native field select styling outside account controls", () => {
   const styles = readFileSync("src/styles/global.css", "utf8");
-  const rules = [...styles.matchAll(/([^{}]+)\{[^{}]*\}/g)].map(
-    (match) => match[1] ?? "",
-  );
+  const fieldSelectRule = styles.match(/\.er-field select\s*\{([^}]*)\}/)?.[1];
 
-  expect(
-    rules.some((selectors) => selectors.includes(".er-field select")),
-  ).toBe(false);
+  expect(fieldSelectRule).toBe(
+    `
+  min-height: 2.75rem;
+  border: 1px solid var(--er-color-border);
+  border-radius: var(--er-radius-sm);
+  padding: 0.625rem;
+  background: var(--er-color-surface);
+`,
+  );
+  expect(fieldSelectRule).not.toContain("appearance");
+  expect(styles).not.toContain(".er-field select:focus");
 });
 
 it("does not render account controls for a manager opening the URL directly", async () => {
