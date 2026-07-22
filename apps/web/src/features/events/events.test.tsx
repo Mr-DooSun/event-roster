@@ -16,6 +16,8 @@ afterEach(() => {
 it("preserves native field select styling outside account controls", () => {
   const styles = readFileSync("src/styles/global.css", "utf8");
   const fieldSelectRule = styles.match(/\.er-field select\s*\{([^}]*)\}/)?.[1];
+  const globalSelectRule =
+    /(?:^|})\s*(?:[a-z-]+\s*,\s*)*select(?:\s*,\s*[a-z-]+)*\s*\{/m;
 
   expect(fieldSelectRule).toBe(
     `
@@ -28,6 +30,7 @@ it("preserves native field select styling outside account controls", () => {
   );
   expect(fieldSelectRule).not.toContain("appearance");
   expect(styles).not.toContain(".er-field select:focus");
+  expect(styles).not.toMatch(globalSelectRule);
 });
 
 it("does not render account controls for a manager opening the URL directly", async () => {
