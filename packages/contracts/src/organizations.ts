@@ -10,6 +10,23 @@ export const OrganizationSchema = z.object({
 
 export type Organization = z.infer<typeof OrganizationSchema>;
 
+export const AddProjectOrganizationSchema = z.union([
+  z.object({ organizationId: OrganizationIdSchema }).strict(),
+  z
+    .object({
+      newOrganizationName: z.string().trim().min(1).max(100),
+    })
+    .strict(),
+]);
+
+export const ProjectOrganizationPatchSchema = z.object({
+  isActive: z.boolean(),
+});
+
+export type AddProjectOrganization = z.infer<
+  typeof AddProjectOrganizationSchema
+>;
+
 export interface ProjectOrganization {
   organizationId: string;
   name: string;

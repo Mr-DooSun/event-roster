@@ -41,14 +41,14 @@ export async function createOrganization(env: Env, actor: Actor, name: string) {
         guardId,
         actor,
         "NOT EXISTS (SELECT 1 FROM organizations WHERE canonical_name = ?)",
-        [canonicalize(name)],
+        [canonicalizeOrganizationName(name)],
       ),
       statements: [
         env.DB.prepare(
           `INSERT INTO organizations
            (id, name, canonical_name, is_active, created_at, updated_at)
            VALUES (?, ?, ?, 1, ?, ?)`,
-        ).bind(id, name, canonicalize(name), now, now),
+        ).bind(id, name, canonicalizeOrganizationName(name), now, now),
       ],
       failureCode: "CONFLICT",
     });
@@ -85,7 +85,7 @@ export async function updateOrganization(
            WHERE id = ?`,
         ).bind(
           name,
-          canonicalize(name),
+          canonicalizeOrganizationName(name),
           isActive ? 1 : 0,
           new Date().toISOString(),
           id,
@@ -96,7 +96,16 @@ export async function updateOrganization(
   } catch (error) {
     throwConstraintConflict(error);
   }
-  return { id, name, isActive };
+  const activeProjectCount =
+    (
+      await env.DB.prepare(
+        `SELECT COUNT(*) AS count FROM project_organizations
+         WHERE organization_id = ? AND is_active = 1`,
+      )
+        .bind(id)
+        .first<{ count: number }>()
+    )?.count ?? 0;
+  return { id, name, isActive, activeProjectCount };
 }
 
 export async function getUsers(env: Env) {
@@ -374,7 +383,7 @@ function createTemporaryPassword(): string {
   ).join("");
 }
 
-function canonicalize(value: string): string {
+export function canonicalizeOrganizationName(value: string): string {
   return value.normalize("NFKC").trim().toLocaleLowerCase();
 }
 

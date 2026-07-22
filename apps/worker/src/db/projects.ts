@@ -31,15 +31,27 @@ export async function findProject(
   return row ? mapProject(row) : null;
 }
 
-export async function listProjects(db: D1Database): Promise<ProjectRecord[]> {
+export async function listProjects(
+  db: D1Database,
+  actorUserId?: string,
+): Promise<ProjectRecord[]> {
+  const visibility = actorUserId
+    ? ` WHERE EXISTS (
+          SELECT 1 FROM project_organizations po
+          JOIN user_organizations uo
+            ON uo.organization_id = po.organization_id
+          WHERE po.project_id = projects.id AND uo.user_id = ?
+        )`
+    : "";
   const rows = (
     await db
-      .prepare(`${SELECT_PROJECT} ORDER BY
+      .prepare(`${SELECT_PROJECT}${visibility} ORDER BY
         CASE WHEN status = 'CLOSED' THEN 1 ELSE 0 END,
         CASE WHEN status <> 'CLOSED' AND start_date IS NULL THEN 1 ELSE 0 END,
         CASE WHEN status <> 'CLOSED' THEN start_date END,
         CASE WHEN status <> 'CLOSED' AND start_date IS NULL THEN created_at END DESC,
         CASE WHEN status = 'CLOSED' THEN closed_at END DESC`)
+      .bind(...(actorUserId ? [actorUserId] : []))
       .all<ProjectRow>()
   ).results;
   return rows.map(mapProject);

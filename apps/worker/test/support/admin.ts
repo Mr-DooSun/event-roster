@@ -6,7 +6,7 @@ export async function seedOrganization(
   id = "org-1",
   name = "1팀",
   isActive = true,
-): Promise<void> {
+): Promise<{ id: string; name: string; isActive: boolean }> {
   const now = "2026-07-21T00:00:00.000Z";
   await env.DB.prepare(
     `INSERT INTO organizations
@@ -22,6 +22,7 @@ export async function seedOrganization(
       now,
     )
     .run();
+  return { id, name, isActive };
 }
 
 export type SeededLogin = LoginResult & { userId: string };

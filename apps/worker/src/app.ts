@@ -10,6 +10,7 @@ import { healthRoutes } from "./routes/health";
 import { importRoutes } from "./routes/imports";
 import { organizationRoutes } from "./routes/organizations";
 import { participantRoutes } from "./routes/participants";
+import { projectOrganizationRoutes } from "./routes/project-organizations";
 import { projectRoutes } from "./routes/projects";
 import { rosterRoutes } from "./routes/roster";
 import { userRoutes } from "./routes/users";
@@ -24,6 +25,7 @@ export function createApp() {
   app.route("/api/v1", userRoutes);
   app.route("/api/v1", eventRoutes);
   app.route("/api/v1", projectRoutes);
+  app.route("/api/v1", projectOrganizationRoutes);
   app.route("/api/v1", participantRoutes);
   app.route("/api/v1", rosterRoutes);
   app.route("/api/v1", importRoutes);

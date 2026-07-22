@@ -12,23 +12,38 @@ import {
 } from "@event-roster/domain";
 import type { z } from "zod";
 import { runGuardedAtomic } from "../db/atomic";
+import { listActorProjectOrganizationIds } from "../db/project-organizations";
 import { findProject, listProjects } from "../db/projects";
 import type { Env } from "../env";
 import type { Actor } from "../middleware/authentication";
 import { createOperatorGuard } from "./admin";
 import { closeExpiredProject } from "./project-expiration";
 
-export async function getProjects(env: Env, _actor: Actor): Promise<Project[]> {
-  return listProjects(env.DB);
+export async function getProjects(env: Env, actor: Actor): Promise<Project[]> {
+  return listProjects(
+    env.DB,
+    actor.session.user.role === "OPERATOR" ? undefined : actor.session.user.id,
+  );
 }
 
 export async function getProject(
   env: Env,
-  _actor: Actor,
+  actor: Actor,
   projectId: string,
 ): Promise<Project> {
   const project = await findProject(env.DB, projectId);
   if (!project) throw new DomainError("NOT_FOUND");
+  if (actor.session.user.role !== "OPERATOR") {
+    const visibleOrganizationIds = await listActorProjectOrganizationIds(
+      env.DB,
+      actor.session.user.id,
+      projectId,
+      false,
+    );
+    if (visibleOrganizationIds.length === 0) {
+      throw new DomainError("FORBIDDEN");
+    }
+  }
   return project;
 }
 
