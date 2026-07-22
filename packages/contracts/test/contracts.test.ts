@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { Project } from "../src";
 import {
   CreateProjectRequestSchema,
   EventStatusSchema,
@@ -7,6 +8,14 @@ import {
   PasswordSchema,
   UpdateProjectRequestSchema,
 } from "../src";
+
+type Equal<Left, Right> =
+  (<Value>() => Value extends Left ? 1 : 2) extends <
+    Value,
+  >() => Value extends Right ? 1 : 2
+    ? true
+    : false;
+type Assert<Value extends true> = Value;
 
 describe("authentication contracts", () => {
   it("accepts only canonical login IDs", () => {
@@ -58,4 +67,22 @@ it("accepts duplicate-name project payloads with independently optional dates", 
       expectedRevision: 2,
     }),
   ).toEqual({ startDate: null, endDate: null, expectedRevision: 2 });
+});
+
+it("exposes required project audit creator fields", () => {
+  type ProjectAuditCreators = Assert<
+    Equal<
+      Pick<Project, "createdBy" | "closedBy">,
+      { createdBy: string; closedBy: string | null }
+    >
+  >;
+
+  const projectAuditCreatorShape: ProjectAuditCreators = true;
+  const auditCreators: Pick<Project, "createdBy" | "closedBy"> = {
+    createdBy: "operator-1",
+    closedBy: null,
+  };
+
+  expect(projectAuditCreatorShape).toBe(true);
+  expect(auditCreators).toEqual({ createdBy: "operator-1", closedBy: null });
 });

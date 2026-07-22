@@ -65,8 +65,10 @@ export interface Project {
   status: ProjectStatus;
   revision: number;
   createdAt: string;
+  createdBy: string;
   updatedAt: string;
   closedAt: string | null;
+  closedBy: string | null;
   closeReason: "MANUAL" | "SCHEDULED" | null;
 }
 
