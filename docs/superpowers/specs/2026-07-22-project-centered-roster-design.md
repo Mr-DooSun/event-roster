@@ -1,7 +1,7 @@
 # Event Roster 프로젝트 중심 운영 설계
 
 - 작성일: 2026-07-22
-- 상태: 사용자 설계 승인 완료, 문서 검토 대기
+- 상태: 사용자 문서 검토 및 승인 완료
 - 대체 범위: 행사(`event`) 중심의 연도·상/하반기 모델과 전역 조직 관리 화면
 - 유지 범위: 자체 계정/JWT 인증, 역할, 참가자 고유 ID, 사전·진행 중 명단 변경, 예상/현재 집계, 감사, 브라우저 Excel, Worker+D1 same-origin 배포
 
@@ -34,7 +34,7 @@
 
 시작일과 종료일은 서로 독립적으로 비워둘 수 있다. 두 값이 모두 있으면 종료일은 시작일보다 빠를 수 없다. 종료일이 있으면 자동 종료 대상이며, 종료일이 없으면 운영자가 수동으로 종료한다.
 
-프로젝트 이름은 고유하지 않아도 된다. 같은 이름의 반복 프로젝트는 UUID와 날짜로 구분한다. 운영자는 모든 비종료 상태에서 이름과 날짜를 수정할 수 있고, 종료 프로젝트는 재개한 뒤에만 수정할 수 있다. 과거 종료일을 입력해 프로젝트를 만들거나 수정하면 다음 mutation 또는 scheduled 실행에서 종료된다.
+프로젝트 이름은 고유하지 않아도 된다. 같은 이름의 반복 프로젝트는 UUID와 날짜로 구분한다. 운영자는 모든 비종료 상태에서 이름과 날짜를 수정할 수 있다. 종료 프로젝트에서는 재개 준비를 위한 시작일·종료일 변경만 허용하고 이름·조직·명단은 잠근다. 과거 종료일을 입력해 프로젝트를 만들거나 수정하면 다음 mutation 또는 scheduled 실행에서 종료된다.
 
 ### 상태 전환
 
@@ -137,6 +137,8 @@ GET    /api/v1/projects/:projectId/organizations
 POST   /api/v1/projects/:projectId/organizations
 PATCH  /api/v1/projects/:projectId/organizations/:organizationId
 
+GET    /api/v1/participants
+PATCH  /api/v1/projects/:projectId/participants/:participantId
 GET    /api/v1/projects/:projectId/roster
 POST   /api/v1/projects/:projectId/roster
 PATCH  /api/v1/projects/:projectId/roster/:entryId
@@ -148,6 +150,8 @@ GET    /api/v1/projects/:projectId/exports/roster
 ```
 
 프로젝트 생성 요청은 `{ name, startDate?, endDate? }`, 수정 요청은 `{ name?, startDate?, endDate?, expectedRevision }`다. nullable 날짜를 지우기 위해 수정 요청은 `null`을 허용하고, key 누락은 기존 값 유지로 해석한다.
+
+참가자 검색은 전역 read endpoint를 유지하지만 참가자 생성·수정은 프로젝트 문맥에서만 수행한다. roster POST는 기존 참가자 선택 또는 신규 참가자 입력을 구분하는 union 요청을 받고, 신규 참가자 마스터 생성과 프로젝트 명단 추가를 하나의 guarded batch로 처리한다. 프로젝트 참가자 PATCH는 마스터의 최신 이름·소속과 현재 프로젝트의 명단 스냅샷만 함께 갱신하며 다른 프로젝트 스냅샷은 변경하지 않는다.
 
 문제 응답에는 기존 공통 코드를 유지하되 `EVENT_CLOSED`를 `PROJECT_CLOSED`로 교체한다. 날짜 역전, 잘못된 ISO 날짜, 비활성 프로젝트 조직, 프로젝트에 연결되지 않은 조직은 `VALIDATION_FAILED`; revision 불일치는 `STALE_REVISION`; 중복 프로젝트 조직은 `CONFLICT`로 반환한다.
 
