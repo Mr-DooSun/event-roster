@@ -78,7 +78,7 @@ function toHttpProblem(error: Error): HttpProblem {
       INVALID_RECOVERY_CODE: [401, "복구 코드를 확인해 주세요."],
       RATE_LIMITED: [429, "로그인 시도가 잠시 제한되었습니다."],
       CONFLICT: [409, "이미 처리되었거나 충돌하는 요청입니다."],
-      INVALID_TRANSITION: [409, "허용되지 않은 행사 상태 변경입니다."],
+      INVALID_TRANSITION: [409, "허용되지 않은 프로젝트 상태 변경입니다."],
       STALE_REVISION: [409, "다른 변경이 먼저 반영되었습니다."],
       PROJECT_CLOSED: [409, "종료된 프로젝트는 변경할 수 없습니다."],
       NOT_FOUND: [404, "요청한 데이터를 찾을 수 없습니다."],

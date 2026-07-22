@@ -6,7 +6,7 @@
     "check": "tsc --noEmit && tsc --noEmit -p tsconfig.scripts.json",
     "bootstrap:remote": "node --import tsx scripts/bootstrap-remote.mts",
     "e2e:prepare": "node --import tsx scripts/prepare-e2e-env.mts",
-    "e2e:serve": "wrangler dev --config wrangler.e2e.jsonc --port 8787 --local-protocol https --persist-to .wrangler/e2e-state --show-interactive-dev-session false",
+    "e2e:serve": "wrangler dev --config wrangler.e2e.jsonc --port 8787 --local-protocol https --persist-to .wrangler/e2e-state --show-interactive-dev-session false --test-scheduled",
     "secrets:remote": "node --import tsx scripts/configure-secrets-remote.mts",
     "smoke:remote": "node --import tsx scripts/smoke-remote.mts",
     "test": "vitest run",

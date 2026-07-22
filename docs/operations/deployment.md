@@ -80,4 +80,14 @@ corepack pnpm@10.28.1 --filter @event-roster/worker run smoke:remote
 
 스크립트는 올바른 로그인 1회, 잘못된 비밀번호 1회, 존재하지 않는 ID 1회를 2초 간격으로 수행하며 재시도하지 않는다. 이어 Access JWT 900초, refresh cookie 속성·1회 회전, logout 폐기를 확인한다. 5xx면 배포 실패로 기록하되 ADR 0003의 stress 결과를 변경하지 않는다.
 
+프로젝트 scheduled 자동 종료는 아래 다섯 항목을 순서대로 확인한다.
+
+1. `wrangler deploy --dry-run`에서 Scheduled Trigger `0 15 * * *` 확인
+2. 실제 deploy 후 Cloudflare Dashboard의 Trigger 목록에 Cron 하나만 있는지 확인
+3. KST 경계 fixture로 scheduled handler를 수동 검증
+4. 만료 프로젝트 mutation이 `PROJECT_CLOSED`를 반환하는지 확인
+5. `project_organizations`와 project roster migration 행 수 확인
+
+Wrangler 4.112.0의 dry-run 요약이 Cron을 별도로 출력하지 않는 경우에는 exit 0과 `apps/worker/wrangler.jsonc`의 `triggers.crons`가 `["0 15 * * *"]` 하나인지를 함께 대조한다. 실제 원격 Trigger 존재 여부는 2번에서 확정한다.
+
 마지막으로 Cloudflare 대시보드에서 Workers 오류, CPU 시간, D1 오류·사용량을 확인하고 배포 시각·커밋 SHA·정확한 URL·smoke 결과만 배포 기록에 남긴다.

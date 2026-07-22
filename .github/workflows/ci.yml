@@ -20,9 +20,9 @@ jobs:
       - run: corepack enable
       - run: corepack pnpm@10.28.1 install --frozen-lockfile
       - run: corepack pnpm@10.28.1 --filter @event-roster/web exec playwright install --with-deps chromium
-      - run: corepack pnpm@10.28.1 format:check
-      - run: corepack pnpm@10.28.1 check
       - run: corepack pnpm@10.28.1 test
+      - run: corepack pnpm@10.28.1 check
+      - run: corepack pnpm@10.28.1 format:check
       - run: corepack pnpm@10.28.1 --filter @event-roster/web build
       - run: corepack pnpm@10.28.1 --filter @event-roster/worker exec wrangler deploy --dry-run
       - run: corepack pnpm@10.28.1 --filter @event-roster/web run e2e

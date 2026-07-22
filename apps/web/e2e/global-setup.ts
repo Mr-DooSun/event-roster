@@ -9,8 +9,7 @@ interface Fixture {
   operator: { loginId: string; displayName: string; password: string };
   temporaryUser: { loginId: string; displayName: string; password?: string };
   organizationId?: string;
-  projectRosterProjectId?: string;
-  importProjectId?: string;
+  projectId?: string;
 }
 
 export default async function globalSetup() {
@@ -68,18 +67,35 @@ export default async function globalSetup() {
   await ok(organization);
   const organizationId = ((await organization.json()) as { id: string }).id;
   fixture.organizationId = organizationId;
-  fixture.projectRosterProjectId = await createProject(
-    api,
-    operatorAuth,
-    organizationId,
-    "E2E 명단 프로젝트",
+  const projectResponse = await api.post("/api/v1/projects", {
+    headers: authHeaders(operatorAuth),
+    data: {
+      name: "E2E 상반기 프로젝트",
+      startDate: "2029-05-22",
+      endDate: "2029-05-23",
+    },
+  });
+  await ok(projectResponse);
+  const project = (await projectResponse.json()) as {
+    id: string;
+    revision: number;
+  };
+  await ok(
+    await api.post(`/api/v1/projects/${project.id}/organizations`, {
+      headers: authHeaders(operatorAuth),
+      data: { organizationId: fixture.organizationId },
+    }),
   );
-  fixture.importProjectId = await createProject(
-    api,
-    operatorAuth,
-    organizationId,
-    "E2E 가져오기 프로젝트",
+  await ok(
+    await api.post(`/api/v1/projects/${project.id}/transition`, {
+      headers: authHeaders(operatorAuth),
+      data: {
+        targetStatus: "PRE_REGISTRATION",
+        expectedRevision: project.revision,
+      },
+    }),
   );
+  fixture.projectId = project.id;
   const temporaryUser = await api.post("/api/v1/users", {
     headers: authHeaders(operatorAuth),
     data: {
@@ -97,36 +113,6 @@ export default async function globalSetup() {
     mode: 0o600,
   });
   await api.dispose();
-}
-
-async function createProject(
-  api: Awaited<ReturnType<typeof request.newContext>>,
-  auth: { accessToken: string; csrfToken: string },
-  organizationId: string,
-  name: string,
-) {
-  const created = await api.post("/api/v1/projects", {
-    headers: authHeaders(auth),
-    data: { name },
-  });
-  await ok(created);
-  const project = (await created.json()) as { id: string; revision: number };
-  await ok(
-    await api.post(`/api/v1/projects/${project.id}/organizations`, {
-      headers: authHeaders(auth),
-      data: { organizationId },
-    }),
-  );
-  await ok(
-    await api.post(`/api/v1/projects/${project.id}/transition`, {
-      headers: authHeaders(auth),
-      data: {
-        targetStatus: "PRE_REGISTRATION",
-        expectedRevision: project.revision,
-      },
-    }),
-  );
-  return project.id;
 }
 
 async function login(

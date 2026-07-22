@@ -50,7 +50,7 @@ it("shows a generated password once and removes it after close", async () => {
     target: { value: "staff-01" },
   });
   fireEvent.change(screen.getByLabelText("표시 이름"), {
-    target: { value: "행사 스태프" },
+    target: { value: "프로젝트 스태프" },
   });
   fireEvent.click(screen.getByRole("button", { name: "계정 만들기" }));
 
@@ -78,7 +78,7 @@ it("updates an existing account role, organizations, and active state", async ()
           {
             id: "user-2",
             loginId: "staff-01",
-            displayName: "행사 스태프",
+            displayName: "프로젝트 스태프",
             role: "OPERATOR",
             isActive: true,
             organizationIds: [],
@@ -121,7 +121,7 @@ it("updates an existing account role, organizations, and active state", async ()
       String(url).endsWith("/users/user-2") && init?.method === "PATCH",
   );
   expect(JSON.parse(String(patchCall?.[1]?.body))).toEqual({
-    displayName: "행사 스태프",
+    displayName: "프로젝트 스태프",
     role: "ORGANIZATION_MANAGER",
     isActive: false,
     organizationIds: ["org-1"],

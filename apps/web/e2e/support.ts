@@ -3,10 +3,13 @@ import { resolve } from "node:path";
 import type { Page } from "@playwright/test";
 
 export interface E2eFixture {
-  operator: { loginId: string; password: string };
-  temporaryUser: { loginId: string; password: string };
-  projectRosterProjectId: string;
-  importProjectId: string;
+  baseUrl: string;
+  bootstrapToken: string;
+  bootstrap: { loginId: string; displayName: string; password: string };
+  operator: { loginId: string; displayName: string; password: string };
+  temporaryUser: { loginId: string; displayName: string; password: string };
+  organizationId: string;
+  projectId: string;
 }
 
 export function fixture() {

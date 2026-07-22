@@ -23,5 +23,7 @@ test("temporary user changes password, is logged out, and logs in again", async 
     page.getByRole("heading", { name: "프로젝트 참가자 명단" }),
   ).toBeVisible();
   await login(page, data.temporaryUser.loginId, nextPassword);
-  await expect(page.getByRole("heading", { name: "프로젝트" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "프로젝트", exact: true }),
+  ).toBeVisible();
 });
