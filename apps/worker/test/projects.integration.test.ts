@@ -191,6 +191,55 @@ it("freezes expected snapshots on IN_PROGRESS and requires a valid reopen date",
   ).toBe("IN_PROGRESS");
 });
 
+it("returns PROJECT_CLOSED after request-time auto-close instead of applying a stale date-only patch", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-07-22T01:00:00.000Z"));
+  const operator = await seedOperator();
+  const expired = await seedProject(operator, { endDate: "2026-07-21" });
+  const response = await authedRequest(
+    operator,
+    `/api/v1/projects/${expired.id}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        endDate: null,
+        expectedRevision: expired.revision,
+      }),
+    },
+  );
+  expect(response.status).toBe(409);
+  expect(await response.json()).toMatchObject({ code: "PROJECT_CLOSED" });
+  expect(
+    await env.DB.prepare(
+      "SELECT status, end_date, revision FROM projects WHERE id = ?",
+    )
+      .bind(expired.id)
+      .first(),
+  ).toEqual({
+    status: "CLOSED",
+    end_date: "2026-07-21",
+    revision: expired.revision + 1,
+  });
+
+  const closedPatch = await authedRequest(
+    operator,
+    `/api/v1/projects/${expired.id}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        endDate: null,
+        expectedRevision: expired.revision + 1,
+      }),
+    },
+  );
+  expect(closedPatch.status).toBe(200);
+  expect(await closedPatch.json()).toMatchObject({
+    status: "CLOSED",
+    endDate: null,
+    revision: expired.revision + 2,
+  });
+});
+
 async function transition(
   operator: Awaited<ReturnType<typeof seedOperator>>,
   project: { id: string; revision: number },

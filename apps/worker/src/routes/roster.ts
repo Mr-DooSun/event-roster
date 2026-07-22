@@ -56,6 +56,8 @@ rosterRoutes.post("/projects/:projectId/roster", async (c) => {
       c.req.param("projectId"),
       input.participantId,
       input.expectedRevision,
+      input.confirmedParticipant,
+      input.expectedParticipantRevision,
     ),
     existing ? 200 : 201,
   );

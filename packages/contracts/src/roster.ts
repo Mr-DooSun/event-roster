@@ -16,6 +16,13 @@ const ExpectedProjectRevisionSchema = z.object({
 export const RosterCreateRequestSchema = z.union([
   ExpectedProjectRevisionSchema.extend({
     participantId: ParticipantIdSchema,
+    confirmedParticipant: z
+      .object({
+        name: z.string().trim().min(1).max(100),
+        organizationId: OrganizationIdSchema,
+      })
+      .strict(),
+    expectedParticipantRevision: z.number().int().nonnegative(),
   }).strict(),
   ExpectedProjectRevisionSchema.extend({
     newParticipant: z

@@ -3,7 +3,12 @@ import { beforeEach, expect, it } from "vitest";
 import type { Env } from "../src/env";
 import { requireActor } from "../src/middleware/authentication";
 import { addRosterEntry } from "../src/services/roster";
-import { authedRequest, seedManager, seedOrganization } from "./support/admin";
+import {
+  authedRequest,
+  seedManager,
+  seedOrganization,
+  seedProject,
+} from "./support/admin";
 import { authenticatedHeaders, resetAuthState } from "./support/auth";
 import { addRoster, setupPreRegistration } from "./support/roster";
 
@@ -96,6 +101,8 @@ it("rejects a manager writing another organization roster", async () => {
       method: "POST",
       body: JSON.stringify({
         participantId: fixture.firstParticipant.id,
+        confirmedParticipant: { name: "첫 참가자", organizationId: "org-1" },
+        expectedParticipantRevision: 0,
         expectedRevision: fixture.project.revision,
       }),
     },
@@ -187,6 +194,8 @@ it("forbids organization managers from IN_PROGRESS roster mutations", async () =
       method: "POST",
       body: JSON.stringify({
         participantId: fixture.firstParticipant.id,
+        confirmedParticipant: { name: "첫 참가자", organizationId: "org-1" },
+        expectedParticipantRevision: 0,
         expectedRevision: dayOf.revision,
       }),
     },
@@ -395,6 +404,277 @@ it("preserves historical roster operations when a project membership becomes ina
   expect(newEntry.status).toBe(422);
 });
 
+it("makes an inactive membership read-only for managers while operators can cancel and reactivate history", async () => {
+  const fixture = await setupPreRegistration();
+  const added = await addRoster(fixture, fixture.firstParticipant.id);
+  const entry = await added.json<{
+    id: string;
+    revision: number;
+    projectRevision: number;
+  }>();
+  await authedRequest(
+    fixture.operator,
+    `/api/v1/projects/${fixture.project.id}/organizations/org-1`,
+    { method: "PATCH", body: JSON.stringify({ isActive: false }) },
+  );
+  const manager = await seedManager("org-1");
+  const managerCancel = await authedRequest(
+    manager,
+    `/api/v1/projects/${fixture.project.id}/roster/${entry.id}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        status: "CANCELLED",
+        expectedRevision: entry.projectRevision,
+        expectedEntryRevision: entry.revision,
+      }),
+    },
+  );
+  expect(managerCancel.status).toBe(403);
+
+  const operatorCancel = await authedRequest(
+    fixture.operator,
+    `/api/v1/projects/${fixture.project.id}/roster/${entry.id}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        status: "CANCELLED",
+        expectedRevision: entry.projectRevision,
+        expectedEntryRevision: entry.revision,
+      }),
+    },
+  );
+  expect(operatorCancel.status).toBe(200);
+  const cancelled = await operatorCancel.json<{
+    revision: number;
+    projectRevision: number;
+  }>();
+
+  const managerReactivate = await authedRequest(
+    manager,
+    `/api/v1/projects/${fixture.project.id}/roster`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        participantId: fixture.firstParticipant.id,
+        confirmedParticipant: { name: "첫 참가자", organizationId: "org-1" },
+        expectedParticipantRevision: 0,
+        expectedRevision: cancelled.projectRevision,
+      }),
+    },
+  );
+  expect(managerReactivate.status).toBe(403);
+  const operatorReactivate = await addRoster(
+    {
+      ...fixture,
+      project: { ...fixture.project, revision: cancelled.projectRevision },
+    },
+    fixture.firstParticipant.id,
+  );
+  expect(operatorReactivate.status).toBe(200);
+  const reactivated = await operatorReactivate.json<{
+    id: string;
+    revision: number;
+    projectRevision: number;
+  }>();
+  await authedRequest(fixture.operator, "/api/v1/organizations/org-1", {
+    method: "PATCH",
+    body: JSON.stringify({ isActive: false }),
+  });
+  const masterInactiveCancel = await authedRequest(
+    manager,
+    `/api/v1/projects/${fixture.project.id}/roster/${reactivated.id}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        status: "CANCELLED",
+        expectedRevision: reactivated.projectRevision,
+        expectedEntryRevision: reactivated.revision,
+      }),
+    },
+  );
+  expect(masterInactiveCancel.status).toBe(403);
+});
+
+it("atomically refreshes a reused participant only for a new project and preserves old snapshots", async () => {
+  const fixture = await setupPreRegistration();
+  const oldAdded = await addRoster(fixture, fixture.firstParticipant.id);
+  expect(oldAdded.status).toBe(201);
+  const targetOrganization = await seedOrganization("org-2", "2팀");
+  const targetProject = await seedProject(fixture.operator, {
+    name: "새 프로젝트",
+  });
+  await authedRequest(
+    fixture.operator,
+    `/api/v1/projects/${targetProject.id}/organizations`,
+    {
+      method: "POST",
+      body: JSON.stringify({ organizationId: targetOrganization.id }),
+    },
+  );
+  const pre = await authedRequest(
+    fixture.operator,
+    `/api/v1/projects/${targetProject.id}/transition`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        targetStatus: "PRE_REGISTRATION",
+        expectedRevision: targetProject.revision,
+      }),
+    },
+  );
+  const target = await pre.json<{ revision: number }>();
+  const reused = await authedRequest(
+    fixture.operator,
+    `/api/v1/projects/${targetProject.id}/roster`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        participantId: fixture.firstParticipant.id,
+        confirmedParticipant: { name: "최신 참가자", organizationId: "org-2" },
+        expectedParticipantRevision: fixture.firstParticipant.revision,
+        expectedRevision: target.revision,
+      }),
+    },
+  );
+  expect(reused.status).toBe(201);
+  expect(
+    await env.DB.prepare(
+      "SELECT name, organization_id, revision FROM participants WHERE id = ?",
+    )
+      .bind(fixture.firstParticipant.id)
+      .first(),
+  ).toEqual({ name: "최신 참가자", organization_id: "org-2", revision: 1 });
+  const snapshots = (
+    await env.DB.prepare(
+      `SELECT project_id, participant_name_snapshot, organization_name_snapshot
+       FROM project_roster_entries WHERE participant_id = ? ORDER BY project_id`,
+    )
+      .bind(fixture.firstParticipant.id)
+      .all<{
+        project_id: string;
+        participant_name_snapshot: string;
+        organization_name_snapshot: string;
+      }>()
+  ).results;
+  expect(snapshots).toEqual(
+    expect.arrayContaining([
+      {
+        project_id: fixture.project.id,
+        participant_name_snapshot: "첫 참가자",
+        organization_name_snapshot: "1팀",
+      },
+      {
+        project_id: targetProject.id,
+        participant_name_snapshot: "최신 참가자",
+        organization_name_snapshot: "2팀",
+      },
+    ]),
+  );
+
+  const staleProject = await seedProject(fixture.operator, {
+    name: "stale 프로젝트",
+  });
+  await authedRequest(
+    fixture.operator,
+    `/api/v1/projects/${staleProject.id}/organizations`,
+    {
+      method: "POST",
+      body: JSON.stringify({ organizationId: targetOrganization.id }),
+    },
+  );
+  const stalePre = await authedRequest(
+    fixture.operator,
+    `/api/v1/projects/${staleProject.id}/transition`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        targetStatus: "PRE_REGISTRATION",
+        expectedRevision: 0,
+      }),
+    },
+  );
+  const staleTarget = await stalePre.json<{ revision: number }>();
+  const stale = await authedRequest(
+    fixture.operator,
+    `/api/v1/projects/${staleProject.id}/roster`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        participantId: fixture.firstParticipant.id,
+        confirmedParticipant: { name: "롤백 이름", organizationId: "org-2" },
+        expectedParticipantRevision: 0,
+        expectedRevision: staleTarget.revision,
+      }),
+    },
+  );
+  expect(stale.status).toBe(409);
+  expect(
+    await env.DB.prepare("SELECT name, revision FROM participants WHERE id = ?")
+      .bind(fixture.firstParticipant.id)
+      .first(),
+  ).toEqual({ name: "최신 참가자", revision: 1 });
+  expect(
+    (
+      await env.DB.prepare(
+        "SELECT COUNT(*) AS count FROM project_roster_entries WHERE project_id = ?",
+      )
+        .bind(staleProject.id)
+        .first<{ count: number }>()
+    )?.count,
+  ).toBe(0);
+});
+
+it("reactivates a same-project entry without replacing its snapshot with confirmed values", async () => {
+  const fixture = await setupPreRegistration();
+  const added = await addRoster(fixture, fixture.firstParticipant.id);
+  const active = await added.json<{
+    id: string;
+    revision: number;
+    projectRevision: number;
+  }>();
+  const cancelled = await authedRequest(
+    fixture.operator,
+    `/api/v1/projects/${fixture.project.id}/roster/${active.id}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        status: "CANCELLED",
+        expectedRevision: active.projectRevision,
+        expectedEntryRevision: active.revision,
+      }),
+    },
+  );
+  const cancelledBody = await cancelled.json<{ projectRevision: number }>();
+  const reactivated = await authedRequest(
+    fixture.operator,
+    `/api/v1/projects/${fixture.project.id}/roster`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        participantId: fixture.firstParticipant.id,
+        confirmedParticipant: {
+          name: "덮어쓰면 안 됨",
+          organizationId: "org-1",
+        },
+        expectedParticipantRevision: 0,
+        expectedRevision: cancelledBody.projectRevision,
+      }),
+    },
+  );
+  expect(reactivated.status).toBe(200);
+  expect(
+    await env.DB.prepare(
+      "SELECT participant_name_snapshot, organization_name_snapshot FROM project_roster_entries WHERE id = ?",
+    )
+      .bind(active.id)
+      .first(),
+  ).toEqual({
+    participant_name_snapshot: "첫 참가자",
+    organization_name_snapshot: "1팀",
+  });
+});
+
 it("closes an expired project when auto-close first loses a revision race", async () => {
   const fixture = await setupPreRegistration();
   await env.DB.prepare("UPDATE projects SET end_date='2026-07-21' WHERE id=?")
@@ -428,6 +708,8 @@ it("closes an expired project when auto-close first loses a revision race", asyn
       fixture.project.id,
       fixture.firstParticipant.id,
       fixture.project.revision + 1,
+      { name: "첫 참가자", organizationId: "org-1" },
+      fixture.firstParticipant.revision,
       new Date("2026-07-22T01:00:00.000Z"),
     ),
   ).rejects.toMatchObject({ code: "PROJECT_CLOSED" });

@@ -94,9 +94,10 @@ export async function updateProject(
   input: z.infer<typeof UpdateProjectRequestSchema>,
   now = new Date(),
 ): Promise<Project> {
-  await closeExpiredProject(env, projectId, now);
+  const expired = await closeExpiredProject(env, projectId, now);
   const current = await findProject(env.DB, projectId);
   if (!current) throw new DomainError("NOT_FOUND");
+  if (expired) throw new DomainError("PROJECT_CLOSED");
   const closedDateOnly =
     current.status === "CLOSED" && input.name === undefined;
   if (current.status === "CLOSED" && !closedDateOnly) {

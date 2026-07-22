@@ -1,3 +1,4 @@
+import { OrganizationPatchRequestSchema } from "@event-roster/contracts";
 import { Hono } from "hono";
 import { z } from "zod";
 import type { Env } from "../env";
@@ -15,12 +16,6 @@ import {
 const OrganizationCreateSchema = z.object({
   name: z.string().trim().min(1).max(100),
 });
-const OrganizationPatchSchema = z
-  .object({
-    name: z.string().trim().min(1).max(100).optional(),
-    isActive: z.boolean().optional(),
-  })
-  .refine((value) => Object.keys(value).length > 0);
 
 export const organizationRoutes = new Hono<{ Bindings: Env }>();
 
@@ -44,7 +39,7 @@ organizationRoutes.patch("/organizations/:id", async (c) => {
   const actor = await requireActor(c.req.raw, c.env);
   await requireCsrf(c.req.raw, actor);
   requireAdministrativeOperator(actor);
-  const input = OrganizationPatchSchema.parse(await c.req.json());
+  const input = OrganizationPatchRequestSchema.parse(await c.req.json());
   return c.json(
     await updateOrganization(c.env, actor, c.req.param("id"), input),
   );

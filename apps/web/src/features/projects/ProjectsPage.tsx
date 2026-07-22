@@ -41,6 +41,7 @@ export function ProjectsPage() {
   }, [load]);
 
   async function create(input: ProjectCreateInput) {
+    loadGeneration.current += 1;
     setError(null);
     try {
       await api.post("/projects", input);

@@ -81,7 +81,9 @@ test("imports 130 rows and downloads two-sheet Excel", async ({ page }) => {
   const downloadPromise = page.waitForEvent("download");
   await page.getByRole("button", { name: "엑셀 내보내기" }).click();
   const download = await downloadPromise;
-  expect(download.suggestedFilename()).toContain("프로젝트-명단");
+  expect(download.suggestedFilename()).toBe(
+    "E2E 가져오기 프로젝트-프로젝트-명단.xlsx",
+  );
   const downloadPath = await download.path();
   expect(downloadPath).not.toBeNull();
   const exportedWorkbook = XLSX.read(readFileSync(downloadPath as string), {

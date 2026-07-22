@@ -8,6 +8,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import * as XLSX from "xlsx";
+import * as workbookReader from "../../lib/excel/read-workbook";
 import { AuthProvider, useAuth } from "../auth/AuthProvider";
 import { LoginPage } from "../auth/LoginPage";
 import { ImportWizard } from "./ImportWizard";
@@ -15,6 +16,7 @@ import { ImportWizard } from "./ImportWizard";
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 it("loads only active project organizations as import targets", async () => {
@@ -334,6 +336,275 @@ it("locks workflow controls until an atomic commit response arrives", async () =
   expect(await screen.findByText("1개 행을 확정했습니다.")).toBeVisible();
 });
 
+it("discards staged validation and directs to the latest project when validation finds a closed project", async () => {
+  let validations = 0;
+  const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.endsWith("/auth/login"))
+      return Promise.resolve(Response.json(auth()));
+    if (
+      url.endsWith("/projects/project-1/imports/validate") &&
+      init?.method === "POST"
+    ) {
+      validations += 1;
+      return Promise.resolve(
+        validations === 1
+          ? Response.json({
+              projectRevision: 4,
+              rows: [
+                {
+                  rowNumber: 2,
+                  name: "박민수",
+                  organizationName: "1팀",
+                  issues: [],
+                  candidates: [],
+                },
+              ],
+            })
+          : projectClosedResponse(),
+      );
+    }
+    throw new Error(`unexpected request: ${url}`);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  render(
+    <AuthProvider restoreOnMount={false}>
+      <Gate>
+        <ImportWizard projectId="project-1" />
+      </Gate>
+    </AuthProvider>,
+  );
+  await login();
+  fireEvent.change(await screen.findByLabelText("엑셀 파일"), {
+    target: { files: [workbookFixture([{ 이름: "박민수", 조직: "1팀" }])] },
+  });
+  fireEvent.click(await screen.findByRole("button", { name: "서버 검증" }));
+  expect(
+    await screen.findByRole("heading", { name: "검증 결과" }),
+  ).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "서버 검증" }));
+
+  expect(
+    await screen.findByText(
+      "프로젝트가 종료되어 가져오기를 진행할 수 없습니다. 최신 프로젝트 정보를 확인해 주세요.",
+    ),
+  ).toBeVisible();
+  expect(
+    screen.queryByRole("heading", { name: "검증 결과" }),
+  ).not.toBeInTheDocument();
+  expect(screen.getByLabelText("엑셀 파일")).toBeEnabled();
+  expect(screen.queryByText("처리 중…")).not.toBeInTheDocument();
+  expect(
+    screen.getByRole("link", { name: "최신 프로젝트 보기" }),
+  ).toHaveAttribute("href", "/projects/project-1");
+  expect(
+    fetchMock.mock.calls.filter(
+      ([url, init]) =>
+        String(url).endsWith("/imports/validate") && init?.method === "POST",
+    ),
+  ).toHaveLength(2);
+});
+
+it("discards staged validation without replaying commit when commit finds a closed project", async () => {
+  const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.endsWith("/auth/login"))
+      return Promise.resolve(Response.json(auth()));
+    if (
+      url.endsWith("/projects/project-1/imports/validate") &&
+      init?.method === "POST"
+    ) {
+      return Promise.resolve(
+        Response.json({
+          projectRevision: 4,
+          rows: [
+            {
+              rowNumber: 2,
+              name: "박민수",
+              organizationName: "1팀",
+              issues: [],
+              candidates: [],
+            },
+          ],
+        }),
+      );
+    }
+    if (
+      url.endsWith("/projects/project-1/imports/commit") &&
+      init?.method === "POST"
+    ) {
+      return Promise.resolve(projectClosedResponse());
+    }
+    throw new Error(`unexpected request: ${url}`);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  render(
+    <AuthProvider restoreOnMount={false}>
+      <Gate>
+        <ImportWizard projectId="project-1" />
+      </Gate>
+    </AuthProvider>,
+  );
+  await login();
+  fireEvent.change(await screen.findByLabelText("엑셀 파일"), {
+    target: { files: [workbookFixture([{ 이름: "박민수", 조직: "1팀" }])] },
+  });
+  fireEvent.click(await screen.findByRole("button", { name: "서버 검증" }));
+  fireEvent.click(await screen.findByRole("button", { name: "명단 확정" }));
+
+  expect(
+    await screen.findByText(
+      "프로젝트가 종료되어 가져오기를 진행할 수 없습니다. 최신 프로젝트 정보를 확인해 주세요.",
+    ),
+  ).toBeVisible();
+  expect(
+    screen.queryByRole("heading", { name: "검증 결과" }),
+  ).not.toBeInTheDocument();
+  expect(screen.getByLabelText("엑셀 파일")).toBeEnabled();
+  expect(screen.queryByText("처리 중…")).not.toBeInTheDocument();
+  expect(
+    fetchMock.mock.calls.filter(
+      ([url, init]) =>
+        String(url).endsWith("/imports/commit") && init?.method === "POST",
+    ),
+  ).toHaveLength(1);
+});
+
+it("ignores a file parse failure after the project context changes", async () => {
+  let rejectParse: ((reason?: unknown) => void) | undefined;
+  const parse = new Promise<never>((_resolve, reject) => {
+    rejectParse = reject;
+  });
+  vi.spyOn(workbookReader, "readWorkbook").mockReturnValueOnce(parse);
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL) =>
+      String(input).endsWith("/auth/login")
+        ? Promise.resolve(Response.json(auth()))
+        : Promise.reject(new Error("organizations unavailable")),
+    ),
+  );
+  const view = render(
+    <AuthProvider restoreOnMount={false}>
+      <Gate>
+        <ImportWizard projectId="project-1" />
+      </Gate>
+    </AuthProvider>,
+  );
+  await login();
+  fireEvent.change(await screen.findByLabelText("엑셀 파일"), {
+    target: { files: [new File(["broken"], "broken.xlsx")] },
+  });
+  view.rerender(
+    <AuthProvider restoreOnMount={false}>
+      <Gate>
+        <ImportWizard projectId="project-2" />
+      </Gate>
+    </AuthProvider>,
+  );
+
+  await act(async () => {
+    rejectParse?.(new Error("obsolete parse failed"));
+    await parse.catch(() => undefined);
+  });
+  expect(
+    screen.queryByText("엑셀 파일을 읽지 못했습니다."),
+  ).not.toBeInTheDocument();
+});
+
+it("keeps a current project request locked when an obsolete project request settles", async () => {
+  let resolveProjectOne: (response: Response) => void = () => undefined;
+  let resolveProjectTwo: (response: Response) => void = () => undefined;
+  const projectOneRequest = new Promise<Response>((resolve) => {
+    resolveProjectOne = resolve;
+  });
+  const projectTwoRequest = new Promise<Response>((resolve) => {
+    resolveProjectTwo = resolve;
+  });
+  const fetchMock = vi.fn((input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.endsWith("/auth/login")) {
+      return Promise.resolve(Response.json(auth()));
+    }
+    if (url.endsWith("/projects/project-1/imports/validate")) {
+      return projectOneRequest;
+    }
+    if (url.endsWith("/projects/project-2/imports/validate")) {
+      return projectTwoRequest;
+    }
+    return Promise.reject(new Error(`unexpected request: ${url}`));
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  const view = render(
+    <AuthProvider restoreOnMount={false}>
+      <Gate>
+        <ImportWizard projectId="project-1" />
+      </Gate>
+    </AuthProvider>,
+  );
+  await login();
+  fireEvent.change(await screen.findByLabelText("엑셀 파일"), {
+    target: { files: [workbookFixture([{ 이름: "프로젝트1", 조직: "1팀" }])] },
+  });
+  fireEvent.click(await screen.findByRole("button", { name: "서버 검증" }));
+
+  view.rerender(
+    <AuthProvider restoreOnMount={false}>
+      <Gate>
+        <ImportWizard projectId="project-2" />
+      </Gate>
+    </AuthProvider>,
+  );
+  await vi.waitFor(() =>
+    expect(screen.getByLabelText("엑셀 파일")).toBeEnabled(),
+  );
+  fireEvent.change(screen.getByLabelText("엑셀 파일"), {
+    target: { files: [workbookFixture([{ 이름: "프로젝트2", 조직: "2팀" }])] },
+  });
+  fireEvent.click(await screen.findByRole("button", { name: "서버 검증" }));
+  await vi.waitFor(() =>
+    expect(
+      fetchMock.mock.calls.filter(([url]) =>
+        String(url).endsWith("/projects/project-2/imports/validate"),
+      ),
+    ).toHaveLength(1),
+  );
+
+  await act(async () => {
+    resolveProjectOne(Response.json({ projectRevision: 1, rows: [] }));
+    await projectOneRequest;
+  });
+  expect(screen.getByText("처리 중…")).toBeVisible();
+  expect(screen.getByLabelText("엑셀 파일")).toBeDisabled();
+  const validateButton = screen.getByRole("button", { name: "서버 검증" });
+  expect(validateButton).toBeDisabled();
+  fireEvent.click(validateButton);
+  expect(
+    fetchMock.mock.calls.filter(([url]) =>
+      String(url).endsWith("/projects/project-2/imports/validate"),
+    ),
+  ).toHaveLength(1);
+
+  await act(async () => {
+    resolveProjectTwo(
+      Response.json({
+        projectRevision: 2,
+        rows: [
+          {
+            rowNumber: 2,
+            name: "프로젝트2",
+            organizationName: "2팀",
+            issues: [],
+            candidates: [],
+          },
+        ],
+      }),
+    );
+    await projectTwoRequest;
+  });
+  expect(await screen.findByText("검증 완료")).toBeVisible();
+});
+
 function Gate({ children }: { children: React.ReactNode }) {
   return useAuth().auth ? children : <LoginPage />;
 }
@@ -377,4 +648,11 @@ function auth() {
       },
     },
   };
+}
+
+function projectClosedResponse() {
+  return Response.json(
+    { code: "PROJECT_CLOSED", message: "closed", requestId: "request-closed" },
+    { status: 409 },
+  );
 }

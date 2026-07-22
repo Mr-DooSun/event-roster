@@ -1,12 +1,15 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, expect, it } from "vitest";
+import type { Env } from "../src/env";
+import { requireActor } from "../src/middleware/authentication";
+import { updateOrganization } from "../src/services/admin";
 import {
   authedRequest,
   seedManager,
   seedOperator,
   seedOrganization,
 } from "./support/admin";
-import { login, resetAuthState } from "./support/auth";
+import { authenticatedHeaders, login, resetAuthState } from "./support/auth";
 
 beforeEach(resetAuthState);
 
@@ -123,4 +126,94 @@ it("rejects duplicate organization links as validation errors", async () => {
     }),
   });
   expect(response.status).toBe(422);
+});
+
+it("rejects a stale rename after a concurrent deactivate without resurrecting or auditing it", async () => {
+  const operator = await seedOperator();
+  await seedOrganization();
+  const actor = await requireActor(
+    new Request("https://event-roster.test", {
+      headers: authenticatedHeaders(operator),
+    }),
+    env as Env,
+  );
+  let pending = true;
+  const raceDb = {
+    prepare: (query: string) => env.DB.prepare(query),
+    batch: async (statements: D1PreparedStatement[]) => {
+      if (pending) {
+        pending = false;
+        await env.DB.prepare(
+          "UPDATE organizations SET is_active = 0 WHERE id = 'org-1'",
+        ).run();
+      }
+      return env.DB.batch(statements);
+    },
+  } as D1Database;
+
+  await expect(
+    updateOrganization({ ...(env as Env), DB: raceDb }, actor, "org-1", {
+      name: "stale rename",
+    }),
+  ).rejects.toMatchObject({ code: "CONFLICT" });
+  expect(
+    await env.DB.prepare(
+      "SELECT name, canonical_name, is_active FROM organizations WHERE id = 'org-1'",
+    ).first(),
+  ).toEqual({ name: "1팀", canonical_name: "1팀", is_active: 0 });
+  expect(
+    (
+      await env.DB.prepare(
+        "SELECT COUNT(*) AS count FROM audit_logs WHERE entity_type = 'ORGANIZATION' AND entity_id = 'org-1'",
+      ).first<{ count: number }>()
+    )?.count,
+  ).toBe(0);
+});
+
+it("rejects a stale deactivate after a concurrent rename without losing or auditing the rename", async () => {
+  const operator = await seedOperator();
+  await seedOrganization();
+  const actor = await requireActor(
+    new Request("https://event-roster.test", {
+      headers: authenticatedHeaders(operator),
+    }),
+    env as Env,
+  );
+  let pending = true;
+  const raceDb = {
+    prepare: (query: string) => env.DB.prepare(query),
+    batch: async (statements: D1PreparedStatement[]) => {
+      if (pending) {
+        pending = false;
+        await env.DB.prepare(
+          `UPDATE organizations
+           SET name = 'concurrent rename', canonical_name = 'concurrent rename'
+           WHERE id = 'org-1'`,
+        ).run();
+      }
+      return env.DB.batch(statements);
+    },
+  } as D1Database;
+
+  await expect(
+    updateOrganization({ ...(env as Env), DB: raceDb }, actor, "org-1", {
+      isActive: false,
+    }),
+  ).rejects.toMatchObject({ code: "CONFLICT" });
+  expect(
+    await env.DB.prepare(
+      "SELECT name, canonical_name, is_active FROM organizations WHERE id = 'org-1'",
+    ).first(),
+  ).toEqual({
+    name: "concurrent rename",
+    canonical_name: "concurrent rename",
+    is_active: 1,
+  });
+  expect(
+    (
+      await env.DB.prepare(
+        "SELECT COUNT(*) AS count FROM audit_logs WHERE entity_type = 'ORGANIZATION' AND entity_id = 'org-1'",
+      ).first<{ count: number }>()
+    )?.count,
+  ).toBe(0);
 });

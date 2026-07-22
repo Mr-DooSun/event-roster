@@ -8,6 +8,7 @@ import {
   seedProject,
 } from "./support/admin";
 import { resetAuthState } from "./support/auth";
+import { addRoster, setupPreRegistration } from "./support/roster";
 
 beforeEach(resetAuthState);
 afterEach(() => vi.useRealTimers());
@@ -39,7 +40,7 @@ it("links an existing organization, deactivates it, and reuses the row", async (
       isActive: true,
       masterIsActive: true,
       activeProjectCount: 1,
-      hasHistory: false,
+      hasHistory: true,
     },
   ]);
   const disabled = await authedRequest(
@@ -81,7 +82,7 @@ it("links an existing organization, deactivates it, and reuses the row", async (
   ).results.map((row) => row.action);
   expect(auditActions).toEqual([
     "PROJECT_ORGANIZATION_ADDED",
-    "PROJECT_ORGANIZATION_REMOVED",
+    "PROJECT_ORGANIZATION_DEACTIVATED",
     "PROJECT_ORGANIZATION_REACTIVATED",
   ]);
 });
@@ -106,7 +107,7 @@ it("creates and links a new organization atomically, then deletes a no-history l
   );
   expect(await disabled.json()).toMatchObject({
     isActive: false,
-    removed: true,
+    removed: false,
   });
   expect(
     (
@@ -116,7 +117,229 @@ it("creates and links a new organization atomically, then deletes a no-history l
         .bind(project.id, membership.organizationId)
         .first<{ count: number }>()
     )?.count,
+  ).toBe(1);
+});
+
+it("treats membership audit rows as history and deletes only a truly audit-free fixture", async () => {
+  const operator = await seedOperator();
+  const audited = await seedOrganization("org-audited", "감사 조직");
+  const legacy = await seedOrganization("org-legacy", "수동 조직");
+  const project = await seedProject(operator);
+  await linkProjectOrganization(operator, project.id, audited.id);
+  await env.DB.prepare(`INSERT INTO project_organizations
+    (project_id, organization_id, is_active, added_at, added_by, updated_by)
+    VALUES (?, ?, 1, ?, ?, ?)`)
+    .bind(
+      project.id,
+      legacy.id,
+      "2026-07-21T00:00:00.000Z",
+      operator.userId,
+      operator.userId,
+    )
+    .run();
+
+  const listed = await (
+    await authedRequest(
+      operator,
+      `/api/v1/projects/${project.id}/organizations`,
+    )
+  ).json<Array<{ organizationId: string; hasHistory: boolean }>>();
+  expect(
+    listed.find((item) => item.organizationId === audited.id)?.hasHistory,
+  ).toBe(true);
+  expect(
+    listed.find((item) => item.organizationId === legacy.id)?.hasHistory,
+  ).toBe(false);
+
+  const auditedDisabled = await authedRequest(
+    operator,
+    `/api/v1/projects/${project.id}/organizations/${audited.id}`,
+    { method: "PATCH", body: JSON.stringify({ isActive: false }) },
+  );
+  expect(await auditedDisabled.json()).toMatchObject({ removed: false });
+  const legacyDisabled = await authedRequest(
+    operator,
+    `/api/v1/projects/${project.id}/organizations/${legacy.id}`,
+    { method: "PATCH", body: JSON.stringify({ isActive: false }) },
+  );
+  expect(await legacyDisabled.json()).toMatchObject({ removed: true });
+  expect(
+    (
+      await env.DB.prepare(
+        "SELECT COUNT(*) AS count FROM project_organizations WHERE project_id = ?",
+      )
+        .bind(project.id)
+        .first<{ count: number }>()
+    )?.count,
+  ).toBe(1);
+
+  const manager = await seedManager(audited.id);
+  const projects = await (
+    await authedRequest(manager, "/api/v1/projects")
+  ).json<Array<{ id: string }>>();
+  expect(projects.map((item) => item.id)).toContain(project.id);
+});
+
+it("does not treat LIKE-wildcard lookalike audit actions as membership history", async () => {
+  const operator = await seedOperator();
+  const organization = await seedOrganization(
+    "org-lookalike",
+    "유사 감사 조직",
+  );
+  const project = await seedProject(operator);
+  const timestamp = "2026-07-21T00:00:00.000Z";
+  await env.DB.batch([
+    env.DB.prepare(`INSERT INTO project_organizations
+      (project_id, organization_id, is_active, added_at, added_by, updated_by)
+      VALUES (?, ?, 1, ?, ?, ?)`).bind(
+      project.id,
+      organization.id,
+      timestamp,
+      operator.userId,
+      operator.userId,
+    ),
+    env.DB.prepare(`INSERT INTO audit_logs
+      (id, actor_user_id, action, entity_type, entity_id, occurred_at, details_json)
+      VALUES ('lookalike-audit', ?, 'PROJECTXORGANIZATIONYFAKE',
+              'PROJECT_ORGANIZATION', ?, ?, '{}')`).bind(
+      operator.userId,
+      `${project.id}:${organization.id}`,
+      timestamp,
+    ),
+  ]);
+
+  const listed = await (
+    await authedRequest(
+      operator,
+      `/api/v1/projects/${project.id}/organizations`,
+    )
+  ).json<Array<{ organizationId: string; hasHistory: boolean }>>();
+  expect(listed).toEqual([
+    expect.objectContaining({
+      organizationId: organization.id,
+      hasHistory: false,
+    }),
+  ]);
+  const disabled = await authedRequest(
+    operator,
+    `/api/v1/projects/${project.id}/organizations/${organization.id}`,
+    { method: "PATCH", body: JSON.stringify({ isActive: false }) },
+  );
+  expect(await disabled.json()).toMatchObject({ removed: true });
+  expect(
+    (
+      await env.DB.prepare(
+        "SELECT COUNT(*) AS count FROM project_organizations WHERE project_id = ? AND organization_id = ?",
+      )
+        .bind(project.id, organization.id)
+        .first<{ count: number }>()
+    )?.count,
   ).toBe(0);
+});
+
+it("globally deactivates an organization with audit and blocks only new usage", async () => {
+  const fixture = await setupPreRegistration();
+  const added = await addRoster(fixture, fixture.firstParticipant.id);
+  const active = await added.json<{
+    id: string;
+    revision: number;
+    projectRevision: number;
+  }>();
+  const deactivated = await authedRequest(
+    fixture.operator,
+    "/api/v1/organizations/org-1",
+    { method: "PATCH", body: JSON.stringify({ isActive: false }) },
+  );
+  expect(deactivated.status).toBe(200);
+  expect(await deactivated.json()).toMatchObject({
+    id: "org-1",
+    isActive: false,
+    masterIsActive: false,
+    activeProjectCount: 1,
+  });
+  expect(
+    (
+      await env.DB.prepare(
+        "SELECT COUNT(*) AS count FROM audit_logs WHERE action = 'ORGANIZATION_DEACTIVATED' AND entity_id = 'org-1'",
+      ).first<{ count: number }>()
+    )?.count,
+  ).toBe(1);
+
+  const cancelled = await authedRequest(
+    fixture.operator,
+    `/api/v1/projects/${fixture.project.id}/roster/${active.id}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        status: "CANCELLED",
+        expectedRevision: active.projectRevision,
+        expectedEntryRevision: active.revision,
+      }),
+    },
+  );
+  expect(cancelled.status).toBe(200);
+  const cancelledBody = await cancelled.json<{ projectRevision: number }>();
+  const updated = await authedRequest(
+    fixture.operator,
+    `/api/v1/projects/${fixture.project.id}/participants/${fixture.firstParticipant.id}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        name: "비활성 마스터 이력 수정",
+        expectedRevision: 0,
+        expectedProjectRevision: cancelledBody.projectRevision,
+      }),
+    },
+  );
+  expect(updated.status).toBe(200);
+  const blockedRoster = await addRoster(
+    {
+      ...fixture,
+      project: {
+        ...fixture.project,
+        revision: cancelledBody.projectRevision + 1,
+      },
+    },
+    fixture.secondParticipant.id,
+  );
+  expect(blockedRoster.status).toBe(422);
+
+  const newProject = await seedProject(fixture.operator, {
+    name: "새 연결 차단",
+  });
+  const blockedLink = await authedRequest(
+    fixture.operator,
+    `/api/v1/projects/${newProject.id}/organizations`,
+    { method: "POST", body: JSON.stringify({ organizationId: "org-1" }) },
+  );
+  expect(blockedLink.status).toBe(409);
+
+  const validation = await authedRequest(
+    fixture.operator,
+    `/api/v1/projects/${fixture.project.id}/imports/validate`,
+    {
+      method: "POST",
+      body: JSON.stringify([
+        { rowNumber: 2, name: "신규", organizationName: "1팀" },
+      ]),
+    },
+  );
+  expect(validation.status).toBe(200);
+  expect(await validation.json()).toMatchObject({
+    rows: [{ issues: ["UNKNOWN_ORGANIZATION"] }],
+  });
+  const blockedImport = await authedRequest(
+    fixture.operator,
+    `/api/v1/projects/${fixture.project.id}/imports/commit`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        rows: [{ rowNumber: 2, name: "신규", organizationName: "1팀" }],
+        expectedProjectRevision: cancelledBody.projectRevision + 1,
+      }),
+    },
+  );
+  expect(blockedImport.status).toBe(422);
 });
 
 it("rejects an ambiguous organization link request", async () => {

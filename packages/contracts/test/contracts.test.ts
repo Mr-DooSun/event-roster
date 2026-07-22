@@ -3,6 +3,7 @@ import type { Project } from "../src";
 import {
   CreateProjectRequestSchema,
   LoginIdSchema,
+  OrganizationPatchRequestSchema,
   PasswordSchema,
   RosterCreateRequestSchema,
   RosterSourceSchema,
@@ -33,6 +34,15 @@ describe("authentication contracts", () => {
   });
 });
 
+describe("organization contracts", () => {
+  it("accepts the minimal global deactivation payload", () => {
+    expect(OrganizationPatchRequestSchema.parse({ isActive: false })).toEqual({
+      isActive: false,
+    });
+    expect(OrganizationPatchRequestSchema.safeParse({}).success).toBe(false);
+  });
+});
+
 describe("roster contracts", () => {
   it("uses project lifecycle sources and a strict participant creation union", () => {
     expect(RosterSourceSchema.options).toEqual([
@@ -46,6 +56,28 @@ describe("roster contracts", () => {
         expectedRevision: 0,
       }).success,
     ).toBe(false);
+  });
+
+  it("requires confirmed participant state for an existing participant reuse", () => {
+    expect(
+      RosterCreateRequestSchema.safeParse({
+        participantId: "participant-1",
+        expectedRevision: 0,
+      }).success,
+    ).toBe(false);
+    expect(
+      RosterCreateRequestSchema.parse({
+        participantId: "participant-1",
+        confirmedParticipant: { name: "확인된 이름", organizationId: "org-1" },
+        expectedParticipantRevision: 2,
+        expectedRevision: 3,
+      }),
+    ).toEqual({
+      participantId: "participant-1",
+      confirmedParticipant: { name: "확인된 이름", organizationId: "org-1" },
+      expectedParticipantRevision: 2,
+      expectedRevision: 3,
+    });
   });
 });
 

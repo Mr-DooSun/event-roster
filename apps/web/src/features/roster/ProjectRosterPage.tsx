@@ -7,7 +7,11 @@ import { ApiError } from "../../lib/api";
 import type { ExportData } from "../../lib/excel/download-workbook";
 import type { OrganizationView } from "../admin/UserForm";
 import { useAuth } from "../auth/AuthProvider";
-import { ParticipantDialog, type ParticipantView } from "./ParticipantDialog";
+import {
+  type ExistingParticipantConfirmation,
+  ParticipantDialog,
+  type ParticipantView,
+} from "./ParticipantDialog";
 import { ParticipantEditDialog } from "./ParticipantEditDialog";
 import { RosterTable, type RosterView } from "./RosterTable";
 
@@ -46,13 +50,12 @@ export function ProjectRosterPage({
     () =>
       participants.filter(
         (participant) =>
-          activeOrganizationIds.has(participant.organizationId) &&
           !rows.some(
             (row) =>
               row.participantId === participant.id && row.status === "ACTIVE",
           ),
       ),
-    [activeOrganizationIds, participants, rows],
+    [participants, rows],
   );
 
   async function handleMutation(
@@ -120,10 +123,17 @@ export function ProjectRosterPage({
     if (completed) setEditingParticipant(null);
   }
 
-  async function add(participantId: string) {
+  async function add(input: ExistingParticipantConfirmation) {
+    const {
+      participantId,
+      expectedParticipantRevision,
+      ...confirmedParticipant
+    } = input;
     const completed = await handleMutation(() =>
       api.post(`/projects/${project.id}/roster`, {
         participantId,
+        confirmedParticipant,
+        expectedParticipantRevision,
         expectedRevision: project.revision,
       }),
     );
@@ -191,6 +201,10 @@ export function ProjectRosterPage({
         <RosterTable
           rows={rows}
           canMutate={canMutate}
+          canMutateRow={(row) =>
+            auth?.session.user.role === "OPERATOR" ||
+            activeOrganizationIds.has(row.organizationId)
+          }
           onStatusChange={changeStatus}
           onEdit={edit}
         />

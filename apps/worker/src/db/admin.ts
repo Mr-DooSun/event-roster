@@ -6,6 +6,10 @@ export interface OrganizationRecord {
   isActive: boolean;
 }
 
+export interface OrganizationState extends OrganizationRecord {
+  canonicalName: string;
+}
+
 export interface UserAdminRecord {
   id: string;
   loginId: string;
@@ -23,13 +27,25 @@ export interface UserAdminState extends UserAdminRecord {
 export async function findOrganization(
   db: D1Database,
   id: string,
-): Promise<OrganizationRecord | null> {
+): Promise<OrganizationState | null> {
   const row = await db
-    .prepare("SELECT id, name, is_active FROM organizations WHERE id = ?")
+    .prepare(
+      "SELECT id, name, canonical_name, is_active FROM organizations WHERE id = ?",
+    )
     .bind(id)
-    .first<{ id: string; name: string; is_active: number }>();
+    .first<{
+      id: string;
+      name: string;
+      canonical_name: string;
+      is_active: number;
+    }>();
   return row
-    ? { id: row.id, name: row.name, isActive: row.is_active === 1 }
+    ? {
+        id: row.id,
+        name: row.name,
+        canonicalName: row.canonical_name,
+        isActive: row.is_active === 1,
+      }
     : null;
 }
 

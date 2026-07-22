@@ -75,12 +75,26 @@ export async function addRoster(
   participantId: string,
   expectedRevision = fixture.project.revision,
 ) {
+  const participant = await env.DB.prepare(
+    "SELECT name, organization_id, revision FROM participants WHERE id = ?",
+  )
+    .bind(participantId)
+    .first<{ name: string; organization_id: string; revision: number }>();
+  if (!participant) throw new Error(`participant not found: ${participantId}`);
   return authedRequest(
     fixture.operator,
     `/api/v1/projects/${fixture.project.id}/roster`,
     {
       method: "POST",
-      body: JSON.stringify({ participantId, expectedRevision }),
+      body: JSON.stringify({
+        participantId,
+        confirmedParticipant: {
+          name: participant.name,
+          organizationId: participant.organization_id,
+        },
+        expectedParticipantRevision: participant.revision,
+        expectedRevision,
+      }),
     },
   );
 }

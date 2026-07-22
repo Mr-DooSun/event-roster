@@ -25,6 +25,8 @@ interface RenameConfirmation {
   name: string;
 }
 
+const EXISTING_ORGANIZATIONS_ID = "existing-organizations";
+
 export function ProjectOrganizationsPanel({
   projectId,
   memberships,
@@ -42,20 +44,35 @@ export function ProjectOrganizationsPanel({
       (organization) => organization.isActive && !linked.has(organization.id),
     );
   }, [allOrganizations, memberships]);
+  const [existingQuery, setExistingQuery] = useState("");
   const [existingId, setExistingId] = useState("");
+  const [comboboxOpen, setComboboxOpen] = useState(false);
+  const [activeOptionIndex, setActiveOptionIndex] = useState(-1);
   const [newName, setNewName] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [renameConfirmation, setRenameConfirmation] =
     useState<RenameConfirmation | null>(null);
+  const [globalDeactivation, setGlobalDeactivation] =
+    useState<ProjectOrganization | null>(null);
+  const matchingOrganizations = useMemo(() => {
+    const query = existingQuery.trim().toLocaleLowerCase();
+    return availableOrganizations.filter(
+      (organization) =>
+        !query || organization.name.toLocaleLowerCase().includes(query),
+    );
+  }, [availableOrganizations, existingQuery]);
 
   useEffect(() => {
     if (availableOrganizations.some((item) => item.id === existingId)) return;
-    setExistingId(availableOrganizations[0]?.id ?? "");
+    setExistingId("");
   }, [availableOrganizations, existingId]);
 
   useEffect(() => {
-    if (!canAdminister) setRenameConfirmation(null);
+    if (!canAdminister) {
+      setRenameConfirmation(null);
+      setGlobalDeactivation(null);
+    }
   }, [canAdminister]);
 
   async function mutate(operation: () => Promise<unknown>) {
@@ -73,6 +90,7 @@ export function ProjectOrganizationsPanel({
         onProjectClosed
       ) {
         setRenameConfirmation(null);
+        setGlobalDeactivation(null);
         await onProjectClosed();
         return false;
       }
@@ -91,6 +109,17 @@ export function ProjectOrganizationsPanel({
         organizationId: existingId,
       }),
     );
+  }
+
+  function selectExistingOrganization(organization: Organization) {
+    setExistingId(organization.id);
+    setExistingQuery(organization.name);
+    setComboboxOpen(false);
+    setActiveOptionIndex(-1);
+  }
+
+  function existingOrganizationOptionId(index: number) {
+    return `${projectId}-existing-organization-${index}`;
   }
 
   async function addNew(event: FormEvent) {
@@ -127,6 +156,16 @@ export function ProjectOrganizationsPanel({
     if (completed) setRenameConfirmation(null);
   }
 
+  async function confirmGlobalDeactivation() {
+    if (!globalDeactivation) return;
+    const completed = await mutate(() =>
+      api.patch(`/organizations/${globalDeactivation.organizationId}`, {
+        isActive: false,
+      }),
+    );
+    if (completed) setGlobalDeactivation(null);
+  }
+
   return (
     <div className="er-page-stack">
       {message ? <StatusMessage tone="error">{message}</StatusMessage> : null}
@@ -136,19 +175,100 @@ export function ProjectOrganizationsPanel({
             <h2>기존 조직 연결</h2>
             <form className="er-inline-form" onSubmit={addExisting}>
               <label className="er-field">
-                <span>기존 조직</span>
-                <select
-                  value={existingId}
-                  onChange={(event) => setExistingId(event.currentTarget.value)}
-                >
-                  <option value="">선택</option>
-                  {availableOrganizations.map((organization) => (
-                    <option key={organization.id} value={organization.id}>
-                      {organization.name}
-                    </option>
-                  ))}
-                </select>
+                <span>기존 조직 검색</span>
+                <input
+                  role="combobox"
+                  aria-autocomplete="list"
+                  aria-expanded={
+                    comboboxOpen && matchingOrganizations.length > 0
+                  }
+                  aria-controls={EXISTING_ORGANIZATIONS_ID}
+                  aria-activedescendant={
+                    comboboxOpen && matchingOrganizations[activeOptionIndex]
+                      ? existingOrganizationOptionId(activeOptionIndex)
+                      : undefined
+                  }
+                  value={existingQuery}
+                  onFocus={() => {
+                    setComboboxOpen(true);
+                    setActiveOptionIndex(-1);
+                  }}
+                  onChange={(event) => {
+                    const query = event.currentTarget.value;
+                    setExistingQuery(query);
+                    setExistingId("");
+                    setComboboxOpen(true);
+                    setActiveOptionIndex(-1);
+                    const normalized = query.trim().toLocaleLowerCase();
+                    if (
+                      normalized &&
+                      !availableOrganizations.some((organization) =>
+                        organization.name
+                          .toLocaleLowerCase()
+                          .includes(normalized),
+                      )
+                    ) {
+                      setNewName(query);
+                    }
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === "Escape") {
+                      event.preventDefault();
+                      setComboboxOpen(false);
+                      setActiveOptionIndex(-1);
+                      return;
+                    }
+                    if (
+                      (event.key === "ArrowDown" || event.key === "ArrowUp") &&
+                      matchingOrganizations.length > 0
+                    ) {
+                      event.preventDefault();
+                      setComboboxOpen(true);
+                      setActiveOptionIndex((current) => {
+                        if (event.key === "ArrowDown") {
+                          return current >= matchingOrganizations.length - 1
+                            ? 0
+                            : current + 1;
+                        }
+                        return current <= 0
+                          ? matchingOrganizations.length - 1
+                          : current - 1;
+                      });
+                      return;
+                    }
+                    if (event.key === "Enter" && matchingOrganizations[0]) {
+                      event.preventDefault();
+                      selectExistingOrganization(
+                        matchingOrganizations[activeOptionIndex] ??
+                          matchingOrganizations[0],
+                      );
+                    }
+                  }}
+                />
               </label>
+              {comboboxOpen ? (
+                matchingOrganizations.length > 0 ? (
+                  <div id={EXISTING_ORGANIZATIONS_ID} role="listbox">
+                    {matchingOrganizations.map((organization, index) => (
+                      <button
+                        key={organization.id}
+                        id={existingOrganizationOptionId(index)}
+                        type="button"
+                        role="option"
+                        aria-selected={activeOptionIndex === index}
+                        className="er-button er-button--secondary"
+                        onClick={() => selectExistingOrganization(organization)}
+                      >
+                        {organization.name}
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="er-muted">
+                    검색 결과가 없습니다. 아래에서 새 조직을 추가하세요.
+                  </p>
+                )
+              ) : null}
               <Button
                 type="submit"
                 variant="primary"
@@ -191,6 +311,7 @@ export function ProjectOrganizationsPanel({
                 canAdminister={canAdminister}
                 busy={busy}
                 onRename={(name) => setRenameConfirmation({ membership, name })}
+                onGlobalDeactivate={() => setGlobalDeactivation(membership)}
                 onSetActive={(active) => setActive(membership, active)}
               />
             ))}
@@ -216,6 +337,26 @@ export function ProjectOrganizationsPanel({
           </Button>
         </Dialog>
       ) : null}
+      {canAdminister && globalDeactivation ? (
+        <Dialog
+          title="조직 전체 사용 중지"
+          onClose={() => setGlobalDeactivation(null)}
+        >
+          <p>
+            현재 연결된 활성 프로젝트 {globalDeactivation.activeProjectCount}
+            개를 포함해, 이 조직은 전체 프로젝트에서 신규 연결과 신규 참가자
+            선택이 차단됩니다. 계속하시겠습니까?
+          </p>
+          <Button
+            type="button"
+            variant="danger"
+            disabled={busy}
+            onClick={() => void confirmGlobalDeactivation()}
+          >
+            전체 사용 중지 확인
+          </Button>
+        </Dialog>
+      ) : null}
     </div>
   );
 }
@@ -225,12 +366,14 @@ function OrganizationMembershipRow({
   canAdminister,
   busy,
   onRename,
+  onGlobalDeactivate,
   onSetActive,
 }: {
   membership: ProjectOrganization;
   canAdminister: boolean;
   busy: boolean;
   onRename: (name: string) => void;
+  onGlobalDeactivate: () => void;
   onSetActive: (active: boolean) => Promise<void>;
 }) {
   const [name, setName] = useState(membership.name);
@@ -245,6 +388,7 @@ function OrganizationMembershipRow({
             className="er-control er-control--inline"
             aria-label={`${membership.name} 조직 이름`}
             value={name}
+            disabled={!membership.masterIsActive}
             onChange={(event) => setName(event.currentTarget.value)}
           />
         ) : (
@@ -261,11 +405,26 @@ function OrganizationMembershipRow({
         <div className="er-action-row">
           <Button
             type="button"
-            disabled={busy || !name.trim() || name.trim() === membership.name}
+            disabled={
+              busy ||
+              !membership.masterIsActive ||
+              !name.trim() ||
+              name.trim() === membership.name
+            }
             onClick={() => onRename(name.trim())}
           >
             이름 저장
           </Button>
+          {membership.masterIsActive ? (
+            <Button
+              type="button"
+              variant="danger"
+              disabled={busy}
+              onClick={onGlobalDeactivate}
+            >
+              전체 사용 중지
+            </Button>
+          ) : null}
           <Button
             type="button"
             variant={membership.isActive ? "danger" : "secondary"}

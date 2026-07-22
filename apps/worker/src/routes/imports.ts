@@ -22,7 +22,9 @@ const RowsSchema = z.array(NormalizedImportRowSchema).min(1).max(IMPORT_LIMIT);
 export const importRoutes = new Hono<{ Bindings: Env }>();
 
 importRoutes.post("/projects/:projectId/imports/validate", async (c) => {
+  assertExactOrigin(c.req.raw, c.env.APP_ORIGIN);
   const actor = await requireActor(c.req.raw, c.env);
+  await requireCsrf(c.req.raw, actor);
   requireAdministrativeOperator(actor);
   const rows = RowsSchema.parse(await c.req.json());
   return c.json(await validateImport(c.env, c.req.param("projectId"), rows));

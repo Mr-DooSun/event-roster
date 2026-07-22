@@ -22,6 +22,11 @@ interface ValidationResult {
   rows: ValidatedImportRow[];
 }
 
+interface ImportRequestOwner {
+  projectId: string;
+  generation: number;
+}
+
 export function ImportWizard({ projectId }: { projectId: string }) {
   const { api } = useAuth();
   const [parsed, setParsed] = useState<ParsedWorkbook | null>(null);
@@ -33,6 +38,7 @@ export function ImportWizard({ projectId }: { projectId: string }) {
   const [validation, setValidation] = useState<ValidationResult | null>(null);
   const [resolutionDirty, setResolutionDirty] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [projectClosed, setProjectClosed] = useState(false);
   const [activeOrganizations, setActiveOrganizations] = useState<
     ProjectOrganization[]
   >([]);
@@ -41,7 +47,10 @@ export function ImportWizard({ projectId }: { projectId: string }) {
   );
   const fileInput = useRef<HTMLInputElement>(null);
   const workflowGeneration = useRef(0);
+  const currentProjectId = useRef(projectId);
+  currentProjectId.current = projectId;
   const requestInFlight = useRef(false);
+  const requestOwner = useRef<ImportRequestOwner | null>(null);
   const [busy, setBusy] = useState(false);
   const headers = useMemo(
     () => (parsed && sheetName ? getSheetHeaders(parsed, sheetName) : []),
@@ -50,9 +59,27 @@ export function ImportWizard({ projectId }: { projectId: string }) {
   useEffect(
     () => () => {
       workflowGeneration.current += 1;
+      requestOwner.current = null;
+      requestInFlight.current = false;
     },
     [],
   );
+  useEffect(() => {
+    currentProjectId.current = projectId;
+    workflowGeneration.current += 1;
+    requestOwner.current = null;
+    requestInFlight.current = false;
+    setBusy(false);
+    setParsed(null);
+    setSheetName("");
+    setColumns({ name: "", organization: "" });
+    setNormalizedRows([]);
+    setValidation(null);
+    setResolutionDirty(false);
+    setMessage(null);
+    setProjectClosed(false);
+    if (fileInput.current) fileInput.current.value = "";
+  }, [projectId]);
   useEffect(() => {
     let current = true;
     api
@@ -89,9 +116,14 @@ export function ImportWizard({ projectId }: { projectId: string }) {
     clearWorkbook();
     if (!file) return;
     const generation = workflowGeneration.current;
+    const requestedProjectId = projectId;
     try {
       const next = await readWorkbook(file);
-      if (generation !== workflowGeneration.current) return;
+      if (
+        generation !== workflowGeneration.current ||
+        requestedProjectId !== currentProjectId.current
+      )
+        return;
       const firstSheet = next.sheetNames[0] ?? "";
       const nextHeaders = firstSheet ? getSheetHeaders(next, firstSheet) : [];
       setParsed(next);
@@ -103,6 +135,11 @@ export function ImportWizard({ projectId }: { projectId: string }) {
           : (nextHeaders[1] ?? nextHeaders[0] ?? ""),
       });
     } catch {
+      if (
+        generation !== workflowGeneration.current ||
+        requestedProjectId !== currentProjectId.current
+      )
+        return;
       setMessage("엑셀 파일을 읽지 못했습니다.");
     }
   }
@@ -135,6 +172,8 @@ export function ImportWizard({ projectId }: { projectId: string }) {
       return;
     }
     const generation = workflowGeneration.current;
+    const owner = { projectId, generation };
+    requestOwner.current = owner;
     requestInFlight.current = true;
     setBusy(true);
     try {
@@ -147,13 +186,19 @@ export function ImportWizard({ projectId }: { projectId: string }) {
       setValidation(result);
       setResolutionDirty(false);
       setMessage("검증 완료");
-    } catch {
+    } catch (error) {
       if (generation === workflowGeneration.current) {
+        if (
+          error instanceof ApiError &&
+          error.problem?.code === "PROJECT_CLOSED"
+        ) {
+          discardClosedProject();
+          return;
+        }
         setMessage("명단을 검증하지 못했습니다.");
       }
     } finally {
-      requestInFlight.current = false;
-      setBusy(false);
+      releaseRequest(owner);
     }
   }
 
@@ -175,6 +220,8 @@ export function ImportWizard({ projectId }: { projectId: string }) {
   async function commit() {
     if (!validation || resolutionDirty || requestInFlight.current) return;
     const generation = workflowGeneration.current;
+    const owner = { projectId, generation };
+    requestOwner.current = owner;
     requestInFlight.current = true;
     setBusy(true);
     try {
@@ -196,17 +243,31 @@ export function ImportWizard({ projectId }: { projectId: string }) {
       ) {
         setValidation(null);
         setMessage("다른 변경이 먼저 반영되었습니다. 다시 검증해 주세요.");
+      } else if (
+        error instanceof ApiError &&
+        error.problem?.code === "PROJECT_CLOSED"
+      ) {
+        discardClosedProject();
       } else {
         setMessage("명단을 확정하지 못했습니다.");
       }
     } finally {
-      requestInFlight.current = false;
-      setBusy(false);
+      releaseRequest(owner);
     }
+  }
+
+  function releaseRequest(owner: ImportRequestOwner) {
+    if (requestOwner.current !== owner) return;
+    requestOwner.current = null;
+    requestInFlight.current = false;
+    setBusy(false);
   }
 
   function clearWorkbook() {
     workflowGeneration.current += 1;
+    requestOwner.current = null;
+    requestInFlight.current = false;
+    setBusy(false);
     setParsed(null);
     setSheetName("");
     setColumns({ name: "", organization: "" });
@@ -214,6 +275,25 @@ export function ImportWizard({ projectId }: { projectId: string }) {
     setValidation(null);
     setResolutionDirty(false);
     setMessage(null);
+    setProjectClosed(false);
+    if (fileInput.current) fileInput.current.value = "";
+  }
+
+  function discardClosedProject() {
+    workflowGeneration.current += 1;
+    requestOwner.current = null;
+    requestInFlight.current = false;
+    setBusy(false);
+    setParsed(null);
+    setSheetName("");
+    setColumns({ name: "", organization: "" });
+    setNormalizedRows([]);
+    setValidation(null);
+    setResolutionDirty(false);
+    setProjectClosed(true);
+    setMessage(
+      "프로젝트가 종료되어 가져오기를 진행할 수 없습니다. 최신 프로젝트 정보를 확인해 주세요.",
+    );
     if (fileInput.current) fileInput.current.value = "";
   }
 
@@ -244,7 +324,19 @@ export function ImportWizard({ projectId }: { projectId: string }) {
           </a>
         )}
       </header>
-      {message ? <StatusMessage tone="info">{message}</StatusMessage> : null}
+      {message ? (
+        <StatusMessage tone={projectClosed ? "error" : "info"}>
+          {message}
+        </StatusMessage>
+      ) : null}
+      {projectClosed ? (
+        <a
+          className="er-button er-button--primary"
+          href={`/projects/${projectId}`}
+        >
+          최신 프로젝트 보기
+        </a>
+      ) : null}
       <Card className="er-panel">
         <h2>가져오기 대상 조직</h2>
         {organizationError ? (

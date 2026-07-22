@@ -68,6 +68,13 @@ export async function updateOrganization(
   if (!current) throw new DomainError("NOT_FOUND");
   const name = input.name ?? current.name;
   const isActive = input.isActive ?? current.isActive;
+  const now = new Date().toISOString();
+  const action =
+    input.isActive === false && current.isActive
+      ? "ORGANIZATION_DEACTIVATED"
+      : input.isActive === true && !current.isActive
+        ? "ORGANIZATION_REACTIVATED"
+        : "ORGANIZATION_UPDATED";
   const guardId = crypto.randomUUID();
   try {
     await runGuardedAtomic(env.DB, {
@@ -76,20 +83,37 @@ export async function updateOrganization(
         env.DB,
         guardId,
         actor,
-        "EXISTS (SELECT 1 FROM organizations WHERE id = ?)",
-        [id],
+        `EXISTS (
+           SELECT 1 FROM organizations
+           WHERE id = ? AND name = ? AND canonical_name = ? AND is_active = ?
+         )`,
+        [id, current.name, current.canonicalName, current.isActive ? 1 : 0],
       ),
       statements: [
         env.DB.prepare(
-          `UPDATE organizations SET name = ?, canonical_name = ?, is_active = ?, updated_at = ?
-           WHERE id = ?`,
+          `UPDATE organizations
+           SET name = COALESCE(?, name),
+               canonical_name = COALESCE(?, canonical_name),
+               is_active = COALESCE(?, is_active),
+               updated_at = ?
+           WHERE id = ? AND name = ? AND canonical_name = ? AND is_active = ?`,
         ).bind(
-          name,
-          canonicalizeOrganizationName(name),
-          isActive ? 1 : 0,
-          new Date().toISOString(),
+          input.name ?? null,
+          input.name === undefined
+            ? null
+            : canonicalizeOrganizationName(input.name),
+          input.isActive === undefined ? null : input.isActive ? 1 : 0,
+          now,
           id,
+          current.name,
+          current.canonicalName,
+          current.isActive ? 1 : 0,
         ),
+        env.DB.prepare(
+          `INSERT INTO audit_logs
+           (id, actor_user_id, action, entity_type, entity_id, occurred_at, details_json)
+           VALUES (?, ?, ?, 'ORGANIZATION', ?, ?, '{}')`,
+        ).bind(crypto.randomUUID(), actor.session.user.id, action, id, now),
       ],
       failureCode: "CONFLICT",
     });
@@ -105,7 +129,13 @@ export async function updateOrganization(
         .bind(id)
         .first<{ count: number }>()
     )?.count ?? 0;
-  return { id, name, isActive, activeProjectCount };
+  return {
+    id,
+    name,
+    isActive,
+    masterIsActive: isActive,
+    activeProjectCount,
+  };
 }
 
 export async function getUsers(env: Env) {

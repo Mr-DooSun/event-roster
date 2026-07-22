@@ -43,11 +43,13 @@ export async function addRosterEntry(
   projectId: string,
   participantId: string,
   expectedRevision: number,
+  confirmedParticipant: { name: string; organizationId: string },
+  expectedParticipantRevision: number,
   now = new Date(),
 ) {
   const project = await requireMutableProject(env, projectId, now);
   const participant = await env.DB.prepare(
-    "SELECT id, participant_id, name, organization_id FROM participants WHERE id = ?",
+    "SELECT id, participant_id, name, organization_id, revision FROM participants WHERE id = ?",
   )
     .bind(participantId)
     .first<{
@@ -55,6 +57,7 @@ export async function addRosterEntry(
       participant_id: string;
       name: string;
       organization_id: string;
+      revision: number;
     }>();
   if (!participant) throw new DomainError("NOT_FOUND");
   const existing = await findRosterByParticipant(
@@ -64,8 +67,9 @@ export async function addRosterEntry(
   );
   if (existing?.status === "ACTIVE") throw new DomainError("CONFLICT");
   const organizationId =
-    existing?.organizationId ?? participant.organization_id;
+    existing?.organizationId ?? confirmedParticipant.organizationId;
   assertActorScope(actor, organizationId, project.status);
+  await assertActiveManagerMembership(env, actor, projectId, organizationId);
   if (!existing) {
     const membership = await findProjectOrganization(
       env.DB,
@@ -90,13 +94,15 @@ export async function addRosterEntry(
     ? `EXISTS (
          SELECT 1 FROM project_roster_entries
          WHERE id = ? AND project_id = ? AND status = 'CANCELLED' AND revision = ?
+       ) AND EXISTS (
+         SELECT 1 FROM participants WHERE id = ? AND revision = ?
        )`
     : `NOT EXISTS (
          SELECT 1 FROM project_roster_entries
          WHERE project_id = ? AND participant_id = ?
        ) AND EXISTS (
          SELECT 1 FROM participants
-         WHERE id = ? AND organization_id = ?
+         WHERE id = ? AND revision = ?
        ) AND EXISTS (
          SELECT 1 FROM project_organizations po
          JOIN organizations o ON o.id = po.organization_id
@@ -104,14 +110,20 @@ export async function addRosterEntry(
            AND po.is_active = 1 AND o.is_active = 1
        )`;
   const operationBindings = existing
-    ? [existing.id, projectId, existing.revision]
+    ? [
+        existing.id,
+        projectId,
+        existing.revision,
+        participantId,
+        expectedParticipantRevision,
+      ]
     : [
         projectId,
         participantId,
         participantId,
-        participant.organization_id,
+        expectedParticipantRevision,
         projectId,
-        participant.organization_id,
+        confirmedParticipant.organizationId,
       ];
   const statements: D1PreparedStatement[] = existing
     ? [
@@ -127,13 +139,29 @@ export async function addRosterEntry(
       ]
     : [
         env.DB.prepare(
+          `UPDATE participants
+           SET name = ?, organization_id = ?,
+               revision = revision + CASE
+                 WHEN name <> ? OR organization_id <> ? THEN 1 ELSE 0 END,
+               updated_at = ?
+           WHERE id = ? AND revision = ?`,
+        ).bind(
+          confirmedParticipant.name,
+          confirmedParticipant.organizationId,
+          confirmedParticipant.name,
+          confirmedParticipant.organizationId,
+          timestamp,
+          participantId,
+          expectedParticipantRevision,
+        ),
+        env.DB.prepare(
           `INSERT INTO project_roster_entries
            (id, project_id, participant_id, organization_id,
             participant_name_snapshot, organization_name_snapshot, source, status,
             was_expected_at_start, revision, created_by, updated_by, created_at, updated_at)
-           SELECT ?, ?, p.id, p.organization_id, p.name, o.name, ?, 'ACTIVE', 0, 0,
+           SELECT ?, ?, p.id, ?, ?, o.name, ?, 'ACTIVE', 0, 0,
                   ?, ?, ?, ?
-           FROM participants p JOIN organizations o ON o.id = p.organization_id
+           FROM participants p JOIN organizations o ON o.id = ?
            WHERE p.id = ?
            RETURNING id, project_id, participant_id, organization_id,
              participant_name_snapshot, organization_name_snapshot, source, status,
@@ -141,16 +169,33 @@ export async function addRosterEntry(
         ).bind(
           id,
           projectId,
+          confirmedParticipant.organizationId,
+          confirmedParticipant.name,
           source,
           actor.session.user.id,
           actor.session.user.id,
           timestamp,
           timestamp,
+          confirmedParticipant.organizationId,
           participantId,
         ),
       ];
   statements.push(
     incrementProject(env.DB, projectId, timestamp),
+    ...(!existing &&
+    (participant.name !== confirmedParticipant.name ||
+      participant.organization_id !== confirmedParticipant.organizationId)
+      ? [
+          participantAudit(
+            env.DB,
+            actor,
+            participantId,
+            projectId,
+            confirmedParticipant.organizationId,
+            timestamp,
+          ),
+        ]
+      : []),
     rosterAudit(
       env.DB,
       actor,
@@ -186,7 +231,7 @@ export async function addRosterEntry(
   }
   return {
     ...mapReturnedRoster(
-      results[1]?.results[0],
+      results[existing ? 1 : 2]?.results[0],
       participant.participant_id,
       timestamp,
     ),
@@ -210,6 +255,12 @@ export async function updateRosterEntry(
   const entry = await findRosterById(env.DB, projectId, entryId);
   if (!entry) throw new DomainError("NOT_FOUND");
   assertActorScope(actor, entry.organizationId, project.status);
+  await assertActiveManagerMembership(
+    env,
+    actor,
+    projectId,
+    entry.organizationId,
+  );
   if (entry.status === input.status) throw new DomainError("CONFLICT");
   const timestamp = now.toISOString();
   const nextSource: RosterSource =
@@ -494,6 +545,14 @@ function rosterGuard(
            AND (u.role = 'OPERATOR' OR (? = 'PRE_REGISTRATION' AND EXISTS (
              SELECT 1 FROM user_organizations uo
              WHERE uo.user_id = u.id AND uo.organization_id = ?
+           ) AND EXISTS (
+             SELECT 1 FROM project_organizations scoped_membership
+             JOIN organizations scoped_master
+               ON scoped_master.id = scoped_membership.organization_id
+             WHERE scoped_membership.project_id = ?
+               AND scoped_membership.organization_id = ?
+               AND scoped_membership.is_active = 1
+               AND scoped_master.is_active = 1
            )))
        ) AND EXISTS (
          SELECT 1 FROM projects
@@ -510,11 +569,30 @@ function rosterGuard(
       projectStatus,
       organizationId,
       projectId,
+      organizationId,
+      projectId,
       projectStatus,
       expectedRevision,
       today,
       ...operationBindings,
     );
+}
+
+async function assertActiveManagerMembership(
+  env: Env,
+  actor: Actor,
+  projectId: string,
+  organizationId: string,
+) {
+  if (actor.session.user.role !== "ORGANIZATION_MANAGER") return;
+  const membership = await findProjectOrganization(
+    env.DB,
+    projectId,
+    organizationId,
+  );
+  if (!membership?.isActive || !membership.masterIsActive) {
+    throw new DomainError("FORBIDDEN");
+  }
 }
 
 function incrementProject(
@@ -549,6 +627,29 @@ function rosterAudit(
       actor.session.user.id,
       action,
       entryId,
+      timestamp,
+      JSON.stringify({ projectId, organizationId }),
+    );
+}
+
+function participantAudit(
+  db: D1Database,
+  actor: Actor,
+  participantId: string,
+  projectId: string,
+  organizationId: string,
+  timestamp: string,
+) {
+  return db
+    .prepare(
+      `INSERT INTO audit_logs
+       (id, actor_user_id, action, entity_type, entity_id, occurred_at, details_json)
+       VALUES (?, ?, 'PARTICIPANT_UPDATED', 'PARTICIPANT', ?, ?, ?)`,
+    )
+    .bind(
+      crypto.randomUUID(),
+      actor.session.user.id,
+      participantId,
       timestamp,
       JSON.stringify({ projectId, organizationId }),
     );

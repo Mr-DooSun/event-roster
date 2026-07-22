@@ -12,6 +12,13 @@ export interface ParticipantView {
   revision: number;
 }
 
+export interface ExistingParticipantConfirmation {
+  participantId: string;
+  name: string;
+  organizationId: string;
+  expectedParticipantRevision: number;
+}
+
 export function ParticipantDialog({
   participants,
   organizations,
@@ -22,7 +29,7 @@ export function ParticipantDialog({
 }: {
   participants: ParticipantView[];
   organizations: OrganizationView[];
-  onAdd: (participantId: string) => Promise<void>;
+  onAdd: (input: ExistingParticipantConfirmation) => Promise<void>;
   onCreateAndAdd: (input: {
     name: string;
     organizationId: string;
@@ -33,8 +40,24 @@ export function ParticipantDialog({
   const [participantId, setParticipantId] = useState(
     initialParticipantId ?? participants[0]?.id ?? "",
   );
+  const initialParticipant = participants.find(
+    (participant) =>
+      participant.id === (initialParticipantId ?? participants[0]?.id),
+  );
   const [mode, setMode] = useState<"EXISTING" | "NEW">("EXISTING");
   const [name, setName] = useState("");
+  const [confirmedName, setConfirmedName] = useState(
+    initialParticipant?.name ?? "",
+  );
+  const [confirmedOrganizationId, setConfirmedOrganizationId] = useState(
+    organizations.some(
+      (organization) =>
+        organization.isActive &&
+        organization.id === initialParticipant?.organizationId,
+    )
+      ? (initialParticipant?.organizationId ?? "")
+      : (organizations.find((organization) => organization.isActive)?.id ?? ""),
+  );
   const [organizationId, setOrganizationId] = useState(
     organizations.find((organization) => organization.isActive)?.id ?? "",
   );
@@ -44,6 +67,25 @@ export function ParticipantDialog({
       setMode("EXISTING");
     }
   }, [initialParticipantId]);
+
+  useEffect(() => {
+    const participant = participants.find((item) => item.id === participantId);
+    setConfirmedName(participant?.name ?? "");
+    setConfirmedOrganizationId(
+      organizations.some(
+        (organization) =>
+          organization.isActive &&
+          organization.id === participant?.organizationId,
+      )
+        ? (participant?.organizationId ?? "")
+        : (organizations.find((organization) => organization.isActive)?.id ??
+            ""),
+    );
+  }, [organizations, participantId, participants]);
+
+  const selectedParticipant = participants.find(
+    (participant) => participant.id === participantId,
+  );
   return (
     <Dialog title="참가자 추가" onClose={onClose}>
       <div className="er-action-row">
@@ -77,11 +119,46 @@ export function ParticipantDialog({
               ))}
             </select>
           </label>
+          <TextInput
+            label="확정 이름"
+            required
+            value={confirmedName}
+            onChange={(event) => setConfirmedName(event.currentTarget.value)}
+          />
+          <label className="er-field">
+            <span>확정 소속 조직</span>
+            <select
+              value={confirmedOrganizationId}
+              onChange={(event) =>
+                setConfirmedOrganizationId(event.currentTarget.value)
+              }
+            >
+              {organizations
+                .filter((organization) => organization.isActive)
+                .map((organization) => (
+                  <option key={organization.id} value={organization.id}>
+                    {organization.name}
+                  </option>
+                ))}
+            </select>
+          </label>
           <Button
             type="button"
             variant="primary"
-            disabled={!participantId}
-            onClick={() => void onAdd(participantId)}
+            disabled={
+              !selectedParticipant ||
+              !confirmedName.trim() ||
+              !confirmedOrganizationId
+            }
+            onClick={() => {
+              if (!selectedParticipant) return;
+              void onAdd({
+                participantId: selectedParticipant.id,
+                name: confirmedName.trim(),
+                organizationId: confirmedOrganizationId,
+                expectedParticipantRevision: selectedParticipant.revision,
+              });
+            }}
           >
             명단에 추가
           </Button>

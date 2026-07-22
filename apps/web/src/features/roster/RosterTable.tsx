@@ -20,11 +20,13 @@ export interface RosterView {
 export function RosterTable({
   rows,
   canMutate,
+  canMutateRow = () => true,
   onStatusChange,
   onEdit,
 }: {
   rows: RosterView[];
   canMutate: boolean;
+  canMutateRow?: (row: RosterView) => boolean;
   onStatusChange: (
     row: RosterView,
     status: "ACTIVE" | "CANCELLED",
@@ -117,7 +119,7 @@ export function RosterTable({
                 </td>
                 <td>{row.status === "ACTIVE" ? "참석" : "취소"}</td>
                 <td>
-                  {canMutate ? (
+                  {canMutate && canMutateRow(row) ? (
                     <div className="er-action-row">
                       <Button type="button" onClick={() => onEdit(row)}>
                         정보 수정

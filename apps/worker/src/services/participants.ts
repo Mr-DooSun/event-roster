@@ -196,6 +196,12 @@ export async function updateProjectParticipant(
   ]);
   if (!current || !entry) throw new DomainError("NOT_FOUND");
   assertActorScope(actor, entry.organizationId, project.status);
+  await assertActiveManagerMembership(
+    env,
+    actor,
+    projectId,
+    entry.organizationId,
+  );
   if (
     actor.session.user.role === "ORGANIZATION_MANAGER" &&
     !actor.session.user.organizationIds.includes(current.organizationId)
@@ -259,15 +265,29 @@ export async function updateProjectParticipant(
                  SELECT 1 FROM participants scoped_participant
                  JOIN user_organizations master_scope
                    ON master_scope.organization_id = scoped_participant.organization_id
+                 JOIN project_organizations master_membership
+                   ON master_membership.project_id = ?
+                  AND master_membership.organization_id = scoped_participant.organization_id
+                 JOIN organizations master_organization
+                   ON master_organization.id = master_membership.organization_id
                  WHERE scoped_participant.id = ?
                    AND master_scope.user_id = scoped_user.id
+                   AND master_membership.is_active = 1
+                   AND master_organization.is_active = 1
                ) AND EXISTS (
                  SELECT 1 FROM project_roster_entries scoped_roster
                  JOIN user_organizations roster_scope
                    ON roster_scope.organization_id = scoped_roster.organization_id
+                 JOIN project_organizations roster_membership
+                   ON roster_membership.project_id = scoped_roster.project_id
+                  AND roster_membership.organization_id = scoped_roster.organization_id
+                 JOIN organizations roster_organization
+                   ON roster_organization.id = roster_membership.organization_id
                  WHERE scoped_roster.project_id = ?
                    AND scoped_roster.participant_id = ?
                    AND roster_scope.user_id = scoped_user.id
+                   AND roster_membership.is_active = 1
+                   AND roster_organization.is_active = 1
                )
              )
            )
@@ -278,6 +298,7 @@ export async function updateProjectParticipant(
           projectId,
           participantId,
           actor.session.user.id,
+          projectId,
           participantId,
           projectId,
           participantId,
@@ -399,6 +420,14 @@ function projectParticipantGuard(
            AND (u.role = 'OPERATOR' OR (? = 'PRE_REGISTRATION' AND EXISTS (
              SELECT 1 FROM user_organizations uo
              WHERE uo.user_id = u.id AND uo.organization_id = ?
+           ) AND EXISTS (
+             SELECT 1 FROM project_organizations scoped_membership
+             JOIN organizations scoped_master
+               ON scoped_master.id = scoped_membership.organization_id
+             WHERE scoped_membership.project_id = ?
+               AND scoped_membership.organization_id = ?
+               AND scoped_membership.is_active = 1
+               AND scoped_master.is_active = 1
            )))
        ) AND EXISTS (
          SELECT 1 FROM projects
@@ -415,11 +444,30 @@ function projectParticipantGuard(
       projectStatus,
       organizationId,
       projectId,
+      organizationId,
+      projectId,
       projectStatus,
       expectedProjectRevision,
       today,
       ...operationBindings,
     );
+}
+
+async function assertActiveManagerMembership(
+  env: Env,
+  actor: Actor,
+  projectId: string,
+  organizationId: string,
+) {
+  if (actor.session.user.role !== "ORGANIZATION_MANAGER") return;
+  const membership = await findProjectOrganization(
+    env.DB,
+    projectId,
+    organizationId,
+  );
+  if (!membership?.isActive || !membership.masterIsActive) {
+    throw new DomainError("FORBIDDEN");
+  }
 }
 
 function incrementProject(

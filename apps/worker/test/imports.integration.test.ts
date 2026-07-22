@@ -4,7 +4,11 @@ import type { Env } from "../src/env";
 import { requireActor } from "../src/middleware/authentication";
 import { commitImport } from "../src/services/imports";
 import { authedRequest, seedManager } from "./support/admin";
-import { authenticatedHeaders, resetAuthState } from "./support/auth";
+import {
+  apiRequest,
+  authenticatedHeaders,
+  resetAuthState,
+} from "./support/auth";
 import { setupPreRegistration } from "./support/roster";
 
 beforeEach(resetAuthState);
@@ -46,6 +50,29 @@ it("commits 130 valid normalized rows atomically", async () => {
         .first<{ count: number }>()
     )?.count,
   ).toBe(1);
+});
+
+it("protects import validation with the same exact-origin and CSRF checks as commit", async () => {
+  const fixture = await setupPreRegistration();
+  const path = `/api/v1/projects/${fixture.project.id}/imports/validate`;
+  const body = JSON.stringify([
+    { rowNumber: 2, name: "검증", organizationName: "1팀" },
+  ]);
+  const wrongOrigin = await apiRequest(path, {
+    method: "POST",
+    headers: {
+      ...authenticatedHeaders(fixture.operator),
+      Origin: "https://evil.example",
+    },
+    body,
+  });
+  expect(wrongOrigin.status).toBe(403);
+  const noCsrf = await apiRequest(path, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${fixture.operator.body.accessToken}` },
+    body,
+  });
+  expect(noCsrf.status).toBe(403);
 });
 
 it("leaves no rows when one organization is unknown", async () => {
@@ -222,6 +249,8 @@ it("treats an active selected participant as a no-op and reactivates a selected 
       method: "POST",
       body: JSON.stringify({
         participantId: fixture.firstParticipant.id,
+        confirmedParticipant: { name: "첫 참가자", organizationId: "org-1" },
+        expectedParticipantRevision: 0,
         expectedRevision: fixture.project.revision,
       }),
     },
@@ -518,6 +547,8 @@ it("revalidates active no-op rows when organization state changes", async () => 
       method: "POST",
       body: JSON.stringify({
         participantId: fixture.firstParticipant.id,
+        confirmedParticipant: { name: "첫 참가자", organizationId: "org-1" },
+        expectedParticipantRevision: 0,
         expectedRevision: fixture.project.revision,
       }),
     },
@@ -561,6 +592,8 @@ it("rejects imports for an inactive project organization membership", async () =
       method: "POST",
       body: JSON.stringify({
         participantId: fixture.firstParticipant.id,
+        confirmedParticipant: { name: "첫 참가자", organizationId: "org-1" },
+        expectedParticipantRevision: 0,
         expectedRevision: fixture.project.revision,
       }),
     },

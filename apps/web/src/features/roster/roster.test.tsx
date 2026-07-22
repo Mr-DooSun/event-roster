@@ -4,6 +4,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { AuthProvider, useAuth } from "../auth/AuthProvider";
 import { LoginPage } from "../auth/LoginPage";
 import { ProjectDetailPage } from "../projects/ProjectDetailPage";
+import { ParticipantDialog } from "./ParticipantDialog";
 import { ParticipantEditDialog } from "./ParticipantEditDialog";
 
 afterEach(() => {
@@ -33,6 +34,35 @@ it("keeps the current inactive organization while editing an existing participan
 
   expect(screen.getByRole("option", { name: "이전 조직" })).toBeVisible();
   expect(screen.getByLabelText("소속 조직")).toHaveValue("org-inactive");
+});
+
+it("defaults reusable participants from an inactive master organization to an active project organization", () => {
+  const onAdd = vi.fn().mockResolvedValue(undefined);
+  render(
+    <ParticipantDialog
+      participants={[
+        {
+          id: "person-1",
+          participantId: "P-001",
+          name: "박민수",
+          organizationId: "org-old-inactive",
+          revision: 3,
+        },
+      ]}
+      organizations={[{ id: "org-active", name: "활성 조직", isActive: true }]}
+      onAdd={onAdd}
+      onCreateAndAdd={vi.fn().mockResolvedValue(undefined)}
+      onClose={vi.fn()}
+    />,
+  );
+
+  fireEvent.click(screen.getByRole("button", { name: "명단에 추가" }));
+  expect(onAdd).toHaveBeenCalledWith({
+    participantId: "person-1",
+    name: "박민수",
+    organizationId: "org-active",
+    expectedParticipantRevision: 3,
+  });
 });
 
 it("updates expected and actual totals after an in-progress cancellation", async () => {
@@ -276,6 +306,114 @@ it("creates and adds a participant with one atomic roster request", async () => 
         String(url).endsWith("/participants") && init?.method === "POST",
     ),
   ).toBe(false);
+});
+
+it("confirms reusable participant details in one existing-roster request", async () => {
+  const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.endsWith("/auth/login"))
+      return Promise.resolve(Response.json(auth()));
+    if (url.endsWith("/projects/project-1"))
+      return Promise.resolve(Response.json(project()));
+    if (url.endsWith("/summary"))
+      return Promise.resolve(Response.json(summary(100)));
+    if (url.endsWith("/roster") && (!init?.method || init.method === "GET")) {
+      return Promise.resolve(Response.json([entry("CANCELLED")]));
+    }
+    if (url.endsWith("/participants")) {
+      return Promise.resolve(
+        Response.json([
+          {
+            id: "person-1",
+            participantId: "P-001",
+            name: "이전 이름",
+            organizationId: "org-old-inactive",
+            revision: 7,
+          },
+        ]),
+      );
+    }
+    if (url.endsWith("/projects/project-1/organizations")) {
+      return Promise.resolve(
+        Response.json([
+          {
+            organizationId: "org-1",
+            name: "1팀",
+            isActive: true,
+            masterIsActive: true,
+            activeProjectCount: 1,
+            hasHistory: true,
+          },
+          {
+            organizationId: "org-2",
+            name: "2팀",
+            isActive: true,
+            masterIsActive: true,
+            activeProjectCount: 1,
+            hasHistory: false,
+          },
+        ]),
+      );
+    }
+    if (url.endsWith("/organizations"))
+      return Promise.resolve(Response.json([]));
+    if (url.includes("/audit"))
+      return Promise.resolve(Response.json({ items: [], nextCursor: null }));
+    if (url.endsWith("/roster") && init?.method === "POST") {
+      return Promise.resolve(Response.json({ id: "entry-1" }, { status: 201 }));
+    }
+    throw new Error(`unexpected request: ${url}`);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  render(
+    <AuthProvider restoreOnMount={false}>
+      <Gate>
+        <ProjectDetailPage projectId="project-1" />
+      </Gate>
+    </AuthProvider>,
+  );
+  await login();
+  await openRosterTab();
+  fireEvent.click(await screen.findByRole("button", { name: "참가자 추가" }));
+  expect(screen.getByLabelText("확정 소속 조직")).toHaveValue("org-1");
+  fireEvent.change(screen.getByLabelText("확정 이름"), {
+    target: { value: "확정 이름" },
+  });
+  fireEvent.change(screen.getByLabelText("확정 소속 조직"), {
+    target: { value: "org-2" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "명단에 추가" }));
+
+  await vi.waitFor(() =>
+    expect(
+      fetchMock.mock.calls.filter(
+        ([url, init]) =>
+          String(url).endsWith("/projects/project-1/roster") &&
+          init?.method === "POST",
+      ),
+    ).toHaveLength(1),
+  );
+  const write = fetchMock.mock.calls.find(
+    ([url, init]) =>
+      String(url).endsWith("/projects/project-1/roster") &&
+      init?.method === "POST",
+  );
+  expect(JSON.parse(String(write?.[1]?.body))).toEqual({
+    participantId: "person-1",
+    confirmedParticipant: {
+      name: "확정 이름",
+      organizationId: "org-2",
+    },
+    expectedParticipantRevision: 7,
+    expectedRevision: 2,
+  });
+  expect(
+    fetchMock.mock.calls.filter(
+      ([url, init]) =>
+        String(url).endsWith("/projects/project-1/roster") &&
+        init?.method === "POST",
+    ),
+  ).toHaveLength(1);
 });
 
 it("closes participant editing after a stale revision reload", async () => {

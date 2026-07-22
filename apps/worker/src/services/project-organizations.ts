@@ -205,6 +205,11 @@ export async function setProjectOrganizationActive(
       SELECT 1 FROM project_expected_snapshots snapshot
       WHERE snapshot.project_id = project_organizations.project_id
         AND snapshot.organization_id = project_organizations.organization_id
+    ) OR EXISTS (
+      SELECT 1 FROM audit_logs audit
+      WHERE audit.entity_type = 'PROJECT_ORGANIZATION'
+        AND audit.action GLOB 'PROJECT_ORGANIZATION_*'
+        AND audit.entity_id = project_organizations.project_id || ':' || project_organizations.organization_id
     )
   )`;
   const membershipPredicate = `project_id = ? AND organization_id = ?
@@ -308,7 +313,8 @@ async function hasPriorMembershipAudit(
   const row = await db
     .prepare(
       `SELECT 1 AS found FROM audit_logs
-       WHERE entity_type = 'PROJECT_ORGANIZATION' AND entity_id = ?
+       WHERE entity_type = 'PROJECT_ORGANIZATION'
+         AND action GLOB 'PROJECT_ORGANIZATION_*' AND entity_id = ?
        LIMIT 1`,
     )
     .bind(membershipEntityId(projectId, organizationId))

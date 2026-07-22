@@ -229,3 +229,41 @@ it("allows a manager scoped to both snapshot and master organizations to edit a 
     )?.name,
   ).toBe("양쪽 범위 변경");
 });
+
+it("makes participant history read-only for a manager after membership deactivation while the operator can edit", async () => {
+  const fixture = await setupPreRegistration();
+  const added = await addRoster(fixture, fixture.firstParticipant.id);
+  const entry = await added.json<{ projectRevision: number }>();
+  await authedRequest(
+    fixture.operator,
+    `/api/v1/projects/${fixture.project.id}/organizations/org-1`,
+    { method: "PATCH", body: JSON.stringify({ isActive: false }) },
+  );
+  const manager = await seedManager("org-1");
+  const managerPatch = await authedRequest(
+    manager,
+    `/api/v1/projects/${fixture.project.id}/participants/${fixture.firstParticipant.id}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        name: "관리자 변경 금지",
+        expectedRevision: 0,
+        expectedProjectRevision: entry.projectRevision,
+      }),
+    },
+  );
+  expect(managerPatch.status).toBe(403);
+  const operatorPatch = await authedRequest(
+    fixture.operator,
+    `/api/v1/projects/${fixture.project.id}/participants/${fixture.firstParticipant.id}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        name: "운영자 변경 허용",
+        expectedRevision: 0,
+        expectedProjectRevision: entry.projectRevision,
+      }),
+    },
+  );
+  expect(operatorPatch.status).toBe(200);
+});

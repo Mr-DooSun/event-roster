@@ -373,7 +373,11 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
   const canMutateRoster =
     project.status !== "CLOSED" &&
     project.status !== "PREPARING" &&
-    (operator || project.status === "PRE_REGISTRATION");
+    (operator ||
+      (project.status === "PRE_REGISTRATION" &&
+        memberships.some(
+          (membership) => membership.isActive && membership.masterIsActive,
+        )));
   const rosterOrganizations: OrganizationView[] = memberships.map(
     (membership) => ({
       id: membership.organizationId,

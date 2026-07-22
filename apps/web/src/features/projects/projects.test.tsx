@@ -213,6 +213,34 @@ it("does not let a stale initial response overwrite the post-create reload", asy
   expect(screen.queryByText("오래된 응답")).not.toBeInTheDocument();
 });
 
+it("does not let a late initial load failure overwrite the current create failure", async () => {
+  let rejectInitial: ((reason?: unknown) => void) | undefined;
+  const initial = new Promise<(typeof projectFixture)[]>((_resolve, reject) => {
+    rejectInitial = reject;
+  });
+  mockApi.get.mockReturnValueOnce(initial);
+  mockApi.post.mockRejectedValueOnce(new Error("create failed"));
+  render(<ProjectsPage />);
+
+  fireEvent.click(screen.getByRole("button", { name: "새 프로젝트" }));
+  fireEvent.change(screen.getByLabelText("프로젝트 이름"), {
+    target: { value: "실패 프로젝트" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "프로젝트 만들기" }));
+  expect(
+    await screen.findByText("프로젝트를 만들지 못했습니다."),
+  ).toBeVisible();
+
+  await act(async () => {
+    rejectInitial?.(new Error("late load failed"));
+    await initial.catch(() => undefined);
+  });
+  expect(screen.getByText("프로젝트를 만들지 못했습니다.")).toBeVisible();
+  expect(
+    screen.queryByText("프로젝트 목록을 불러오지 못했습니다."),
+  ).not.toBeInTheDocument();
+});
+
 it("links cards to project details", async () => {
   mockApi.get.mockResolvedValueOnce([projectFixture]);
   render(<ProjectsPage />);

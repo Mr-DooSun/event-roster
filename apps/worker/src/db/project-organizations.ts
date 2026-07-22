@@ -25,6 +25,11 @@ const SELECT_PROJECT_ORGANIZATION = `SELECT
     SELECT 1 FROM project_expected_snapshots snapshot
     WHERE snapshot.project_id = po.project_id
       AND snapshot.organization_id = po.organization_id
+    UNION ALL
+    SELECT 1 FROM audit_logs audit
+    WHERE audit.entity_type = 'PROJECT_ORGANIZATION'
+      AND audit.action GLOB 'PROJECT_ORGANIZATION_*'
+      AND audit.entity_id = po.project_id || ':' || po.organization_id
   ) AS has_history
 FROM project_organizations po
 JOIN organizations o ON o.id = po.organization_id`;
