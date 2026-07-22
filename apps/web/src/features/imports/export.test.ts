@@ -2,6 +2,7 @@ import { expect, it, vi } from "vitest";
 import {
   buildExportWorkbook,
   downloadExportWorkbook,
+  projectRosterFilename,
 } from "../../lib/excel/download-workbook";
 
 const fixture = {
@@ -27,15 +28,26 @@ const fixture = {
   ],
 };
 
-it("creates exactly roster and summary sheets", () => {
-  expect(buildExportWorkbook(fixture).SheetNames).toEqual(["명단", "집계"]);
+it("creates exactly the project summary and participant roster sheets", () => {
+  expect(buildExportWorkbook(fixture).SheetNames).toEqual([
+    "프로젝트 집계",
+    "참가 명단",
+  ]);
 });
 
-it("writes the generated workbook only in the browser", () => {
+it("writes the project-named workbook only in the browser", () => {
   const writeFile = vi.fn();
-  downloadExportWorkbook(fixture, "상반기-명단.xlsx", writeFile);
+  downloadExportWorkbook(fixture, "상반기-프로젝트-명단.xlsx", writeFile);
   expect(writeFile).toHaveBeenCalledWith(
-    expect.objectContaining({ SheetNames: ["명단", "집계"] }),
-    "상반기-명단.xlsx",
+    expect.objectContaining({
+      SheetNames: ["프로젝트 집계", "참가 명단"],
+    }),
+    "상반기-프로젝트-명단.xlsx",
+  );
+});
+
+it("builds a sanitized project roster filename", () => {
+  expect(projectRosterFilename("상반기/리더십")).toBe(
+    "상반기-리더십-프로젝트-명단.xlsx",
   );
 });

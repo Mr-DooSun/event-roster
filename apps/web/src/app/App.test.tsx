@@ -46,7 +46,7 @@ it("renders project-centered navigation for operators", async () => {
     "/users",
   );
   expect(screen.queryByRole("link", { name: "조직" })).not.toBeInTheDocument();
-  expect(screen.queryByText("행사 참가자 명단")).not.toBeInTheDocument();
+  expect(screen.getByText("프로젝트 참가자 명단")).toBeVisible();
 });
 
 it("routes a project URL to the project roster", async () => {

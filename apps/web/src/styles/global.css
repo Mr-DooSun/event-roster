@@ -379,6 +379,81 @@ a {
   gap: 0.25rem;
   color: var(--er-color-muted);
 }
+.er-project-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--er-space-3);
+  color: var(--er-color-muted);
+}
+.er-project-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: var(--er-space-3);
+  max-width: 34rem;
+}
+.er-project-actions .er-muted {
+  flex-basis: 100%;
+  text-align: right;
+}
+.er-tabs {
+  display: flex;
+  gap: var(--er-space-1);
+  overflow-x: auto;
+  border-bottom: 1px solid var(--er-color-border);
+}
+.er-tab {
+  border: 0;
+  border-bottom: 3px solid transparent;
+  padding: var(--er-space-3) var(--er-space-4);
+  color: var(--er-color-muted);
+  background: transparent;
+  font: inherit;
+  font-weight: var(--er-font-weight-medium);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.er-tab:hover {
+  color: var(--er-color-primary);
+  background: var(--er-color-info-soft);
+}
+.er-tab[aria-selected="true"] {
+  border-bottom-color: var(--er-color-primary);
+  color: var(--er-color-primary);
+}
+.er-tab:focus-visible {
+  border-radius: var(--er-radius-sm) var(--er-radius-sm) 0 0;
+  outline: 3px solid rgb(37 87 214 / 15%);
+  outline-offset: -3px;
+}
+.er-project-organization-forms {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
+  gap: var(--er-space-4);
+}
+.er-organization-membership {
+  display: grid;
+  gap: var(--er-space-1);
+}
+.er-action-row--wrap {
+  flex-wrap: wrap;
+}
+.er-compact-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--er-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.er-compact-list li {
+  border-radius: 999px;
+  padding: var(--er-space-1) var(--er-space-3);
+  color: var(--er-color-primary);
+  background: var(--er-color-info-soft);
+}
 .er-summary-card {
   display: grid;
   gap: var(--er-space-2);
@@ -484,5 +559,17 @@ th {
   .er-page-heading {
     align-items: stretch;
     flex-direction: column;
+  }
+  .er-project-actions {
+    justify-content: flex-start;
+    max-width: none;
+  }
+  .er-project-actions .er-muted {
+    text-align: left;
+  }
+  .er-list li {
+    align-items: stretch;
+    flex-direction: column;
+    gap: var(--er-space-3);
   }
 }

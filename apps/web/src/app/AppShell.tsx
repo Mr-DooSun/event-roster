@@ -2,8 +2,8 @@ import { lazy, Suspense, useEffect, useState } from "react";
 import { Button } from "../components/ui/Button";
 import { UsersPage } from "../features/admin/UsersPage";
 import { useAuth } from "../features/auth/AuthProvider";
+import { ProjectDetailPage } from "../features/projects/ProjectDetailPage";
 import { ProjectsPage } from "../features/projects/ProjectsPage";
-import { ProjectRosterPage } from "../features/roster/ProjectRosterPage";
 
 const ImportWizard = lazy(() =>
   import("../features/imports/ImportWizard").then((module) => ({
@@ -54,7 +54,7 @@ function route(path: string, operator: boolean) {
   const projectMatch = path.match(/^\/projects\/([^/]+)$/);
   if (projectMatch?.[1]) {
     return (
-      <ProjectRosterPage projectId={decodeURIComponent(projectMatch[1])} />
+      <ProjectDetailPage projectId={decodeURIComponent(projectMatch[1])} />
     );
   }
   return <ProjectsPage />;

@@ -1,4 +1,7 @@
-import type { NormalizedImportRow } from "@event-roster/contracts";
+import type {
+  NormalizedImportRow,
+  ProjectOrganization,
+} from "@event-roster/contracts";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "../../components/ui/Button";
 import { Card } from "../../components/ui/Card";
@@ -30,6 +33,12 @@ export function ImportWizard({ projectId }: { projectId: string }) {
   const [validation, setValidation] = useState<ValidationResult | null>(null);
   const [resolutionDirty, setResolutionDirty] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [activeOrganizations, setActiveOrganizations] = useState<
+    ProjectOrganization[]
+  >([]);
+  const [organizationError, setOrganizationError] = useState<string | null>(
+    null,
+  );
   const fileInput = useRef<HTMLInputElement>(null);
   const workflowGeneration = useRef(0);
   const requestInFlight = useRef(false);
@@ -44,6 +53,28 @@ export function ImportWizard({ projectId }: { projectId: string }) {
     },
     [],
   );
+  useEffect(() => {
+    let current = true;
+    api
+      .get<ProjectOrganization[]>(`/projects/${projectId}/organizations`)
+      .then((memberships) => {
+        if (!current) return;
+        setActiveOrganizations(
+          memberships.filter(
+            (membership) => membership.isActive && membership.masterIsActive,
+          ),
+        );
+        setOrganizationError(null);
+      })
+      .catch(() => {
+        if (current) {
+          setOrganizationError("프로젝트 조직을 불러오지 못했습니다.");
+        }
+      });
+    return () => {
+      current = false;
+    };
+  }, [api, projectId]);
   useEffect(() => {
     if (!busy) return;
     const preventExit = (event: BeforeUnloadEvent) => {
@@ -214,6 +245,21 @@ export function ImportWizard({ projectId }: { projectId: string }) {
         )}
       </header>
       {message ? <StatusMessage tone="info">{message}</StatusMessage> : null}
+      <Card className="er-panel">
+        <h2>가져오기 대상 조직</h2>
+        {organizationError ? (
+          <StatusMessage tone="error">{organizationError}</StatusMessage>
+        ) : (
+          <>
+            <p className="er-muted">활성 조직 {activeOrganizations.length}개</p>
+            <ul className="er-compact-list">
+              {activeOrganizations.map((organization) => (
+                <li key={organization.organizationId}>{organization.name}</li>
+              ))}
+            </ul>
+          </>
+        )}
+      </Card>
       <Card className="er-panel">
         <label className="er-field">
           <span>엑셀 파일</span>

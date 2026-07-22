@@ -17,6 +17,65 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+it("loads only active project organizations as import targets", async () => {
+  const fetchMock = vi.fn((input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.endsWith("/auth/login")) {
+      return Promise.resolve(Response.json(auth()));
+    }
+    if (url.endsWith("/projects/project-1/organizations")) {
+      return Promise.resolve(
+        Response.json([
+          {
+            organizationId: "org-active",
+            name: "활성 조직",
+            isActive: true,
+            masterIsActive: true,
+            activeProjectCount: 1,
+            hasHistory: false,
+          },
+          {
+            organizationId: "org-inactive",
+            name: "프로젝트 비활성 조직",
+            isActive: false,
+            masterIsActive: true,
+            activeProjectCount: 0,
+            hasHistory: true,
+          },
+          {
+            organizationId: "org-master-inactive",
+            name: "전역 비활성 조직",
+            isActive: true,
+            masterIsActive: false,
+            activeProjectCount: 0,
+            hasHistory: true,
+          },
+        ]),
+      );
+    }
+    throw new Error(`unexpected request: ${url}`);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  render(
+    <AuthProvider restoreOnMount={false}>
+      <Gate>
+        <ImportWizard projectId="project-1" />
+      </Gate>
+    </AuthProvider>,
+  );
+  await login();
+
+  expect(await screen.findByText("활성 조직 1개")).toBeVisible();
+  expect(screen.getByText("활성 조직", { selector: "li" })).toBeVisible();
+  expect(screen.queryByText("프로젝트 비활성 조직")).not.toBeInTheDocument();
+  expect(screen.queryByText("전역 비활성 조직")).not.toBeInTheDocument();
+  expect(
+    fetchMock.mock.calls.some(([url]) =>
+      String(url).endsWith("/projects/project-1/organizations"),
+    ),
+  ).toBe(true);
+});
+
 it("sends normalized rows without uploading the source workbook", async () => {
   const fetchMock = vi.fn((input: RequestInfo | URL, _init?: RequestInit) => {
     const url = String(input);

@@ -3,11 +3,36 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { AuthProvider, useAuth } from "../auth/AuthProvider";
 import { LoginPage } from "../auth/LoginPage";
-import { ProjectRosterPage } from "./ProjectRosterPage";
+import { ProjectDetailPage } from "../projects/ProjectDetailPage";
+import { ParticipantEditDialog } from "./ParticipantEditDialog";
 
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+});
+
+it("keeps the current inactive organization while editing an existing participant", () => {
+  render(
+    <ParticipantEditDialog
+      participant={{
+        id: "person-1",
+        participantId: "P-001",
+        name: "박민수",
+        organizationId: "org-inactive",
+        revision: 1,
+      }}
+      organizations={[
+        { id: "org-inactive", name: "이전 조직", isActive: false },
+        { id: "org-active", name: "현재 조직", isActive: true },
+      ]}
+      allowOrganizationChange
+      onSave={vi.fn().mockResolvedValue(undefined)}
+      onClose={vi.fn()}
+    />,
+  );
+
+  expect(screen.getByRole("option", { name: "이전 조직" })).toBeVisible();
+  expect(screen.getByLabelText("소속 조직")).toHaveValue("org-inactive");
 });
 
 it("updates expected and actual totals after an in-progress cancellation", async () => {
@@ -48,6 +73,10 @@ it("updates expected and actual totals after an in-progress cancellation", async
             },
           ]),
         );
+      if (url.endsWith("/organizations"))
+        return Promise.resolve(
+          Response.json([{ id: "org-1", name: "1팀", isActive: true }]),
+        );
       if (url.includes("/audit"))
         return Promise.resolve(Response.json({ items: [], nextCursor: null }));
       if (url.endsWith("/roster/entry-1") && init?.method === "PATCH") {
@@ -65,14 +94,16 @@ it("updates expected and actual totals after an in-progress cancellation", async
   render(
     <AuthProvider restoreOnMount={false}>
       <Gate>
-        <ProjectRosterPage projectId="project-1" />
+        <ProjectDetailPage projectId="project-1" />
       </Gate>
     </AuthProvider>,
   );
   await login();
   expect(await screen.findByText("예상 100명")).toBeVisible();
   expect(screen.getByText("실제 100명")).toBeVisible();
+  await openRosterTab();
   fireEvent.click(screen.getByRole("button", { name: "박민수 취소" }));
+  fireEvent.click(screen.getByRole("tab", { name: "개요" }));
   expect(await screen.findByText("실제 99명")).toBeVisible();
   expect(screen.getByText("예상 100명")).toBeVisible();
 });
@@ -113,6 +144,11 @@ it("reloads a stale roster without replaying the mutation", async () => {
         ]),
       );
     }
+    if (url.endsWith("/organizations")) {
+      return Promise.resolve(
+        Response.json([{ id: "org-1", name: "1팀", isActive: true }]),
+      );
+    }
     if (url.includes("/audit")) {
       return Promise.resolve(Response.json({ items: [], nextCursor: null }));
     }
@@ -134,11 +170,12 @@ it("reloads a stale roster without replaying the mutation", async () => {
   render(
     <AuthProvider restoreOnMount={false}>
       <Gate>
-        <ProjectRosterPage projectId="project-1" />
+        <ProjectDetailPage projectId="project-1" />
       </Gate>
     </AuthProvider>,
   );
   await login();
+  await openRosterTab();
   fireEvent.click(await screen.findByRole("button", { name: "박민수 취소" }));
   expect(
     await screen.findByText(
@@ -182,6 +219,11 @@ it("creates and adds a participant with one atomic roster request", async () => 
         ]),
       );
     }
+    if (url.endsWith("/organizations")) {
+      return Promise.resolve(
+        Response.json([{ id: "org-1", name: "1팀", isActive: true }]),
+      );
+    }
     if (url.includes("/audit")) {
       return Promise.resolve(Response.json({ items: [], nextCursor: null }));
     }
@@ -196,11 +238,12 @@ it("creates and adds a participant with one atomic roster request", async () => 
   render(
     <AuthProvider restoreOnMount={false}>
       <Gate>
-        <ProjectRosterPage projectId="project-1" />
+        <ProjectDetailPage projectId="project-1" />
       </Gate>
     </AuthProvider>,
   );
   await login();
+  await openRosterTab();
   fireEvent.click(await screen.findByRole("button", { name: "참가자 추가" }));
   fireEvent.click(screen.getByRole("button", { name: "새 참가자" }));
   fireEvent.change(screen.getByLabelText("이름"), {
@@ -208,7 +251,15 @@ it("creates and adds a participant with one atomic roster request", async () => 
   });
   fireEvent.click(screen.getByRole("button", { name: "참가자 생성 후 추가" }));
 
-  await screen.findByText("아직 기록이 없습니다.");
+  await vi.waitFor(() =>
+    expect(
+      fetchMock.mock.calls.filter(
+        ([url, init]) =>
+          String(url).endsWith("/projects/project-1/roster") &&
+          init?.method === "POST",
+      ),
+    ).toHaveLength(1),
+  );
   const rosterWrites = fetchMock.mock.calls.filter(
     ([url, init]) =>
       String(url).endsWith("/projects/project-1/roster") &&
@@ -281,6 +332,11 @@ it("closes participant editing after a stale revision reload", async () => {
         ]),
       );
     }
+    if (url.endsWith("/organizations")) {
+      return Promise.resolve(
+        Response.json([{ id: "org-1", name: "1팀", isActive: true }]),
+      );
+    }
     if (url.includes("/audit")) {
       return Promise.resolve(Response.json({ items: [], nextCursor: null }));
     }
@@ -290,11 +346,12 @@ it("closes participant editing after a stale revision reload", async () => {
   render(
     <AuthProvider restoreOnMount={false}>
       <Gate>
-        <ProjectRosterPage projectId="project-1" />
+        <ProjectDetailPage projectId="project-1" />
       </Gate>
     </AuthProvider>,
   );
   await login();
+  await openRosterTab();
   fireEvent.click(await screen.findByRole("button", { name: "정보 수정" }));
   fireEvent.change(screen.getByLabelText("이름"), {
     target: { value: "박민수 수정" },
@@ -358,6 +415,11 @@ it("shows a project-closed message and reloads after a rejected mutation", async
         ]),
       );
     }
+    if (url.endsWith("/organizations")) {
+      return Promise.resolve(
+        Response.json([{ id: "org-1", name: "1팀", isActive: true }]),
+      );
+    }
     if (url.includes("/audit")) {
       return Promise.resolve(Response.json({ items: [], nextCursor: null }));
     }
@@ -379,11 +441,12 @@ it("shows a project-closed message and reloads after a rejected mutation", async
   render(
     <AuthProvider restoreOnMount={false}>
       <Gate>
-        <ProjectRosterPage projectId="project-1" />
+        <ProjectDetailPage projectId="project-1" />
       </Gate>
     </AuthProvider>,
   );
   await login();
+  await openRosterTab();
   fireEvent.click(await screen.findByRole("button", { name: "박민수 취소" }));
 
   expect(
@@ -404,6 +467,11 @@ async function login() {
     target: { value: "temporary-password-123" },
   });
   fireEvent.click(screen.getByRole("button", { name: "로그인" }));
+}
+
+async function openRosterTab() {
+  fireEvent.click(await screen.findByRole("tab", { name: "참가 명단" }));
+  await screen.findByRole("heading", { name: "참가 명단" });
 }
 
 function auth() {

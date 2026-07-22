@@ -26,6 +26,10 @@ export function ParticipantEditDialog({
   const [organizationId, setOrganizationId] = useState(
     participant.organizationId,
   );
+  const selectableOrganizations = organizations.filter(
+    (organization) =>
+      organization.isActive || organization.id === participant.organizationId,
+  );
   return (
     <Dialog title="참가자 정보 수정" onClose={onClose}>
       <TextInput
@@ -41,13 +45,11 @@ export function ParticipantEditDialog({
           value={organizationId}
           onChange={(event) => setOrganizationId(event.currentTarget.value)}
         >
-          {organizations
-            .filter((organization) => organization.isActive)
-            .map((organization) => (
-              <option key={organization.id} value={organization.id}>
-                {organization.name}
-              </option>
-            ))}
+          {selectableOrganizations.map((organization) => (
+            <option key={organization.id} value={organization.id}>
+              {organization.name}
+            </option>
+          ))}
         </select>
       </label>
       {!allowOrganizationChange ? (
