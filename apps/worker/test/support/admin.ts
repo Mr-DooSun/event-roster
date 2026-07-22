@@ -24,14 +24,16 @@ export async function seedOrganization(
     .run();
 }
 
-export async function seedOperator(): Promise<LoginResult> {
+export type SeededLogin = LoginResult & { userId: string };
+
+export async function seedOperator(): Promise<SeededLogin> {
   await seedUser();
-  return login();
+  return { ...(await login()), userId: "user-1" };
 }
 
 export async function seedManager(
   organizationId = "org-1",
-): Promise<LoginResult> {
+): Promise<SeededLogin> {
   await seedUser({
     id: "manager-user",
     loginId: "manager-02",
@@ -45,7 +47,22 @@ export async function seedManager(
   )
     .bind(organizationId)
     .run();
-  return login("manager-02", "manager-password-123");
+  return {
+    ...(await login("manager-02", "manager-password-123")),
+    userId: "manager-user",
+  };
+}
+
+export async function seedProject(
+  operator: SeededLogin,
+  input: { name?: string; startDate?: string; endDate?: string } = {},
+) {
+  const response = await authedRequest(operator, "/api/v1/projects", {
+    method: "POST",
+    body: JSON.stringify({ ...input, name: input.name ?? "테스트 프로젝트" }),
+  });
+  if (!response.ok) throw new Error(`seedProject failed: ${response.status}`);
+  return response.json<{ id: string; revision: number; status: string }>();
 }
 
 export function authedRequest(

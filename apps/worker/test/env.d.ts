@@ -4,6 +4,7 @@ declare global {
   namespace Cloudflare {
     interface Env {
       DB: D1Database;
+      MIGRATION_DB: D1Database;
       TEST_MIGRATIONS: D1Migration[];
       APP_ORIGIN: string;
       JWT_SIGNING_KEY: string;
