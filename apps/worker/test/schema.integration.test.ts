@@ -4,7 +4,7 @@ import { countRows, insertOrganization } from "./support/database";
 import { IDS } from "./support/ids";
 
 describe("initial D1 schema", () => {
-  it("rejects duplicate canonical login IDs and event year/half", async () => {
+  it("rejects duplicate canonical login IDs and validates project date order", async () => {
     await insertOrganization(IDS.organization, "조직 A");
     await env.DB.prepare(
       "INSERT INTO users (id, login_id, login_id_canonical, display_name, role, is_active, is_bootstrap, session_version, created_at, updated_at) VALUES (?, ?, ?, ?, 'OPERATOR', 1, 0, 1, ?, ?)",
@@ -27,15 +27,23 @@ describe("initial D1 schema", () => {
         .run(),
     ).rejects.toThrow();
 
-    await env.DB.prepare(
-      "INSERT INTO events (id, year, half, name, status, revision, created_by, created_at, updated_at) VALUES (?, 2026, 'H1', ?, 'DRAFT', 0, ?, ?, ?)",
-    )
-      .bind(IDS.event, "2026 상반기", IDS.user, "2026-07-21", "2026-07-21")
-      .run();
-
+    for (const id of [IDS.project, "project-2"]) {
+      await env.DB.prepare(
+        `INSERT INTO projects
+         (id, name, start_date, end_date, status, revision, created_by,
+          created_at, updated_at)
+         VALUES (?, '같은 이름', '2026-05-22', '2026-05-23', 'PREPARING', 0, ?, ?, ?)`,
+      )
+        .bind(id, IDS.user, "2026-07-21", "2026-07-21")
+        .run();
+    }
     await expect(
       env.DB.prepare(
-        "INSERT INTO events (id, year, half, name, status, revision, created_by, created_at, updated_at) VALUES ('event-2', 2026, 'H1', '중복 행사', 'DRAFT', 0, ?, ?, ?)",
+        `INSERT INTO projects
+         (id, name, start_date, end_date, status, revision, created_by,
+          created_at, updated_at)
+         VALUES ('project-invalid', '역전', '2026-05-24', '2026-05-23',
+                 'PREPARING', 0, ?, ?, ?)`,
       )
         .bind(IDS.user, "2026-07-21", "2026-07-21")
         .run(),

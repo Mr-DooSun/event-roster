@@ -1,4 +1,7 @@
-import { RosterStatusSchema } from "@event-roster/contracts";
+import {
+  RosterCreateRequestSchema,
+  RosterPatchRequestSchema,
+} from "@event-roster/contracts";
 import { Hono } from "hono";
 import { z } from "zod";
 import type { Env } from "../env";
@@ -6,6 +9,7 @@ import { assertExactOrigin } from "../http/origin";
 import { requireActor } from "../middleware/authentication";
 import { requireFullSession } from "../middleware/authorization";
 import { requireCsrf } from "../middleware/csrf";
+import { createParticipantAndAddToProject } from "../services/participants";
 import {
   addRosterEntry,
   getAuditPage,
@@ -14,40 +18,42 @@ import {
   updateRosterEntry,
 } from "../services/roster";
 
-const RosterCreateSchema = z.object({
-  participantId: z.string().min(1),
-  expectedRevision: z.number().int().nonnegative(),
-});
-const RosterPatchSchema = z.object({
-  status: RosterStatusSchema,
-  expectedRevision: z.number().int().nonnegative(),
-  expectedEntryRevision: z.number().int().nonnegative(),
-});
-
 export const rosterRoutes = new Hono<{ Bindings: Env }>();
 
-rosterRoutes.get("/events/:eventId/roster", async (c) => {
+rosterRoutes.get("/projects/:projectId/roster", async (c) => {
   const actor = await requireActor(c.req.raw, c.env);
   requireFullSession(actor);
-  return c.json(await getRoster(c.env, actor, c.req.param("eventId")));
+  return c.json(await getRoster(c.env, actor, c.req.param("projectId")));
 });
 
-rosterRoutes.post("/events/:eventId/roster", async (c) => {
+rosterRoutes.post("/projects/:projectId/roster", async (c) => {
   assertExactOrigin(c.req.raw, c.env.APP_ORIGIN);
   const actor = await requireActor(c.req.raw, c.env);
   await requireCsrf(c.req.raw, actor);
   requireFullSession(actor);
-  const input = RosterCreateSchema.parse(await c.req.json());
+  const input = RosterCreateRequestSchema.parse(await c.req.json());
+  if ("newParticipant" in input) {
+    return c.json(
+      await createParticipantAndAddToProject(
+        c.env,
+        actor,
+        c.req.param("projectId"),
+        { ...input.newParticipant, expectedRevision: input.expectedRevision },
+      ),
+      201,
+    );
+  }
   const existing = await c.env.DB.prepare(
-    "SELECT 1 AS found FROM event_roster_entries WHERE event_id = ? AND participant_id = ?",
+    `SELECT 1 AS found FROM project_roster_entries
+     WHERE project_id = ? AND participant_id = ?`,
   )
-    .bind(c.req.param("eventId"), input.participantId)
+    .bind(c.req.param("projectId"), input.participantId)
     .first<{ found: number }>();
   return c.json(
     await addRosterEntry(
       c.env,
       actor,
-      c.req.param("eventId"),
+      c.req.param("projectId"),
       input.participantId,
       input.expectedRevision,
     ),
@@ -55,30 +61,30 @@ rosterRoutes.post("/events/:eventId/roster", async (c) => {
   );
 });
 
-rosterRoutes.patch("/events/:eventId/roster/:entryId", async (c) => {
+rosterRoutes.patch("/projects/:projectId/roster/:entryId", async (c) => {
   assertExactOrigin(c.req.raw, c.env.APP_ORIGIN);
   const actor = await requireActor(c.req.raw, c.env);
   await requireCsrf(c.req.raw, actor);
   requireFullSession(actor);
-  const input = RosterPatchSchema.parse(await c.req.json());
+  const input = RosterPatchRequestSchema.parse(await c.req.json());
   return c.json(
     await updateRosterEntry(
       c.env,
       actor,
-      c.req.param("eventId"),
+      c.req.param("projectId"),
       c.req.param("entryId"),
       input,
     ),
   );
 });
 
-rosterRoutes.get("/events/:eventId/summary", async (c) => {
+rosterRoutes.get("/projects/:projectId/summary", async (c) => {
   const actor = await requireActor(c.req.raw, c.env);
   requireFullSession(actor);
-  return c.json(await getSummary(c.env, actor, c.req.param("eventId")));
+  return c.json(await getSummary(c.env, actor, c.req.param("projectId")));
 });
 
-rosterRoutes.get("/events/:eventId/audit-logs", async (c) => {
+rosterRoutes.get("/projects/:projectId/audit", async (c) => {
   const actor = await requireActor(c.req.raw, c.env);
   requireFullSession(actor);
   const query = z
@@ -91,7 +97,7 @@ rosterRoutes.get("/events/:eventId/audit-logs", async (c) => {
     await getAuditPage(
       c.env,
       actor,
-      c.req.param("eventId"),
+      c.req.param("projectId"),
       query.limit,
       query.cursor ?? null,
     ),

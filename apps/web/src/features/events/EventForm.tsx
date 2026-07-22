@@ -1,7 +1,7 @@
-import type { Half } from "@event-roster/contracts";
 import { type FormEvent, useState } from "react";
 import { Button } from "../../components/ui/Button";
 import { TextInput } from "../../components/ui/TextInput";
+import type { Half } from "./legacy-event-contracts";
 
 export function EventForm({
   onSubmit,

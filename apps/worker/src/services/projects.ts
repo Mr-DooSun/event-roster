@@ -216,7 +216,14 @@ export async function changeProjectStatus(
   ];
 
   if (current.status === "PRE_REGISTRATION" && targetStatus === "IN_PROGRESS") {
-    statements.push(expectedSnapshotStatement(env.DB, projectId, timestamp));
+    statements.push(
+      expectedSnapshotStatement(env.DB, projectId, timestamp),
+      env.DB.prepare(
+        `UPDATE project_roster_entries
+         SET was_expected_at_start = 1
+         WHERE project_id = ? AND source = 'PRE_REGISTRATION' AND status = 'ACTIVE'`,
+      ).bind(projectId),
+    );
   }
   statements.push(
     auditStatement(
@@ -277,12 +284,12 @@ function expectedSnapshotStatement(
          SELECT organization_id FROM project_organizations
          WHERE project_id = ? AND is_active = 1
          UNION
-         SELECT organization_id FROM event_roster_entries
-         WHERE event_id = ? AND source = 'PRE_EVENT' AND status = 'ACTIVE'
+         SELECT organization_id FROM project_roster_entries
+         WHERE project_id = ? AND source = 'PRE_REGISTRATION' AND status = 'ACTIVE'
        ) linked
-       LEFT JOIN event_roster_entries roster
-         ON roster.event_id = ? AND roster.organization_id = linked.organization_id
-        AND roster.source = 'PRE_EVENT' AND roster.status = 'ACTIVE'
+       LEFT JOIN project_roster_entries roster
+         ON roster.project_id = ? AND roster.organization_id = linked.organization_id
+        AND roster.source = 'PRE_REGISTRATION' AND roster.status = 'ACTIVE'
        GROUP BY linked.organization_id
        ON CONFLICT(project_id, organization_id) DO NOTHING`,
     )

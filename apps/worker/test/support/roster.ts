@@ -1,57 +1,83 @@
-import { authedRequest, seedOperator, seedOrganization } from "./admin";
-import type { LoginResult } from "./auth";
+import { env } from "cloudflare:workers";
+import type { SeededLogin } from "./admin";
+import {
+  authedRequest,
+  seedOperator,
+  seedOrganization,
+  seedProject,
+} from "./admin";
 
 export interface RosterFixture {
-  operator: LoginResult;
-  event: { id: string; revision: number; status: string };
-  firstParticipant: { id: string; participantId: string };
-  secondParticipant: { id: string; participantId: string };
+  operator: SeededLogin;
+  project: { id: string; revision: number; status: string };
+  firstParticipant: { id: string; participantId: string; revision: number };
+  secondParticipant: { id: string; participantId: string; revision: number };
 }
 
 export async function setupPreRegistration(): Promise<RosterFixture> {
   const operator = await seedOperator();
-  await seedOrganization("org-1", "1팀");
-  const createParticipant = async (name: string) => {
-    const response = await authedRequest(operator, "/api/v1/participants", {
+  const organization = await seedOrganization("org-1", "1팀");
+  const project = await seedProject(operator, { name: "테스트 프로젝트" });
+  await authedRequest(
+    operator,
+    `/api/v1/projects/${project.id}/organizations`,
+    {
       method: "POST",
-      body: JSON.stringify({ name, organizationId: "org-1" }),
-    });
-    return response.json<{ id: string; participantId: string }>();
-  };
-  const firstParticipant = await createParticipant("첫 참가자");
-  const secondParticipant = await createParticipant("둘째 참가자");
-  const created = await authedRequest(operator, "/api/v1/events", {
-    method: "POST",
-    body: JSON.stringify({ year: 2029, half: "H1", name: "2029 상반기 행사" }),
-  });
-  const draft = await created.json<{ id: string; revision: number }>();
+      body: JSON.stringify({ organizationId: organization.id }),
+    },
+  );
+  const now = "2026-07-21T00:00:00.000Z";
+  await env.DB.batch([
+    env.DB.prepare(
+      `INSERT INTO participants
+       (id, participant_id, name, organization_id, revision, created_at, updated_at)
+       VALUES ('participant-1', 'P-FIRST', '첫 참가자', 'org-1', 0, ?, ?)`,
+    ).bind(now, now),
+    env.DB.prepare(
+      `INSERT INTO participants
+       (id, participant_id, name, organization_id, revision, created_at, updated_at)
+       VALUES ('participant-2', 'P-SECOND', '둘째 참가자', 'org-1', 0, ?, ?)`,
+    ).bind(now, now),
+  ]);
   const transitioned = await authedRequest(
     operator,
-    `/api/v1/events/${draft.id}/transition`,
+    `/api/v1/projects/${project.id}/transition`,
     {
       method: "POST",
       body: JSON.stringify({
         targetStatus: "PRE_REGISTRATION",
-        expectedRevision: draft.revision,
+        expectedRevision: project.revision,
       }),
     },
   );
-  const event = await transitioned.json<{
-    id: string;
-    revision: number;
-    status: string;
-  }>();
-  return { operator, event, firstParticipant, secondParticipant };
+  return {
+    operator,
+    project: await transitioned.json<{
+      id: string;
+      revision: number;
+      status: string;
+    }>(),
+    firstParticipant: {
+      id: "participant-1",
+      participantId: "P-FIRST",
+      revision: 0,
+    },
+    secondParticipant: {
+      id: "participant-2",
+      participantId: "P-SECOND",
+      revision: 0,
+    },
+  };
 }
 
 export async function addRoster(
   fixture: RosterFixture,
   participantId: string,
-  expectedRevision = fixture.event.revision,
+  expectedRevision = fixture.project.revision,
 ) {
   return authedRequest(
     fixture.operator,
-    `/api/v1/events/${fixture.event.id}/roster`,
+    `/api/v1/projects/${fixture.project.id}/roster`,
     {
       method: "POST",
       body: JSON.stringify({ participantId, expectedRevision }),

@@ -198,8 +198,8 @@ export async function setProjectOrganizationActive(
   const guardId = crypto.randomUUID();
   const historyPredicate = `(
     EXISTS (
-      SELECT 1 FROM event_roster_entries roster
-      WHERE roster.event_id = project_organizations.project_id
+      SELECT 1 FROM project_roster_entries roster
+      WHERE roster.project_id = project_organizations.project_id
         AND roster.organization_id = project_organizations.organization_id
     ) OR EXISTS (
       SELECT 1 FROM project_expected_snapshots snapshot

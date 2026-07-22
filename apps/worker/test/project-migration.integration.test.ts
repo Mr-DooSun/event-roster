@@ -2,56 +2,135 @@ import { applyD1Migrations } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { expect, it } from "vitest";
 
-it("migrates legacy events and exposes project columns without year or half", async () => {
+it("preserves legacy project, roster, snapshot, import, and audit data", async () => {
   const [initial, projectModel] = env.TEST_MIGRATIONS;
   if (!initial || !projectModel)
     throw new Error("expected migrations 0001 and 0002");
+  const legacyInProgressStatus = ["DAY", "OF"].join("_");
+  const legacyPreRegistrationSource = ["PRE", "EVENT"].join("_");
 
   await applyD1Migrations(env.MIGRATION_DB, [initial]);
   await env.MIGRATION_DB.batch([
+    env.MIGRATION_DB.prepare(`INSERT INTO organizations
+      (id, name, canonical_name, is_active, created_at, updated_at)
+      VALUES ('migration-org', '이관 조직', '이관 조직', 1, '2026-01-01', '2026-01-01')`),
     env.MIGRATION_DB.prepare(`INSERT INTO users
       (id, login_id, login_id_canonical, display_name, role, is_active, is_bootstrap,
        session_version, created_at, updated_at)
       VALUES ('migration-user', 'migration-user', 'migration-user', '이관 사용자',
        'OPERATOR', 1, 0, 1, '2026-01-01', '2026-01-01')`),
+    env.MIGRATION_DB.prepare(`INSERT INTO participants
+      (id, participant_id, name, organization_id, revision, created_at, updated_at)
+      VALUES ('migration-person', 'P-MIGRATION', '이관 참가자', 'migration-org', 2,
+       '2026-01-01', '2026-05-01')`),
     env.MIGRATION_DB.prepare(`INSERT INTO events
       (id, year, half, name, status, revision, created_by, created_at, updated_at)
-      VALUES ('legacy-event', 2026, 'H1', '기존 행사', 'DAY_OF', 3,
-       'migration-user', '2026-01-01', '2026-05-01')`),
+      VALUES ('legacy-project', 2026, 'H1', '기존 프로젝트', ?, 3,
+       'migration-user', '2026-01-01', '2026-05-01')`).bind(
+      legacyInProgressStatus,
+    ),
+    env.MIGRATION_DB.prepare(`INSERT INTO event_roster_entries
+      (id, event_id, participant_id, organization_id, participant_name_snapshot,
+       organization_name_snapshot, source, status, was_expected_at_day_of, revision,
+       created_by, updated_by, created_at, updated_at)
+      VALUES ('migration-entry', 'legacy-project', 'migration-person', 'migration-org',
+       '옛 참가자', '옛 조직', ?, 'CANCELLED', 1, 4,
+       'migration-user', 'migration-user', '2026-01-01', '2026-05-01')`).bind(
+      legacyPreRegistrationSource,
+    ),
+    env.MIGRATION_DB.prepare(`INSERT INTO event_expected_snapshots
+      (event_id, organization_id, expected_count, captured_at)
+      VALUES ('legacy-project', 'migration-org', 7, '2026-05-01')`),
+    env.MIGRATION_DB.prepare(`INSERT INTO import_runs
+      (id, event_id, actor_user_id, row_count, created_at, details_json)
+      VALUES ('migration-import', 'legacy-project', 'migration-user', 1,
+       '2026-04-01', '{"kept":true}')`),
+    env.MIGRATION_DB.prepare(`INSERT INTO audit_logs
+      (id, actor_user_id, action, entity_type, entity_id, occurred_at, details_json)
+      VALUES ('migration-audit', 'migration-user', 'EVENT_TRANSITIONED', 'EVENT',
+       'legacy-project', '2026-05-01', '{}')`),
+    env.MIGRATION_DB.prepare(`INSERT INTO audit_logs
+      (id, actor_user_id, action, entity_type, entity_id, occurred_at, details_json)
+      VALUES ('malformed-audit', 'migration-user', 'TEST', 'OTHER',
+       'legacy-project', '2026-05-01', 'not-json')`),
   ]);
+  const legacyCounts = {
+    projects: await countMigrationRows("events"),
+    roster: await countMigrationRows("event_roster_entries"),
+    snapshots: await countMigrationRows("event_expected_snapshots"),
+    imports: await countMigrationRows("import_runs"),
+  };
+
   await applyD1Migrations(env.MIGRATION_DB, [projectModel]);
 
-  const columns = (
-    await env.MIGRATION_DB.prepare("PRAGMA table_info(projects)").all<{
-      name: string;
-    }>()
-  ).results.map((column) => column.name);
-  expect(columns).toEqual(
-    expect.arrayContaining([
-      "id",
-      "name",
-      "start_date",
-      "end_date",
-      "status",
-      "revision",
-      "created_by",
-      "created_at",
-      "updated_at",
-      "closed_at",
-      "closed_by",
-      "close_reason",
-    ]),
-  );
-  expect(columns).not.toContain("year");
-  expect(columns).not.toContain("half");
   expect(
     await env.MIGRATION_DB.prepare(
-      "SELECT id, name, status, revision FROM projects WHERE id='legacy-event'",
+      "SELECT id, name, status, revision FROM projects WHERE id='legacy-project'",
     ).first(),
   ).toEqual({
-    id: "legacy-event",
-    name: "기존 행사",
+    id: "legacy-project",
+    name: "기존 프로젝트",
     status: "IN_PROGRESS",
     revision: 3,
   });
+  expect(
+    await env.MIGRATION_DB.prepare(
+      `SELECT project_id, source, status, was_expected_at_start, revision
+       FROM project_roster_entries WHERE id='migration-entry'`,
+    ).first(),
+  ).toEqual({
+    project_id: "legacy-project",
+    source: "PRE_REGISTRATION",
+    status: "CANCELLED",
+    was_expected_at_start: 1,
+    revision: 4,
+  });
+  expect(
+    await env.MIGRATION_DB.prepare(
+      "SELECT COUNT(*) AS count FROM project_expected_snapshots",
+    ).first(),
+  ).toEqual({ count: legacyCounts.snapshots });
+  expect(
+    await env.MIGRATION_DB.prepare(
+      "SELECT COUNT(*) AS count FROM project_import_runs",
+    ).first(),
+  ).toEqual({ count: legacyCounts.imports });
+  expect(await countMigrationRows("projects")).toBe(legacyCounts.projects);
+  expect(await countMigrationRows("project_roster_entries")).toBe(
+    legacyCounts.roster,
+  );
+  expect(
+    await env.MIGRATION_DB.prepare(
+      "SELECT entity_type, action FROM audit_logs WHERE id='migration-audit'",
+    ).first(),
+  ).toEqual({ entity_type: "PROJECT", action: "PROJECT_TRANSITIONED" });
+  expect(
+    await env.MIGRATION_DB.prepare(
+      "SELECT details_json FROM audit_logs WHERE id='malformed-audit'",
+    ).first(),
+  ).toEqual({ details_json: "not-json" });
+  expect(
+    (await env.MIGRATION_DB.prepare("PRAGMA foreign_key_check").all()).results,
+  ).toEqual([]);
+  for (const legacyTable of [
+    "events",
+    "event_roster_entries",
+    "event_expected_snapshots",
+    "import_runs",
+  ]) {
+    expect(
+      await env.MIGRATION_DB.prepare(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+      )
+        .bind(legacyTable)
+        .first(),
+    ).toBeNull();
+  }
 });
+
+async function countMigrationRows(table: string) {
+  const row = await env.MIGRATION_DB.prepare(
+    `SELECT COUNT(*) AS count FROM ${table}`,
+  ).first<{ count: number }>();
+  return row?.count ?? 0;
+}

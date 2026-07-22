@@ -5,12 +5,12 @@ import { addRoster, setupPreRegistration } from "./support/roster";
 
 beforeEach(resetAuthState);
 
-it("uses the current active pre-event roster as expected before DAY_OF", async () => {
+it("uses the current active pre-registration roster as expected before IN_PROGRESS", async () => {
   const fixture = await setupPreRegistration();
   await addRoster(fixture, fixture.firstParticipant.id);
   const summary = await authedRequest(
     fixture.operator,
-    `/api/v1/events/${fixture.event.id}/summary`,
+    `/api/v1/projects/${fixture.project.id}/summary`,
   );
   expect(await summary.json()).toMatchObject({
     expectedTotal: 1,
@@ -19,113 +19,125 @@ it("uses the current active pre-event roster as expected before DAY_OF", async (
   });
 });
 
-it("counts pre-event cancellation and day-of addition independently", async () => {
+it("counts pre-registration cancellation and in-progress addition independently", async () => {
   const fixture = await setupPreRegistration();
   const preResponse = await addRoster(fixture, fixture.firstParticipant.id);
   const preEntry = await preResponse.json<{
     id: string;
     revision: number;
-    eventRevision: number;
+    projectRevision: number;
   }>();
-  const dayOfResponse = await authedRequest(
+  const inProgressResponse = await authedRequest(
     fixture.operator,
-    `/api/v1/events/${fixture.event.id}/transition`,
+    `/api/v1/projects/${fixture.project.id}/transition`,
     {
       method: "POST",
       body: JSON.stringify({
-        targetStatus: "DAY_OF",
-        expectedRevision: preEntry.eventRevision,
+        targetStatus: "IN_PROGRESS",
+        expectedRevision: preEntry.projectRevision,
       }),
     },
   );
-  const dayOf = await dayOfResponse.json<{ revision: number }>();
+  const inProgress = await inProgressResponse.json<{ revision: number }>();
   const cancelled = await authedRequest(
     fixture.operator,
-    `/api/v1/events/${fixture.event.id}/roster/${preEntry.id}`,
+    `/api/v1/projects/${fixture.project.id}/roster/${preEntry.id}`,
     {
       method: "PATCH",
       body: JSON.stringify({
         status: "CANCELLED",
-        expectedRevision: dayOf.revision,
+        expectedRevision: inProgress.revision,
         expectedEntryRevision: preEntry.revision,
       }),
     },
   );
-  const afterCancel = await cancelled.json<{ eventRevision: number }>();
+  const afterCancel = await cancelled.json<{ projectRevision: number }>();
   await addRoster(
     {
       ...fixture,
-      event: { ...fixture.event, revision: afterCancel.eventRevision },
+      project: {
+        ...fixture.project,
+        revision: afterCancel.projectRevision,
+      },
     },
     fixture.secondParticipant.id,
   );
 
   const summary = await authedRequest(
     fixture.operator,
-    `/api/v1/events/${fixture.event.id}/summary`,
+    `/api/v1/projects/${fixture.project.id}/summary`,
   );
   expect(await summary.json()).toMatchObject({
     expectedTotal: 1,
     finalTotal: 1,
     deltaTotal: 0,
     organizations: [
-      { expected: 1, dayOfAdded: 1, dayOfCancelled: 1, final: 1, delta: 0 },
+      {
+        expected: 1,
+        inProgressAdded: 1,
+        inProgressCancelled: 1,
+        final: 1,
+        delta: 0,
+      },
     ],
   });
 });
 
-it("counts a pre-event row reactivated after DAY_OF as a day-of addition", async () => {
+it("counts a pre-registration row reactivated after IN_PROGRESS as an in-progress addition", async () => {
   const fixture = await setupPreRegistration();
   const added = await addRoster(fixture, fixture.firstParticipant.id);
   const entry = await added.json<{
     id: string;
     revision: number;
-    eventRevision: number;
+    projectRevision: number;
   }>();
   const cancelled = await authedRequest(
     fixture.operator,
-    `/api/v1/events/${fixture.event.id}/roster/${entry.id}`,
+    `/api/v1/projects/${fixture.project.id}/roster/${entry.id}`,
     {
       method: "PATCH",
       body: JSON.stringify({
         status: "CANCELLED",
-        expectedRevision: entry.eventRevision,
+        expectedRevision: entry.projectRevision,
         expectedEntryRevision: entry.revision,
       }),
     },
   );
   const cancelledEntry = await cancelled.json<{
     revision: number;
-    eventRevision: number;
+    projectRevision: number;
   }>();
   const transitioned = await authedRequest(
     fixture.operator,
-    `/api/v1/events/${fixture.event.id}/transition`,
+    `/api/v1/projects/${fixture.project.id}/transition`,
     {
       method: "POST",
       body: JSON.stringify({
-        targetStatus: "DAY_OF",
-        expectedRevision: cancelledEntry.eventRevision,
+        targetStatus: "IN_PROGRESS",
+        expectedRevision: cancelledEntry.projectRevision,
       }),
     },
   );
-  const dayOf = await transitioned.json<{ revision: number }>();
+  const inProgress = await transitioned.json<{ revision: number }>();
   const reactivated = await addRoster(
-    { ...fixture, event: { ...fixture.event, revision: dayOf.revision } },
+    {
+      ...fixture,
+      project: { ...fixture.project, revision: inProgress.revision },
+    },
     fixture.firstParticipant.id,
   );
   expect(await reactivated.json<{ source: string }>()).toMatchObject({
-    source: "DAY_OF",
+    source: "IN_PROGRESS",
   });
 
   const summary = await authedRequest(
     fixture.operator,
-    `/api/v1/events/${fixture.event.id}/summary`,
+    `/api/v1/projects/${fixture.project.id}/summary`,
   );
   expect(await summary.json()).toMatchObject({
     expectedTotal: 0,
     finalTotal: 1,
     deltaTotal: 1,
-    organizations: [{ dayOfAdded: 1, dayOfCancelled: 0 }],
+    organizations: [{ inProgressAdded: 1, inProgressCancelled: 0 }],
   });
 });

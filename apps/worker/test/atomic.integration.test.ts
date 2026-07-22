@@ -8,11 +8,11 @@ it("rolls back every statement when the guard is false", async () => {
     runGuardedAtomic(env.DB, {
       guardId: "guard-false",
       guardStatement: env.DB.prepare(
-        "INSERT INTO operation_guards (id, ok) VALUES (?, CASE WHEN EXISTS (SELECT 1 FROM events WHERE id = 'missing-event') THEN 1 ELSE 0 END)",
+        "INSERT INTO operation_guards (id, ok) VALUES (?, CASE WHEN EXISTS (SELECT 1 FROM projects WHERE id = 'missing-project') THEN 1 ELSE 0 END)",
       ).bind("guard-false"),
       statements: [
         env.DB.prepare(
-          "INSERT INTO audit_logs (id, actor_user_id, action, entity_type, entity_id, occurred_at, details_json) VALUES ('audit-rollback', NULL, 'TEST', 'event', 'missing-event', '2026-07-21', '{}')",
+          "INSERT INTO audit_logs (id, actor_user_id, action, entity_type, entity_id, occurred_at, details_json) VALUES ('audit-rollback', NULL, 'TEST', 'project', 'missing-project', '2026-07-21', '{}')",
         ),
       ],
       failureCode: "STALE_REVISION",
@@ -30,7 +30,7 @@ it("commits statements and removes a successful guard", async () => {
     ).bind("guard-true"),
     statements: [
       env.DB.prepare(
-        "INSERT INTO audit_logs (id, actor_user_id, action, entity_type, entity_id, occurred_at, details_json) VALUES ('audit-commit', NULL, 'TEST', 'event', 'event-1', '2026-07-21', '{}')",
+        "INSERT INTO audit_logs (id, actor_user_id, action, entity_type, entity_id, occurred_at, details_json) VALUES ('audit-commit', NULL, 'TEST', 'project', 'project-1', '2026-07-21', '{}')",
       ),
     ],
     failureCode: "STALE_REVISION",

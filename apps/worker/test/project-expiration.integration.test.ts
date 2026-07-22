@@ -6,6 +6,7 @@ import {
 import { env } from "cloudflare:workers";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { findProject } from "../src/db/projects";
+import type { Env } from "../src/env";
 import worker from "../src/index";
 import {
   closeExpiredProject,
@@ -61,6 +62,36 @@ it("closes an expired project once with one SYSTEM audit row", async () => {
   expect(audits).toEqual([
     { actor_user_id: null, action: "PROJECT_AUTO_CLOSED" },
   ]);
+});
+
+it("retries an expired project close after a revision race", async () => {
+  const operator = await seedOperator();
+  await insertProject(operator.userId, "project-race", "2026-05-23");
+  let pending = true;
+  const raceDb = {
+    prepare: (query: string) => env.DB.prepare(query),
+    batch: async (statements: D1PreparedStatement[]) => {
+      if (pending) {
+        pending = false;
+        await env.DB.prepare(
+          "UPDATE projects SET revision=revision+1 WHERE id='project-race'",
+        ).run();
+      }
+      return env.DB.batch(statements);
+    },
+  } as D1Database;
+
+  expect(
+    await closeExpiredProject(
+      { ...(env as Env), DB: raceDb },
+      "project-race",
+      new Date("2026-05-23T15:00:00.000Z"),
+    ),
+  ).toBe(true);
+  expect(await findProject(env.DB, "project-race")).toMatchObject({
+    status: "CLOSED",
+    revision: 2,
+  });
 });
 
 it("rolls the project close back when the SYSTEM audit insert fails", async () => {

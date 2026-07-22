@@ -6,12 +6,12 @@ import { addRoster, setupPreRegistration } from "./support/roster";
 
 beforeEach(resetAuthState);
 
-it("paginates event audit history with an opaque cursor", async () => {
+it("paginates project audit history with an opaque cursor", async () => {
   const fixture = await setupPreRegistration();
   await addRoster(fixture, fixture.firstParticipant.id);
   const first = await authedRequest(
     fixture.operator,
-    `/api/v1/events/${fixture.event.id}/audit-logs?limit=1`,
+    `/api/v1/projects/${fixture.project.id}/audit?limit=1`,
   );
   const firstPage = await first.json<{
     items: Array<{ action: string }>;
@@ -20,11 +20,11 @@ it("paginates event audit history with an opaque cursor", async () => {
   expect(first.status).toBe(200);
   expect(firstPage.items).toHaveLength(1);
   expect(firstPage.nextCursor).toBeTruthy();
-  expect(firstPage.nextCursor).not.toContain(fixture.event.id);
+  expect(firstPage.nextCursor).not.toContain(fixture.project.id);
 
   const second = await authedRequest(
     fixture.operator,
-    `/api/v1/events/${fixture.event.id}/audit-logs?limit=1&cursor=${encodeURIComponent(
+    `/api/v1/projects/${fixture.project.id}/audit?limit=1&cursor=${encodeURIComponent(
       firstPage.nextCursor ?? "",
     )}`,
   );
@@ -35,7 +35,7 @@ it("rejects malformed audit cursors as validation errors", async () => {
   const fixture = await setupPreRegistration();
   const response = await authedRequest(
     fixture.operator,
-    `/api/v1/events/${fixture.event.id}/audit-logs?cursor=not-a-cursor`,
+    `/api/v1/projects/${fixture.project.id}/audit?cursor=not-a-cursor`,
   );
   expect(response.status).toBe(422);
   expect(await response.json<{ code: string }>()).toMatchObject({
@@ -48,13 +48,13 @@ it("allowlists audit details and never exposes credential-like fields", async ()
   await env.DB.prepare(
     `INSERT INTO audit_logs
      (id, actor_user_id, action, entity_type, entity_id, occurred_at, details_json)
-     VALUES ('unsafe-audit', 'user-1', 'TEST', 'EVENT', ?,
+     VALUES ('unsafe-audit', 'user-1', 'TEST', 'PROJECT', ?,
              '2099-01-01T00:00:00.000Z', ?)`,
   )
     .bind(
-      fixture.event.id,
+      fixture.project.id,
       JSON.stringify({
-        eventId: fixture.event.id,
+        projectId: fixture.project.id,
         organizationId: "org-1",
         csrfToken: "must-not-leak",
         recoveryCode: "must-not-leak",
@@ -63,7 +63,7 @@ it("allowlists audit details and never exposes credential-like fields", async ()
     .run();
   const response = await authedRequest(
     fixture.operator,
-    `/api/v1/events/${fixture.event.id}/audit-logs?limit=10`,
+    `/api/v1/projects/${fixture.project.id}/audit?limit=10`,
   );
   const body = await response.json();
   expect(JSON.stringify(body)).not.toContain("must-not-leak");

@@ -1,5 +1,5 @@
-import type { EventSummary } from "@event-roster/contracts";
 import { Card } from "../../components/ui/Card";
+import type { EventSummary } from "../events/legacy-event-contracts";
 
 export function SummaryCards({ summary }: { summary: EventSummary }) {
   return (

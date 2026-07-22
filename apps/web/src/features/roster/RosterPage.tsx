@@ -1,4 +1,3 @@
-import type { EventSummary } from "@event-roster/contracts";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "../../components/ui/Button";
 import { Card } from "../../components/ui/Card";
@@ -8,6 +7,7 @@ import type { ExportData } from "../../lib/excel/download-workbook";
 import type { OrganizationView } from "../admin/UserForm";
 import { useAuth } from "../auth/AuthProvider";
 import type { EventView } from "../events/EventsPage";
+import type { EventSummary } from "../events/legacy-event-contracts";
 import { AuditPanel, type AuditView } from "./AuditPanel";
 import { ParticipantDialog, type ParticipantView } from "./ParticipantDialog";
 import { ParticipantEditDialog } from "./ParticipantEditDialog";

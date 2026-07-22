@@ -12,5 +12,5 @@ export type NormalizedImportRow = z.infer<typeof NormalizedImportRowSchema>;
 
 export const ImportCommitRequestSchema = z.object({
   rows: z.array(NormalizedImportRowSchema).min(1).max(130),
-  revision: z.number().int().nonnegative(),
+  expectedProjectRevision: z.number().int().nonnegative(),
 });

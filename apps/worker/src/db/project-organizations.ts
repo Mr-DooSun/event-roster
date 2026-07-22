@@ -18,8 +18,8 @@ const SELECT_PROJECT_ORGANIZATION = `SELECT
    WHERE active.organization_id = po.organization_id
      AND active.is_active = 1) AS active_project_count,
   EXISTS (
-    SELECT 1 FROM event_roster_entries roster
-    WHERE roster.event_id = po.project_id
+    SELECT 1 FROM project_roster_entries roster
+    WHERE roster.project_id = po.project_id
       AND roster.organization_id = po.organization_id
     UNION ALL
     SELECT 1 FROM project_expected_snapshots snapshot

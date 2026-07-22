@@ -262,7 +262,7 @@ it("reports global rename impact without rewriting a roster snapshot", async () 
   const organization = await seedOrganization();
   const project = await seedProject(operator);
   await linkProjectOrganization(operator, project.id, organization.id);
-  await seedLegacyRosterSnapshot(
+  await seedRosterSnapshot(
     project.id,
     organization.id,
     organization.name,
@@ -283,7 +283,7 @@ it("reports global rename impact without rewriting a roster snapshot", async () 
   expect(
     (
       await env.DB.prepare(
-        "SELECT organization_name_snapshot FROM event_roster_entries WHERE event_id=? LIMIT 1",
+        "SELECT organization_name_snapshot FROM project_roster_entries WHERE project_id=? LIMIT 1",
       )
         .bind(project.id)
         .first<{ organization_name_snapshot: string }>()
@@ -350,7 +350,7 @@ async function linkProjectOrganization(
   expect(response.status).toBe(201);
 }
 
-async function seedLegacyRosterSnapshot(
+async function seedRosterSnapshot(
   projectId: string,
   organizationId: string,
   organizationName: string,
@@ -358,14 +358,6 @@ async function seedLegacyRosterSnapshot(
 ) {
   const now = "2026-05-01T00:00:00.000Z";
   await env.DB.batch([
-    env.DB.prepare(`INSERT INTO events
-      (id, year, half, name, status, revision, created_by, created_at, updated_at)
-      VALUES (?, 2099, 'H1', 'legacy', 'PRE_REGISTRATION', 0, ?, ?, ?)`).bind(
-      projectId,
-      userId,
-      now,
-      now,
-    ),
     env.DB.prepare(`INSERT INTO participants
       (id, participant_id, name, organization_id, revision, created_at, updated_at)
       VALUES ('legacy-person', 'P-LEGACY', '기존 참가자', ?, 0, ?, ?)`).bind(
@@ -373,11 +365,11 @@ async function seedLegacyRosterSnapshot(
       now,
       now,
     ),
-    env.DB.prepare(`INSERT INTO event_roster_entries
-      (id, event_id, participant_id, organization_id, participant_name_snapshot,
+    env.DB.prepare(`INSERT INTO project_roster_entries
+      (id, project_id, participant_id, organization_id, participant_name_snapshot,
        organization_name_snapshot, source, status, revision, created_by, updated_by, created_at, updated_at)
       VALUES ('legacy-entry', ?, 'legacy-person', ?, '기존 참가자', ?,
-       'PRE_EVENT', 'ACTIVE', 0, ?, ?, ?, ?)`).bind(
+       'PRE_REGISTRATION', 'ACTIVE', 0, ?, ?, ?, ?)`).bind(
       projectId,
       organizationId,
       organizationName,

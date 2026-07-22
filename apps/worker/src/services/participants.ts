@@ -1,10 +1,14 @@
-import { DomainError } from "@event-roster/domain";
-import { findOrganization } from "../db/admin";
+import type { ProjectStatus, RosterSource } from "@event-roster/contracts";
+import { DomainError, toKstDate } from "@event-roster/domain";
 import { runGuardedAtomic } from "../db/atomic";
+import { findProjectOrganization } from "../db/project-organizations";
+import { findProject } from "../db/projects";
+import { findRosterByParticipant, type RosterRecord } from "../db/roster";
 import type { Env } from "../env";
 import type { Actor } from "../middleware/authentication";
+import { closeExpiredProject } from "./project-expiration";
 
-interface ParticipantRecord {
+export interface ParticipantRecord {
   id: string;
   participantId: string;
   name: string;
@@ -18,219 +22,361 @@ export async function getParticipants(env: Env, actor: Actor) {
   const sql = manager
     ? `SELECT id, participant_id, name, organization_id, revision FROM participants
        WHERE organization_id IN (${actor.session.user.organizationIds.map(() => "?").join(",")})
-       ORDER BY name`
-    : "SELECT id, participant_id, name, organization_id, revision FROM participants ORDER BY name";
+       ORDER BY name, participant_id`
+    : `SELECT id, participant_id, name, organization_id, revision
+       FROM participants ORDER BY name, participant_id`;
   const rows = (
     await env.DB.prepare(sql)
       .bind(...(manager ? actor.session.user.organizationIds : []))
-      .all<{
-        id: string;
-        participant_id: string;
-        name: string;
-        organization_id: string;
-        revision: number;
-      }>()
+      .all<ParticipantRow>()
   ).results;
   return rows.map(mapParticipant);
 }
 
-export async function createParticipant(
+export async function createParticipantAndAddToProject(
   env: Env,
   actor: Actor,
-  input: { name: string; organizationId: string },
-) {
-  assertActorScope(actor, input.organizationId);
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    const id = crypto.randomUUID();
-    const participantId = `P-${crypto.randomUUID().toUpperCase()}`;
-    const now = new Date().toISOString();
-    const guardId = crypto.randomUUID();
-    try {
-      await runGuardedAtomic(env.DB, {
-        guardId,
-        guardStatement: participantGuard(
-          env.DB,
-          guardId,
-          actor,
-          input.organizationId,
-          `EXISTS (
-             SELECT 1 FROM organizations WHERE id = ? AND is_active = 1
-           )`,
-          [input.organizationId],
-        ),
-        statements: [
-          env.DB.prepare(
-            `INSERT INTO participants
-           (id, participant_id, name, organization_id, revision, created_at, updated_at)
-           VALUES (?, ?, ?, ?, 0, ?, ?)`,
-          ).bind(id, participantId, input.name, input.organizationId, now, now),
-          env.DB.prepare(
-            `INSERT INTO audit_logs
-           (id, actor_user_id, action, entity_type, entity_id, occurred_at, details_json)
-           VALUES (?, ?, 'PARTICIPANT_CREATED', 'PARTICIPANT', ?, ?, '{}')`,
-          ).bind(crypto.randomUUID(), actor.session.user.id, id, now),
-        ],
-        failureCode: "CONFLICT",
-      });
-      return { id, participantId, ...input, revision: 0 };
-    } catch (error) {
-      if (!isConstraint(error) || attempt === 1) throw error;
-    }
+  projectId: string,
+  input: { name: string; organizationId: string; expectedRevision: number },
+  now = new Date(),
+): Promise<{
+  participant: ParticipantRecord;
+  rosterEntry: RosterRecord;
+  projectRevision: number;
+}> {
+  const project = await requireRosterMutableProject(env, projectId, now);
+  assertActorScope(actor, input.organizationId, project.status);
+  const membership = await findProjectOrganization(
+    env.DB,
+    projectId,
+    input.organizationId,
+  );
+  if (!membership?.isActive || !membership.masterIsActive) {
+    throw new DomainError("VALIDATION_FAILED");
   }
-  throw new DomainError("CONFLICT");
+  const participantId = crypto.randomUUID();
+  const participantNumber = `P-${crypto.randomUUID().toUpperCase()}`;
+  const entryId = crypto.randomUUID();
+  const timestamp = now.toISOString();
+  const source: RosterSource =
+    project.status === "PRE_REGISTRATION" ? "PRE_REGISTRATION" : "IN_PROGRESS";
+  const guardId = crypto.randomUUID();
+  let results: D1Result[];
+  try {
+    results = await runGuardedAtomic(env.DB, {
+      guardId,
+      guardStatement: projectParticipantGuard(
+        env.DB,
+        guardId,
+        actor,
+        projectId,
+        input.organizationId,
+        project.status,
+        input.expectedRevision,
+        toKstDate(now),
+        `EXISTS (
+           SELECT 1 FROM project_organizations po
+           JOIN organizations o ON o.id = po.organization_id
+           WHERE po.project_id = ? AND po.organization_id = ?
+             AND po.is_active = 1 AND o.is_active = 1
+         )`,
+        [projectId, input.organizationId],
+      ),
+      statements: [
+        env.DB.prepare(
+          `INSERT INTO participants
+         (id, participant_id, name, organization_id, revision, created_at, updated_at)
+         VALUES (?, ?, ?, ?, 0, ?, ?)`,
+        ).bind(
+          participantId,
+          participantNumber,
+          input.name,
+          input.organizationId,
+          timestamp,
+          timestamp,
+        ),
+        env.DB.prepare(
+          `INSERT INTO project_roster_entries
+         (id, project_id, participant_id, organization_id,
+          participant_name_snapshot, organization_name_snapshot, source, status,
+          was_expected_at_start, revision, created_by, updated_by, created_at, updated_at)
+         SELECT ?, ?, ?, o.id, ?, o.name, ?, 'ACTIVE', 0, 0, ?, ?, ?, ?
+         FROM organizations o WHERE o.id = ?`,
+        ).bind(
+          entryId,
+          projectId,
+          participantId,
+          input.name,
+          source,
+          actor.session.user.id,
+          actor.session.user.id,
+          timestamp,
+          timestamp,
+          input.organizationId,
+        ),
+        incrementProject(env.DB, projectId, timestamp),
+        auditStatement(
+          env.DB,
+          actor,
+          "PARTICIPANT_CREATED",
+          "PARTICIPANT",
+          participantId,
+          projectId,
+          input.organizationId,
+          timestamp,
+        ),
+        auditStatement(
+          env.DB,
+          actor,
+          "ROSTER_ADDED",
+          "ROSTER_ENTRY",
+          entryId,
+          projectId,
+          input.organizationId,
+          timestamp,
+        ),
+      ],
+      failureCode: "STALE_REVISION",
+    });
+  } catch (error) {
+    if (error instanceof DomainError) {
+      await closeExpiredProject(env, projectId, now);
+      const latest = await findProject(env.DB, projectId);
+      if (latest?.status === "CLOSED") throw new DomainError("PROJECT_CLOSED");
+    }
+    throw error;
+  }
+  if (!results[1]?.success) throw new DomainError("INTERNAL_ERROR");
+  return {
+    participant: {
+      id: participantId,
+      participantId: participantNumber,
+      name: input.name,
+      organizationId: input.organizationId,
+      revision: 0,
+    },
+    rosterEntry: {
+      id: entryId,
+      projectId,
+      participantId,
+      participantNumber,
+      organizationId: input.organizationId,
+      participantName: input.name,
+      organizationName: membership.name,
+      source,
+      status: "ACTIVE",
+      wasExpectedAtStart: false,
+      revision: 0,
+      updatedAt: timestamp,
+    },
+    projectRevision: input.expectedRevision + 1,
+  };
 }
 
-export async function updateParticipant(
+export async function updateProjectParticipant(
   env: Env,
   actor: Actor,
-  id: string,
+  projectId: string,
+  participantId: string,
   input: {
     name?: string | undefined;
     organizationId?: string | undefined;
     expectedRevision: number;
+    expectedProjectRevision: number;
   },
-) {
-  const current = await findParticipant(env.DB, id);
-  if (!current) throw new DomainError("NOT_FOUND");
-  assertActorScope(actor, current.organizationId);
-  const nextOrganization = input.organizationId ?? current.organizationId;
-  if (
-    nextOrganization !== current.organizationId &&
-    (await isOnDayOfRoster(env.DB, current.id))
-  ) {
-    throw new DomainError("CONFLICT");
-  }
+  now = new Date(),
+): Promise<ParticipantRecord & { projectRevision: number }> {
+  await closeExpiredProject(env, projectId, now);
+  const project = await findProject(env.DB, projectId);
+  if (!project) throw new DomainError("NOT_FOUND");
+  if (project.status === "CLOSED") throw new DomainError("PROJECT_CLOSED");
+  const [current, entry] = await Promise.all([
+    findParticipant(env.DB, participantId),
+    findRosterByParticipant(env.DB, projectId, participantId),
+  ]);
+  if (!current || !entry) throw new DomainError("NOT_FOUND");
+  assertActorScope(actor, entry.organizationId, project.status);
   if (
     actor.session.user.role === "ORGANIZATION_MANAGER" &&
-    nextOrganization !== current.organizationId
+    current.organizationId !== entry.organizationId
   ) {
     throw new DomainError("FORBIDDEN");
   }
-  const organization = await findOrganization(env.DB, nextOrganization);
-  if (!organization?.isActive) throw new DomainError("CONFLICT");
-  const now = new Date().toISOString();
-  const guardId = crypto.randomUUID();
-  const statements: D1PreparedStatement[] = [
-    env.DB.prepare(
-      `UPDATE participants SET name = ?, organization_id = ?,
-       revision = revision + 1, updated_at = ? WHERE id = ?`,
-    ).bind(input.name ?? current.name, nextOrganization, now, id),
-    env.DB.prepare(
-      `UPDATE event_roster_entries
-       SET participant_name_snapshot = ?, updated_at = ?, revision = revision + 1
-       WHERE participant_id = ? AND event_id IN (
-         SELECT id FROM events WHERE status IN ('PRE_REGISTRATION', 'DAY_OF')
-       )`,
-    ).bind(input.name ?? current.name, now, id),
-  ];
-  if (nextOrganization !== current.organizationId) {
-    statements.push(
-      env.DB.prepare(
-        `UPDATE event_roster_entries
-         SET organization_id = ?, organization_name_snapshot = ?,
-             updated_at = ?
-         WHERE participant_id = ? AND event_id IN (
-           SELECT id FROM events WHERE status = 'PRE_REGISTRATION'
-         )`,
-      ).bind(nextOrganization, organization.name, now, id),
-    );
+  const nextOrganizationId = input.organizationId ?? current.organizationId;
+  if (
+    actor.session.user.role === "ORGANIZATION_MANAGER" &&
+    nextOrganizationId !== current.organizationId
+  ) {
+    throw new DomainError("FORBIDDEN");
   }
-  statements.push(
-    env.DB.prepare(
-      `UPDATE events SET revision = revision + 1, updated_at = ?
-       WHERE status IN ('PRE_REGISTRATION', 'DAY_OF') AND id IN (
-         SELECT event_id FROM event_roster_entries WHERE participant_id = ?
-       )`,
-    ).bind(now, id),
-    env.DB.prepare(
-      `INSERT INTO audit_logs
-       (id, actor_user_id, action, entity_type, entity_id, occurred_at, details_json)
-       VALUES (?, ?, 'PARTICIPANT_UPDATED', 'PARTICIPANT', ?, ?, '{}')`,
-    ).bind(crypto.randomUUID(), actor.session.user.id, id, now),
-  );
+  if (nextOrganizationId !== current.organizationId) {
+    const membership = await findProjectOrganization(
+      env.DB,
+      projectId,
+      nextOrganizationId,
+    );
+    if (!membership?.isActive || !membership.masterIsActive) {
+      throw new DomainError("VALIDATION_FAILED");
+    }
+  }
+  const timestamp = now.toISOString();
+  const guardId = crypto.randomUUID();
+  const membershipPredicate =
+    nextOrganizationId === current.organizationId
+      ? "1 = 1"
+      : `EXISTS (
+           SELECT 1 FROM project_organizations po
+           JOIN organizations o ON o.id = po.organization_id
+           WHERE po.project_id = ? AND po.organization_id = ?
+             AND po.is_active = 1 AND o.is_active = 1
+         )`;
+  const membershipBindings =
+    nextOrganizationId === current.organizationId
+      ? []
+      : [projectId, nextOrganizationId];
   try {
     await runGuardedAtomic(env.DB, {
       guardId,
-      guardStatement: participantGuard(
+      guardStatement: projectParticipantGuard(
         env.DB,
         guardId,
         actor,
-        current.organizationId,
+        projectId,
+        entry.organizationId,
+        project.status,
+        input.expectedProjectRevision,
+        toKstDate(now),
         `EXISTS (
            SELECT 1 FROM participants WHERE id = ? AND revision = ?
          ) AND EXISTS (
-           SELECT 1 FROM organizations WHERE id = ? AND is_active = 1
-         ) AND (? = ? OR NOT EXISTS (
-           SELECT 1 FROM event_roster_entries r
-           JOIN events e ON e.id = r.event_id
-           WHERE r.participant_id = ? AND e.status = 'DAY_OF'
-         ))`,
+           SELECT 1 FROM project_roster_entries
+           WHERE project_id = ? AND participant_id = ?
+         ) AND EXISTS (
+           SELECT 1 FROM users scoped_user
+           WHERE scoped_user.id = ? AND (
+             scoped_user.role = 'OPERATOR' OR EXISTS (
+               SELECT 1 FROM participants scoped_participant
+               JOIN project_roster_entries scoped_roster
+                 ON scoped_roster.participant_id = scoped_participant.id
+               WHERE scoped_participant.id = ?
+                 AND scoped_roster.project_id = ?
+                 AND scoped_participant.organization_id = scoped_roster.organization_id
+             )
+           )
+         ) AND ${membershipPredicate}`,
         [
-          id,
+          participantId,
           input.expectedRevision,
-          nextOrganization,
-          current.organizationId,
-          nextOrganization,
-          id,
+          projectId,
+          participantId,
+          actor.session.user.id,
+          participantId,
+          projectId,
+          ...membershipBindings,
         ],
       ),
-      statements,
+      statements: [
+        env.DB.prepare(
+          `UPDATE participants
+           SET name = ?, organization_id = ?, revision = revision + 1,
+               updated_at = ? WHERE id = ?`,
+        ).bind(
+          input.name ?? current.name,
+          nextOrganizationId,
+          timestamp,
+          participantId,
+        ),
+        incrementProject(env.DB, projectId, timestamp),
+        auditStatement(
+          env.DB,
+          actor,
+          "PARTICIPANT_UPDATED",
+          "PARTICIPANT",
+          participantId,
+          projectId,
+          entry.organizationId,
+          timestamp,
+        ),
+      ],
       failureCode: "STALE_REVISION",
     });
   } catch (error) {
-    if (error instanceof DomainError && error.code === "STALE_REVISION") {
-      throw await classifyParticipantGuardFailure(
-        env.DB,
-        actor,
-        id,
-        current.organizationId,
-        nextOrganization,
-        input.expectedRevision,
-      );
+    if (error instanceof DomainError) {
+      await closeExpiredProject(env, projectId, now);
+      const latest = await findProject(env.DB, projectId);
+      if (latest?.status === "CLOSED") throw new DomainError("PROJECT_CLOSED");
     }
     throw error;
   }
   return {
     ...current,
     name: input.name ?? current.name,
-    organizationId: nextOrganization,
+    organizationId: nextOrganizationId,
     revision: input.expectedRevision + 1,
+    projectRevision: input.expectedProjectRevision + 1,
   };
+}
+
+interface ParticipantRow {
+  id: string;
+  participant_id: string;
+  name: string;
+  organization_id: string;
+  revision: number;
 }
 
 async function findParticipant(db: D1Database, id: string) {
   const row = await db
     .prepare(
-      "SELECT id, participant_id, name, organization_id, revision FROM participants WHERE id = ?",
+      `SELECT id, participant_id, name, organization_id, revision
+       FROM participants WHERE id = ?`,
     )
     .bind(id)
-    .first<{
-      id: string;
-      participant_id: string;
-      name: string;
-      organization_id: string;
-      revision: number;
-    }>();
+    .first<ParticipantRow>();
   return row ? mapParticipant(row) : null;
 }
 
-async function isOnDayOfRoster(db: D1Database, participantId: string) {
-  const row = await db
-    .prepare(
-      `SELECT 1 AS found FROM event_roster_entries r
-       JOIN events e ON e.id = r.event_id
-       WHERE r.participant_id = ? AND e.status = 'DAY_OF' LIMIT 1`,
-    )
-    .bind(participantId)
-    .first<{ found: number }>();
-  return row?.found === 1;
+async function requireRosterMutableProject(
+  env: Env,
+  projectId: string,
+  now: Date,
+) {
+  await closeExpiredProject(env, projectId, now);
+  const project = await findProject(env.DB, projectId);
+  if (!project) throw new DomainError("NOT_FOUND");
+  if (project.status === "CLOSED") throw new DomainError("PROJECT_CLOSED");
+  if (
+    project.status !== "PRE_REGISTRATION" &&
+    project.status !== "IN_PROGRESS"
+  ) {
+    throw new DomainError("CONFLICT");
+  }
+  return project;
 }
 
-function participantGuard(
+function assertActorScope(
+  actor: Actor,
+  organizationId: string,
+  projectStatus: ProjectStatus,
+) {
+  if (
+    actor.session.user.role === "ORGANIZATION_MANAGER" &&
+    (!actor.session.user.organizationIds.includes(organizationId) ||
+      projectStatus !== "PRE_REGISTRATION")
+  ) {
+    throw new DomainError("FORBIDDEN");
+  }
+}
+
+function projectParticipantGuard(
   db: D1Database,
   guardId: string,
   actor: Actor,
+  projectId: string,
   organizationId: string,
+  projectStatus: ProjectStatus,
+  expectedProjectRevision: number,
+  today: string,
   operationPredicate: string,
   operationBindings: Array<string | number>,
 ) {
@@ -238,17 +384,17 @@ function participantGuard(
     .prepare(
       `INSERT INTO operation_guards (id, ok)
        VALUES (?, CASE WHEN EXISTS (
-         SELECT 1 FROM users u
-         JOIN auth_sessions s ON s.user_id = u.id
-         WHERE u.id = ? AND s.id = ? AND s.revoked_at IS NULL
-           AND u.is_active = 1 AND s.kind = 'FULL'
-           AND u.session_version = ? AND s.session_version = ?
-           AND (
-             u.role = 'OPERATOR' OR EXISTS (
-               SELECT 1 FROM user_organizations uo
-               WHERE uo.user_id = u.id AND uo.organization_id = ?
-             )
-           )
+         SELECT 1 FROM users u JOIN auth_sessions s ON s.user_id = u.id
+         WHERE u.id = ? AND s.id = ? AND s.revoked_at IS NULL AND s.kind = 'FULL'
+           AND u.is_active = 1 AND u.session_version = ? AND s.session_version = ?
+           AND (u.role = 'OPERATOR' OR (? = 'PRE_REGISTRATION' AND EXISTS (
+             SELECT 1 FROM user_organizations uo
+             WHERE uo.user_id = u.id AND uo.organization_id = ?
+           )))
+       ) AND EXISTS (
+         SELECT 1 FROM projects
+         WHERE id = ? AND status = ? AND revision = ?
+           AND (end_date IS NULL OR end_date >= ?)
        ) AND (${operationPredicate}) THEN 1 ELSE 0 END)`,
     )
     .bind(
@@ -257,86 +403,56 @@ function participantGuard(
       actor.session.id,
       actor.claims.sv,
       actor.claims.sv,
+      projectStatus,
       organizationId,
+      projectId,
+      projectStatus,
+      expectedProjectRevision,
+      today,
       ...operationBindings,
     );
 }
 
-async function classifyParticipantGuardFailure(
+function incrementProject(
+  db: D1Database,
+  projectId: string,
+  timestamp: string,
+) {
+  return db
+    .prepare(
+      "UPDATE projects SET revision = revision + 1, updated_at = ? WHERE id = ?",
+    )
+    .bind(timestamp, projectId);
+}
+
+function auditStatement(
   db: D1Database,
   actor: Actor,
-  participantId: string,
-  currentOrganizationId: string,
-  nextOrganizationId: string,
-  expectedRevision: number,
-): Promise<DomainError> {
-  const currentActor = await db
+  action: string,
+  entityType: string,
+  entityId: string,
+  projectId: string,
+  organizationId: string,
+  timestamp: string,
+) {
+  return db
     .prepare(
-      `SELECT u.role, u.is_active, u.session_version AS user_version,
-              s.session_version, s.kind, s.revoked_at
-       FROM users u JOIN auth_sessions s ON s.user_id = u.id
-       WHERE u.id = ? AND s.id = ?`,
+      `INSERT INTO audit_logs
+       (id, actor_user_id, action, entity_type, entity_id, occurred_at, details_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
     )
-    .bind(actor.session.user.id, actor.session.id)
-    .first<{
-      role: "OPERATOR" | "ORGANIZATION_MANAGER";
-      is_active: number;
-      user_version: number;
-      session_version: number;
-      kind: "FULL" | "MUST_CHANGE_PASSWORD";
-      revoked_at: string | null;
-    }>();
-  if (
-    currentActor?.is_active !== 1 ||
-    currentActor.revoked_at ||
-    currentActor.kind !== "FULL" ||
-    currentActor.user_version !== actor.claims.sv ||
-    currentActor.session_version !== actor.claims.sv
-  ) {
-    return new DomainError("AUTHENTICATION_REQUIRED");
-  }
-  if (currentActor.role === "ORGANIZATION_MANAGER") {
-    const linked = await db
-      .prepare(
-        `SELECT 1 AS found FROM user_organizations
-         WHERE user_id = ? AND organization_id = ?`,
-      )
-      .bind(actor.session.user.id, currentOrganizationId)
-      .first<{ found: number }>();
-    if (!linked) return new DomainError("FORBIDDEN");
-  }
-  const organization = await findOrganization(db, nextOrganizationId);
-  if (!organization?.isActive) return new DomainError("CONFLICT");
-  const participant = await findParticipant(db, participantId);
-  if (!participant) return new DomainError("NOT_FOUND");
-  if (participant.revision !== expectedRevision) {
-    return new DomainError("STALE_REVISION");
-  }
-  if (
-    nextOrganizationId !== currentOrganizationId &&
-    (await isOnDayOfRoster(db, participantId))
-  ) {
-    return new DomainError("CONFLICT");
-  }
-  return new DomainError("CONFLICT");
+    .bind(
+      crypto.randomUUID(),
+      actor.session.user.id,
+      action,
+      entityType,
+      entityId,
+      timestamp,
+      JSON.stringify({ projectId, organizationId }),
+    );
 }
 
-function assertActorScope(actor: Actor, organizationId: string) {
-  if (
-    actor.session.user.role === "ORGANIZATION_MANAGER" &&
-    !actor.session.user.organizationIds.includes(organizationId)
-  ) {
-    throw new DomainError("FORBIDDEN");
-  }
-}
-
-function mapParticipant(row: {
-  id: string;
-  participant_id: string;
-  name: string;
-  organization_id: string;
-  revision: number;
-}): ParticipantRecord {
+function mapParticipant(row: ParticipantRow): ParticipantRecord {
   return {
     id: row.id,
     participantId: row.participant_id,
@@ -344,8 +460,4 @@ function mapParticipant(row: {
     organizationId: row.organization_id,
     revision: row.revision,
   };
-}
-
-function isConstraint(error: unknown): boolean {
-  return error instanceof Error && error.message.includes("SQLITE_CONSTRAINT");
 }

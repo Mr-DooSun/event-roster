@@ -3,132 +3,172 @@ import { beforeEach, expect, it } from "vitest";
 import {
   authedRequest,
   seedManager,
-  seedOperator,
   seedOrganization,
+  seedProject,
 } from "./support/admin";
 import { resetAuthState } from "./support/auth";
+import { addRoster, setupPreRegistration } from "./support/roster";
 
 beforeEach(resetAuthState);
 
-it("limits organization managers to active linked organizations", async () => {
-  await seedOrganization("org-1", "1팀");
-  await seedOrganization("org-2", "2팀");
-  const manager = await seedManager("org-1");
-  const own = await authedRequest(manager, "/api/v1/participants", {
-    method: "POST",
-    body: JSON.stringify({ name: "김참가", organizationId: "org-1" }),
-  });
-  const other = await authedRequest(manager, "/api/v1/participants", {
-    method: "POST",
-    body: JSON.stringify({ name: "이참가", organizationId: "org-2" }),
-  });
+it("keeps global participants read-only", async () => {
+  const fixture = await setupPreRegistration();
+  const list = await authedRequest(fixture.operator, "/api/v1/participants");
+  expect(list.status).toBe(200);
+  expect(await list.json<Array<{ id: string }>>()).toHaveLength(2);
 
-  expect(own.status).toBe(201);
-  expect(other.status).toBe(403);
+  const create = await authedRequest(fixture.operator, "/api/v1/participants", {
+    method: "POST",
+    body: JSON.stringify({ name: "전역 생성 금지", organizationId: "org-1" }),
+  });
+  const update = await authedRequest(
+    fixture.operator,
+    `/api/v1/participants/${fixture.firstParticipant.id}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({ name: "전역 수정 금지", expectedRevision: 0 }),
+    },
+  );
+  expect(create.status).toBe(404);
+  expect(update.status).toBe(404);
 });
 
-it("rejects participant writes for inactive organizations", async () => {
-  await seedOrganization("org-1", "1팀", false);
-  const operator = await seedOperator();
-  const response = await authedRequest(operator, "/api/v1/participants", {
-    method: "POST",
-    body: JSON.stringify({ name: "김참가", organizationId: "org-1" }),
+it("updates the participant master organization without rewriting past snapshots", async () => {
+  const fixture = await setupPreRegistration();
+  const secondOrganization = await seedOrganization("org-2", "2팀");
+  const otherProject = await seedProject(fixture.operator, {
+    name: "다른 프로젝트",
   });
-  expect(response.status).toBe(409);
-});
-
-it("rejects moving a participant who is on a DAY_OF roster", async () => {
-  await seedOrganization("org-1", "1팀");
-  await seedOrganization("org-2", "2팀");
-  const operator = await seedOperator();
-  const created = await authedRequest(operator, "/api/v1/participants", {
-    method: "POST",
-    body: JSON.stringify({ name: "김참가", organizationId: "org-1" }),
-  });
-  const participant = await created.json<{ id: string; revision: number }>();
+  for (const [projectId, organizationId] of [
+    [fixture.project.id, secondOrganization.id],
+    [otherProject.id, "org-1"],
+  ]) {
+    const linked = await authedRequest(
+      fixture.operator,
+      `/api/v1/projects/${projectId}/organizations`,
+      {
+        method: "POST",
+        body: JSON.stringify({ organizationId }),
+      },
+    );
+    expect(linked.status).toBe(201);
+  }
   const now = "2026-07-21T00:00:00.000Z";
-  await env.DB.batch([
-    env.DB.prepare(
-      `INSERT INTO events
-       (id, year, half, name, status, revision, created_by, created_at, updated_at)
-       VALUES ('event-day', 2026, 'H1', '행사', 'DAY_OF', 1, 'user-1', ?, ?)`,
-    ).bind(now, now),
-    env.DB.prepare(
-      `INSERT INTO event_roster_entries
-       (id, event_id, participant_id, organization_id, participant_name_snapshot,
-        organization_name_snapshot, source, status, revision, created_by, updated_by,
-        created_at, updated_at)
-       VALUES ('entry-day', 'event-day', ?, 'org-1', '김참가', '1팀',
-               'PRE_EVENT', 'ACTIVE', 0,
-               'user-1', 'user-1', ?, ?)`,
-    ).bind(participant.id, now, now),
-  ]);
+  await env.DB.batch(
+    [fixture.project.id, otherProject.id].map((projectId, index) =>
+      env.DB.prepare(
+        `INSERT INTO project_roster_entries
+         (id, project_id, participant_id, organization_id,
+          participant_name_snapshot, organization_name_snapshot, source, status,
+          was_expected_at_start, revision, created_by, updated_by, created_at, updated_at)
+         VALUES (?, ?, ?, 'org-1', '첫 참가자', '1팀', 'PRE_REGISTRATION',
+                 'ACTIVE', 0, 0, 'user-1', 'user-1', ?, ?)`,
+      ).bind(
+        `entry-${index}`,
+        projectId,
+        fixture.firstParticipant.id,
+        now,
+        now,
+      ),
+    ),
+  );
 
+  const response = await authedRequest(
+    fixture.operator,
+    `/api/v1/projects/${fixture.project.id}/participants/${fixture.firstParticipant.id}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        name: "첫 참가자",
+        organizationId: secondOrganization.id,
+        expectedRevision: fixture.firstParticipant.revision,
+        expectedProjectRevision: fixture.project.revision,
+      }),
+    },
+  );
+  expect(response.status).toBe(200);
+  const master = await env.DB.prepare(
+    "SELECT organization_id FROM participants WHERE id=?",
+  )
+    .bind(fixture.firstParticipant.id)
+    .first<{ organization_id: string }>();
+  const snapshots = (
+    await env.DB.prepare(
+      `SELECT project_id, organization_id, organization_name_snapshot
+       FROM project_roster_entries WHERE participant_id=? ORDER BY project_id`,
+    )
+      .bind(fixture.firstParticipant.id)
+      .all<{
+        project_id: string;
+        organization_id: string;
+        organization_name_snapshot: string;
+      }>()
+  ).results;
+  expect(master?.organization_id).toBe(secondOrganization.id);
+  expect(snapshots).toEqual(
+    [
+      {
+        project_id: otherProject.id,
+        organization_id: "org-1",
+        organization_name_snapshot: "1팀",
+      },
+      {
+        project_id: fixture.project.id,
+        organization_id: "org-1",
+        organization_name_snapshot: "1팀",
+      },
+    ].sort((left, right) => left.project_id.localeCompare(right.project_id)),
+  );
+});
+
+it("prevents a snapshot organization manager from editing a moved participant master", async () => {
+  const fixture = await setupPreRegistration();
+  await seedOrganization("org-2", "2팀");
+  await authedRequest(
+    fixture.operator,
+    `/api/v1/projects/${fixture.project.id}/organizations`,
+    {
+      method: "POST",
+      body: JSON.stringify({ organizationId: "org-2" }),
+    },
+  );
+  const added = await addRoster(fixture, fixture.firstParticipant.id);
+  const entry = await added.json<{ projectRevision: number }>();
   const moved = await authedRequest(
-    operator,
-    `/api/v1/participants/${participant.id}`,
+    fixture.operator,
+    `/api/v1/projects/${fixture.project.id}/participants/${fixture.firstParticipant.id}`,
     {
       method: "PATCH",
       body: JSON.stringify({
         organizationId: "org-2",
-        expectedRevision: participant.revision,
+        expectedRevision: fixture.firstParticipant.revision,
+        expectedProjectRevision: entry.projectRevision,
       }),
     },
   );
-  expect(moved.status).toBe(409);
-});
-
-it("updates open display snapshots but preserves closed history", async () => {
-  await seedOrganization("org-1", "1팀");
-  const operator = await seedOperator();
-  const created = await authedRequest(operator, "/api/v1/participants", {
-    method: "POST",
-    body: JSON.stringify({ name: "이전 이름", organizationId: "org-1" }),
-  });
-  const participant = await created.json<{ id: string; revision: number }>();
-  const now = "2026-07-21T00:00:00.000Z";
-  await env.DB.batch([
-    env.DB.prepare(
-      `INSERT INTO events
-       (id, year, half, name, status, revision, created_by, created_at, updated_at)
-       VALUES ('event-open', 2028, 'H1', '진행 행사', 'DAY_OF', 1, 'user-1', ?, ?)`,
-    ).bind(now, now),
-    env.DB.prepare(
-      `INSERT INTO events
-       (id, year, half, name, status, revision, created_by, created_at, updated_at)
-       VALUES ('event-closed', 2028, 'H2', '종료 행사', 'CLOSED', 1, 'user-1', ?, ?)`,
-    ).bind(now, now),
-    ...["event-open", "event-closed"].map((eventId) =>
-      env.DB.prepare(
-        `INSERT INTO event_roster_entries
-         (id, event_id, participant_id, organization_id, participant_name_snapshot,
-          organization_name_snapshot, source, status, revision, created_by, updated_by,
-          created_at, updated_at)
-         VALUES (?, ?, ?, 'org-1', '이전 이름', '1팀', 'PRE_EVENT', 'ACTIVE', 0,
-                 'user-1', 'user-1', ?, ?)`,
-      ).bind(`entry-${eventId}`, eventId, participant.id, now, now),
-    ),
-  ]);
-
-  const updated = await authedRequest(
-    operator,
-    `/api/v1/participants/${participant.id}`,
+  const movedParticipant = await moved.json<{
+    revision: number;
+    projectRevision: number;
+  }>();
+  const manager = await seedManager("org-1");
+  const response = await authedRequest(
+    manager,
+    `/api/v1/projects/${fixture.project.id}/participants/${fixture.firstParticipant.id}`,
     {
       method: "PATCH",
       body: JSON.stringify({
-        name: "수정 이름",
-        expectedRevision: participant.revision,
+        name: "권한 밖 변경",
+        expectedRevision: movedParticipant.revision,
+        expectedProjectRevision: movedParticipant.projectRevision,
       }),
     },
   );
-  expect(updated.status).toBe(200);
-  const rows = (
-    await env.DB.prepare(
-      "SELECT event_id, participant_name_snapshot FROM event_roster_entries ORDER BY event_id",
-    ).all<{ event_id: string; participant_name_snapshot: string }>()
-  ).results;
-  expect(rows).toEqual([
-    { event_id: "event-closed", participant_name_snapshot: "이전 이름" },
-    { event_id: "event-open", participant_name_snapshot: "수정 이름" },
-  ]);
+  expect(response.status).toBe(403);
+  expect(
+    (
+      await env.DB.prepare("SELECT name FROM participants WHERE id=?")
+        .bind(fixture.firstParticipant.id)
+        .first<{ name: string }>()
+    )?.name,
+  ).toBe("첫 참가자");
 });

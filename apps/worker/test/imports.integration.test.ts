@@ -18,12 +18,12 @@ it("commits 130 valid normalized rows atomically", async () => {
   }));
   const response = await authedRequest(
     fixture.operator,
-    `/api/v1/events/${fixture.event.id}/imports/commit`,
+    `/api/v1/projects/${fixture.project.id}/imports/commit`,
     {
       method: "POST",
       body: JSON.stringify({
         rows,
-        expectedEventRevision: fixture.event.revision,
+        expectedProjectRevision: fixture.project.revision,
       }),
     },
   );
@@ -31,18 +31,18 @@ it("commits 130 valid normalized rows atomically", async () => {
   expect(
     (
       await env.DB.prepare(
-        "SELECT COUNT(*) AS count FROM event_roster_entries WHERE event_id = ? AND status = 'ACTIVE'",
+        "SELECT COUNT(*) AS count FROM project_roster_entries WHERE project_id = ? AND status = 'ACTIVE'",
       )
-        .bind(fixture.event.id)
+        .bind(fixture.project.id)
         .first<{ count: number }>()
     )?.count,
   ).toBe(130);
   expect(
     (
       await env.DB.prepare(
-        "SELECT COUNT(*) AS count FROM import_runs WHERE event_id = ?",
+        "SELECT COUNT(*) AS count FROM project_import_runs WHERE project_id = ?",
       )
-        .bind(fixture.event.id)
+        .bind(fixture.project.id)
         .first<{ count: number }>()
     )?.count,
   ).toBe(1);
@@ -52,11 +52,11 @@ it("leaves no rows when one organization is unknown", async () => {
   const fixture = await setupPreRegistration();
   const response = await authedRequest(
     fixture.operator,
-    `/api/v1/events/${fixture.event.id}/imports/commit`,
+    `/api/v1/projects/${fixture.project.id}/imports/commit`,
     {
       method: "POST",
       body: JSON.stringify({
-        expectedEventRevision: fixture.event.revision,
+        expectedProjectRevision: fixture.project.revision,
         rows: [
           { rowNumber: 2, name: "정상", organizationName: "1팀" },
           { rowNumber: 3, name: "오류", organizationName: "없는 팀" },
@@ -74,7 +74,9 @@ it("leaves no rows when one organization is unknown", async () => {
   ).toBe(0);
   expect(
     (
-      await env.DB.prepare("SELECT COUNT(*) AS count FROM import_runs").first<{
+      await env.DB.prepare(
+        "SELECT COUNT(*) AS count FROM project_import_runs",
+      ).first<{
         count: number;
       }>()
     )?.count,
@@ -83,22 +85,22 @@ it("leaves no rows when one organization is unknown", async () => {
 
 it("requires PRE_REGISTRATION for validation and commit", async () => {
   const fixture = await setupPreRegistration();
-  const dayOf = await authedRequest(
+  const inProgress = await authedRequest(
     fixture.operator,
-    `/api/v1/events/${fixture.event.id}/transition`,
+    `/api/v1/projects/${fixture.project.id}/transition`,
     {
       method: "POST",
       body: JSON.stringify({
-        targetStatus: "DAY_OF",
-        expectedRevision: fixture.event.revision,
+        targetStatus: "IN_PROGRESS",
+        expectedRevision: fixture.project.revision,
       }),
     },
   );
-  expect(dayOf.status).toBe(200);
+  expect(inProgress.status).toBe(200);
   const rows = [{ rowNumber: 2, name: "신규", organizationName: "1팀" }];
   const validation = await authedRequest(
     fixture.operator,
-    `/api/v1/events/${fixture.event.id}/imports/validate`,
+    `/api/v1/projects/${fixture.project.id}/imports/validate`,
     { method: "POST", body: JSON.stringify(rows) },
   );
   expect(validation.status).toBe(409);
@@ -107,22 +109,23 @@ it("requires PRE_REGISTRATION for validation and commit", async () => {
 it("returns ambiguous candidates and commits only an explicitly selected candidate", async () => {
   const fixture = await setupPreRegistration();
   const duplicate = async () => {
-    const response = await authedRequest(
-      fixture.operator,
-      "/api/v1/participants",
-      {
-        method: "POST",
-        body: JSON.stringify({ name: "동명이인", organizationId: "org-1" }),
-      },
-    );
-    return response.json<{ id: string }>();
+    const id = crypto.randomUUID();
+    const now = "2026-07-21T00:00:00.000Z";
+    await env.DB.prepare(
+      `INSERT INTO participants
+       (id, participant_id, name, organization_id, revision, created_at, updated_at)
+       VALUES (?, ?, '동명이인', 'org-1', 0, ?, ?)`,
+    )
+      .bind(id, `P-${id}`, now, now)
+      .run();
+    return { id };
   };
   const first = await duplicate();
   const second = await duplicate();
   const rows = [{ rowNumber: 2, name: "동명이인", organizationName: "1팀" }];
   const validation = await authedRequest(
     fixture.operator,
-    `/api/v1/events/${fixture.event.id}/imports/validate`,
+    `/api/v1/projects/${fixture.project.id}/imports/validate`,
     { method: "POST", body: JSON.stringify(rows) },
   );
   const validationBody = await validation.json<{
@@ -138,12 +141,12 @@ it("returns ambiguous candidates and commits only an explicitly selected candida
 
   const unresolved = await authedRequest(
     fixture.operator,
-    `/api/v1/events/${fixture.event.id}/imports/commit`,
+    `/api/v1/projects/${fixture.project.id}/imports/commit`,
     {
       method: "POST",
       body: JSON.stringify({
         rows,
-        expectedEventRevision: fixture.event.revision,
+        expectedProjectRevision: fixture.project.revision,
       }),
     },
   );
@@ -152,12 +155,12 @@ it("returns ambiguous candidates and commits only an explicitly selected candida
   const selectedRows = [{ ...rows[0], resolvedParticipantId: second.id }];
   const committed = await authedRequest(
     fixture.operator,
-    `/api/v1/events/${fixture.event.id}/imports/commit`,
+    `/api/v1/projects/${fixture.project.id}/imports/commit`,
     {
       method: "POST",
       body: JSON.stringify({
         rows: selectedRows,
-        expectedEventRevision: fixture.event.revision,
+        expectedProjectRevision: fixture.project.revision,
       }),
     },
   );
@@ -165,20 +168,20 @@ it("returns ambiguous candidates and commits only an explicitly selected candida
   expect(
     (
       await env.DB.prepare(
-        "SELECT participant_id FROM event_roster_entries WHERE event_id = ?",
+        "SELECT participant_id FROM project_roster_entries WHERE project_id = ?",
       )
-        .bind(fixture.event.id)
+        .bind(fixture.project.id)
         .first<{ participant_id: string }>()
     )?.participant_id,
   ).toBe(second.id);
   expect(first.id).not.toBe(second.id);
 });
 
-it("rejects an invalid resolved candidate and a stale event revision", async () => {
+it("rejects an invalid resolved candidate and a stale project revision", async () => {
   const fixture = await setupPreRegistration();
   const invalid = await authedRequest(
     fixture.operator,
-    `/api/v1/events/${fixture.event.id}/imports/commit`,
+    `/api/v1/projects/${fixture.project.id}/imports/commit`,
     {
       method: "POST",
       body: JSON.stringify({
@@ -190,7 +193,7 @@ it("rejects an invalid resolved candidate and a stale event revision", async () 
             resolvedParticipantId: "missing-participant",
           },
         ],
-        expectedEventRevision: fixture.event.revision,
+        expectedProjectRevision: fixture.project.revision,
       }),
     },
   );
@@ -198,12 +201,12 @@ it("rejects an invalid resolved candidate and a stale event revision", async () 
 
   const stale = await authedRequest(
     fixture.operator,
-    `/api/v1/events/${fixture.event.id}/imports/commit`,
+    `/api/v1/projects/${fixture.project.id}/imports/commit`,
     {
       method: "POST",
       body: JSON.stringify({
         rows: [{ rowNumber: 2, name: "신규", organizationName: "1팀" }],
-        expectedEventRevision: fixture.event.revision + 1,
+        expectedProjectRevision: fixture.project.revision + 1,
       }),
     },
   );
@@ -214,19 +217,19 @@ it("treats an active selected participant as a no-op and reactivates a selected 
   const fixture = await setupPreRegistration();
   const added = await authedRequest(
     fixture.operator,
-    `/api/v1/events/${fixture.event.id}/roster`,
+    `/api/v1/projects/${fixture.project.id}/roster`,
     {
       method: "POST",
       body: JSON.stringify({
         participantId: fixture.firstParticipant.id,
-        expectedRevision: fixture.event.revision,
+        expectedRevision: fixture.project.revision,
       }),
     },
   );
   const active = await added.json<{
     id: string;
     revision: number;
-    eventRevision: number;
+    projectRevision: number;
   }>();
   const row = {
     rowNumber: 2,
@@ -236,12 +239,12 @@ it("treats an active selected participant as a no-op and reactivates a selected 
   };
   const noOp = await authedRequest(
     fixture.operator,
-    `/api/v1/events/${fixture.event.id}/imports/commit`,
+    `/api/v1/projects/${fixture.project.id}/imports/commit`,
     {
       method: "POST",
       body: JSON.stringify({
         rows: [row],
-        expectedEventRevision: active.eventRevision,
+        expectedProjectRevision: active.projectRevision,
       }),
     },
   );
@@ -249,45 +252,45 @@ it("treats an active selected participant as a no-op and reactivates a selected 
   expect(
     (
       await env.DB.prepare(
-        "SELECT revision FROM event_roster_entries WHERE id = ?",
+        "SELECT revision FROM project_roster_entries WHERE id = ?",
       )
         .bind(active.id)
         .first<{ revision: number }>()
     )?.revision,
   ).toBe(active.revision);
 
-  const imported = await noOp.json<{ eventRevision: number }>();
+  const imported = await noOp.json<{ projectRevision: number }>();
   const cancelled = await authedRequest(
     fixture.operator,
-    `/api/v1/events/${fixture.event.id}/roster/${active.id}`,
+    `/api/v1/projects/${fixture.project.id}/roster/${active.id}`,
     {
       method: "PATCH",
       body: JSON.stringify({
         status: "CANCELLED",
-        expectedRevision: imported.eventRevision,
+        expectedRevision: imported.projectRevision,
         expectedEntryRevision: active.revision,
       }),
     },
   );
   const cancelledBody = await cancelled.json<{
     revision: number;
-    eventRevision: number;
+    projectRevision: number;
   }>();
   const reactivated = await authedRequest(
     fixture.operator,
-    `/api/v1/events/${fixture.event.id}/imports/commit`,
+    `/api/v1/projects/${fixture.project.id}/imports/commit`,
     {
       method: "POST",
       body: JSON.stringify({
         rows: [row],
-        expectedEventRevision: cancelledBody.eventRevision,
+        expectedProjectRevision: cancelledBody.projectRevision,
       }),
     },
   );
   expect(reactivated.status).toBe(201);
   expect(
     await env.DB.prepare(
-      "SELECT status, revision FROM event_roster_entries WHERE id = ?",
+      "SELECT status, revision FROM project_roster_entries WHERE id = ?",
     )
       .bind(active.id)
       .first<{ status: string; revision: number }>(),
@@ -299,7 +302,7 @@ it("forbids organization managers from import endpoints", async () => {
   const manager = await seedManager("org-1");
   const response = await authedRequest(
     manager,
-    `/api/v1/events/${fixture.event.id}/imports/validate`,
+    `/api/v1/projects/${fixture.project.id}/imports/validate`,
     {
       method: "POST",
       body: JSON.stringify([
@@ -313,7 +316,7 @@ it("forbids organization managers from import endpoints", async () => {
 it("rolls back when a same-name candidate appears after the set reads", async () => {
   const fixture = await setupPreRegistration();
   const actor = await requireActor(
-    new Request("https://event-roster.test", {
+    new Request("https://project-roster.test", {
       headers: authenticatedHeaders(fixture.operator),
     }),
     env as Env,
@@ -333,17 +336,17 @@ it("rolls back when a same-name candidate appears after the set reads", async ()
     commitImport(
       { ...(env as Env), DB: raceDb },
       actor,
-      fixture.event.id,
+      fixture.project.id,
       [{ rowNumber: 2, name: "경쟁 참가자", organizationName: "1팀" }],
-      fixture.event.revision,
+      fixture.project.revision,
     ),
   ).rejects.toMatchObject({ code: "STALE_REVISION" });
   expect(
     (
       await env.DB.prepare(
-        "SELECT COUNT(*) AS count FROM event_roster_entries WHERE event_id = ?",
+        "SELECT COUNT(*) AS count FROM project_roster_entries WHERE project_id = ?",
       )
-        .bind(fixture.event.id)
+        .bind(fixture.project.id)
         .first<{ count: number }>()
     )?.count,
   ).toBe(0);
@@ -352,7 +355,7 @@ it("rolls back when a same-name candidate appears after the set reads", async ()
 it("rolls back when the resolved organization is renamed after the set reads", async () => {
   const fixture = await setupPreRegistration();
   const actor = await requireActor(
-    new Request("https://event-roster.test", {
+    new Request("https://project-roster.test", {
       headers: authenticatedHeaders(fixture.operator),
     }),
     env as Env,
@@ -367,9 +370,9 @@ it("rolls back when the resolved organization is renamed after the set reads", a
     commitImport(
       { ...(env as Env), DB: raceDb },
       actor,
-      fixture.event.id,
+      fixture.project.id,
       [{ rowNumber: 2, name: "조직 경쟁", organizationName: "1팀" }],
-      fixture.event.revision,
+      fixture.project.revision,
     ),
   ).rejects.toMatchObject({ code: "STALE_REVISION" });
   expect(
@@ -384,7 +387,7 @@ it("rolls back when the resolved organization is renamed after the set reads", a
 it("rolls back when a selected participant changes after the set reads", async () => {
   const fixture = await setupPreRegistration();
   const actor = await requireActor(
-    new Request("https://event-roster.test", {
+    new Request("https://project-roster.test", {
       headers: authenticatedHeaders(fixture.operator),
     }),
     env as Env,
@@ -401,7 +404,7 @@ it("rolls back when a selected participant changes after the set reads", async (
     commitImport(
       { ...(env as Env), DB: raceDb },
       actor,
-      fixture.event.id,
+      fixture.project.id,
       [
         {
           rowNumber: 2,
@@ -410,32 +413,32 @@ it("rolls back when a selected participant changes after the set reads", async (
           resolvedParticipantId: fixture.firstParticipant.id,
         },
       ],
-      fixture.event.revision,
+      fixture.project.revision,
     ),
   ).rejects.toMatchObject({ code: "STALE_REVISION" });
 });
 
-it("serializes import commit against the DAY_OF snapshot transition", async () => {
+it("serializes import commit against the IN_PROGRESS snapshot transition", async () => {
   const fixture = await setupPreRegistration();
   const transition = authedRequest(
     fixture.operator,
-    `/api/v1/events/${fixture.event.id}/transition`,
+    `/api/v1/projects/${fixture.project.id}/transition`,
     {
       method: "POST",
       body: JSON.stringify({
-        targetStatus: "DAY_OF",
-        expectedRevision: fixture.event.revision,
+        targetStatus: "IN_PROGRESS",
+        expectedRevision: fixture.project.revision,
       }),
     },
   );
   const imported = authedRequest(
     fixture.operator,
-    `/api/v1/events/${fixture.event.id}/imports/commit`,
+    `/api/v1/projects/${fixture.project.id}/imports/commit`,
     {
       method: "POST",
       body: JSON.stringify({
         rows: [{ rowNumber: 2, name: "경쟁 입력", organizationName: "1팀" }],
-        expectedEventRevision: fixture.event.revision,
+        expectedProjectRevision: fixture.project.revision,
       }),
     },
   );
@@ -449,46 +452,48 @@ it("serializes import commit against the DAY_OF snapshot transition", async () =
     ),
   ).toBe(true);
 
-  const event = await env.DB.prepare("SELECT status FROM events WHERE id = ?")
-    .bind(fixture.event.id)
+  const project = await env.DB.prepare(
+    "SELECT status FROM projects WHERE id = ?",
+  )
+    .bind(fixture.project.id)
     .first<{ status: string }>();
   const rosterCount = await env.DB.prepare(
-    "SELECT COUNT(*) AS count FROM event_roster_entries WHERE event_id = ? AND status = 'ACTIVE'",
+    "SELECT COUNT(*) AS count FROM project_roster_entries WHERE project_id = ? AND status = 'ACTIVE'",
   )
-    .bind(fixture.event.id)
+    .bind(fixture.project.id)
     .first<{ count: number }>();
   const snapshotCount = await env.DB.prepare(
-    "SELECT COALESCE(SUM(expected_count), 0) AS count FROM event_expected_snapshots WHERE event_id = ?",
+    "SELECT COALESCE(SUM(expected_count), 0) AS count FROM project_expected_snapshots WHERE project_id = ?",
   )
-    .bind(fixture.event.id)
+    .bind(fixture.project.id)
     .first<{ count: number }>();
-  if (event?.status === "DAY_OF") {
+  if (project?.status === "IN_PROGRESS") {
     expect(snapshotCount?.count).toBe(rosterCount?.count);
   } else {
-    expect(event?.status).toBe("PRE_REGISTRATION");
+    expect(project?.status).toBe("PRE_REGISTRATION");
     expect(snapshotCount?.count).toBe(0);
   }
 });
 
 it("commits a case-insensitive match using the selected master name", async () => {
   const fixture = await setupPreRegistration();
-  const created = await authedRequest(
-    fixture.operator,
-    "/api/v1/participants",
-    {
-      method: "POST",
-      body: JSON.stringify({ name: "Alice", organizationId: "org-1" }),
-    },
-  );
-  const participant = await created.json<{ id: string }>();
+  const participant = { id: crypto.randomUUID() };
+  const now = "2026-07-21T00:00:00.000Z";
+  await env.DB.prepare(
+    `INSERT INTO participants
+     (id, participant_id, name, organization_id, revision, created_at, updated_at)
+     VALUES (?, 'P-ALICE', 'Alice', 'org-1', 0, ?, ?)`,
+  )
+    .bind(participant.id, now, now)
+    .run();
   const response = await authedRequest(
     fixture.operator,
-    `/api/v1/events/${fixture.event.id}/imports/commit`,
+    `/api/v1/projects/${fixture.project.id}/imports/commit`,
     {
       method: "POST",
       body: JSON.stringify({
         rows: [{ rowNumber: 2, name: "alice", organizationName: "1팀" }],
-        expectedEventRevision: fixture.event.revision,
+        expectedProjectRevision: fixture.project.revision,
       }),
     },
   );
@@ -496,9 +501,9 @@ it("commits a case-insensitive match using the selected master name", async () =
   expect(
     (
       await env.DB.prepare(
-        "SELECT participant_id FROM event_roster_entries WHERE event_id = ?",
+        "SELECT participant_id FROM project_roster_entries WHERE project_id = ?",
       )
-        .bind(fixture.event.id)
+        .bind(fixture.project.id)
         .first<{ participant_id: string }>()
     )?.participant_id,
   ).toBe(participant.id);
@@ -508,18 +513,18 @@ it("revalidates active no-op rows when organization state changes", async () => 
   const fixture = await setupPreRegistration();
   const added = await authedRequest(
     fixture.operator,
-    `/api/v1/events/${fixture.event.id}/roster`,
+    `/api/v1/projects/${fixture.project.id}/roster`,
     {
       method: "POST",
       body: JSON.stringify({
         participantId: fixture.firstParticipant.id,
-        expectedRevision: fixture.event.revision,
+        expectedRevision: fixture.project.revision,
       }),
     },
   );
-  const active = await added.json<{ eventRevision: number }>();
+  const active = await added.json<{ projectRevision: number }>();
   const actor = await requireActor(
-    new Request("https://event-roster.test", {
+    new Request("https://project-roster.test", {
       headers: authenticatedHeaders(fixture.operator),
     }),
     env as Env,
@@ -533,7 +538,7 @@ it("revalidates active no-op rows when organization state changes", async () => 
     commitImport(
       { ...(env as Env), DB: raceDb },
       actor,
-      fixture.event.id,
+      fixture.project.id,
       [
         {
           rowNumber: 2,
@@ -542,9 +547,49 @@ it("revalidates active no-op rows when organization state changes", async () => 
           resolvedParticipantId: fixture.firstParticipant.id,
         },
       ],
-      active.eventRevision,
+      active.projectRevision,
     ),
   ).rejects.toMatchObject({ code: "STALE_REVISION" });
+});
+
+it("rejects imports for an inactive project organization membership", async () => {
+  const fixture = await setupPreRegistration();
+  const added = await authedRequest(
+    fixture.operator,
+    `/api/v1/projects/${fixture.project.id}/roster`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        participantId: fixture.firstParticipant.id,
+        expectedRevision: fixture.project.revision,
+      }),
+    },
+  );
+  const entry = await added.json<{ projectRevision: number }>();
+  await authedRequest(
+    fixture.operator,
+    `/api/v1/projects/${fixture.project.id}/organizations/org-1`,
+    { method: "PATCH", body: JSON.stringify({ isActive: false }) },
+  );
+  const response = await authedRequest(
+    fixture.operator,
+    `/api/v1/projects/${fixture.project.id}/imports/commit`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        rows: [{ rowNumber: 2, name: "차단 참가자", organizationName: "1팀" }],
+        expectedProjectRevision: entry.projectRevision,
+      }),
+    },
+  );
+  expect(response.status).toBe(422);
+  expect(
+    (
+      await env.DB.prepare(
+        "SELECT COUNT(*) AS count FROM participants WHERE name='차단 참가자'",
+      ).first<{ count: number }>()
+    )?.count,
+  ).toBe(0);
 });
 
 function beforeNextBatch(before: () => Promise<void>): D1Database {

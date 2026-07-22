@@ -1,4 +1,3 @@
-import type { EventStatus, Half } from "@event-roster/contracts";
 import { useCallback, useEffect, useState } from "react";
 import { Button } from "../../components/ui/Button";
 import { Card } from "../../components/ui/Card";
@@ -7,6 +6,7 @@ import { ApiError } from "../../lib/api";
 import { useAuth } from "../auth/AuthProvider";
 import { EventForm } from "./EventForm";
 import { EventTransitionDialog } from "./EventTransitionDialog";
+import type { EventStatus, Half } from "./legacy-event-contracts";
 
 export interface EventView {
   id: string;

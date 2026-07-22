@@ -8,7 +8,7 @@ it("keeps 130 all-new rows within the D1 statement and binding budget", () => {
     organizationName: "1팀",
   }));
   const plan = buildImportQueryPlan(rows);
-  expect(plan.queryCount).toBe(31);
-  expect(Math.max(...plan.bindingCounts)).toBe(93);
+  expect(plan.queryCount).toBe(32);
+  expect(Math.max(...plan.bindingCounts)).toBe(94);
   expect(plan.rows).toHaveLength(130);
 });

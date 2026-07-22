@@ -1,10 +1,15 @@
 import type { NormalizedImportRow } from "@event-roster/contracts";
-import { DomainError, validateNormalizedRows } from "@event-roster/domain";
+import {
+  DomainError,
+  toKstDate,
+  validateNormalizedRows,
+} from "@event-roster/domain";
 import { runGuardedAtomic } from "../db/atomic";
-import { findEvent } from "../db/events";
+import { findProject } from "../db/projects";
 import type { Env } from "../env";
 import type { Actor } from "../middleware/authentication";
 import { createOperatorGuard } from "./admin";
+import { closeExpiredProject } from "./project-expiration";
 import { getRoster, getSummary } from "./roster";
 
 const PARTICIPANT_CHUNK_SIZE = 15;
@@ -34,13 +39,13 @@ export function buildImportQueryPlan(rows: NormalizedImportRow[]) {
   return {
     rows,
     queryCount:
-      3 + 1 + participantChunks + rosterChunks + auditChunks + 1 + 1 + 1,
+      4 + 1 + participantChunks + rosterChunks + auditChunks + 1 + 1 + 1,
     bindingCounts: [
       1,
       0,
       1,
       6 * Math.min(PARTICIPANT_CHUNK_SIZE, rows.length),
-      8 * Math.min(ROSTER_CHUNK_SIZE, rows.length) + 5,
+      8 * Math.min(ROSTER_CHUNK_SIZE, rows.length) + 6,
       2 * Math.min(AUDIT_CHUNK_SIZE, rows.length) + 2,
       2,
       5,
@@ -51,16 +56,14 @@ export function buildImportQueryPlan(rows: NormalizedImportRow[]) {
 
 export async function validateImport(
   env: Env,
-  eventId: string,
+  projectId: string,
   rows: NormalizedImportRow[],
 ) {
   const normalized = validateNormalizedRows(rows);
-  const event = await findEvent(env.DB, eventId);
-  if (!event) throw new DomainError("NOT_FOUND");
-  if (event.status !== "PRE_REGISTRATION") throw new DomainError("CONFLICT");
-  const resolved = await resolveRows(env.DB, eventId, normalized);
+  const project = await requireImportProject(env, projectId, new Date());
+  const resolved = await resolveRows(env.DB, projectId, normalized);
   return {
-    eventRevision: event.revision,
+    projectRevision: project.revision,
     rows: resolved.map((row) => ({
       rowNumber: row.input.rowNumber,
       name: row.input.name,
@@ -78,15 +81,14 @@ export async function validateImport(
 export async function commitImport(
   env: Env,
   actor: Actor,
-  eventId: string,
+  projectId: string,
   rows: NormalizedImportRow[],
-  expectedEventRevision: number,
+  expectedProjectRevision: number,
+  currentTime = new Date(),
 ) {
   const normalized = validateNormalizedRows(rows);
-  const event = await findEvent(env.DB, eventId);
-  if (!event) throw new DomainError("NOT_FOUND");
-  if (event.status !== "PRE_REGISTRATION") throw new DomainError("CONFLICT");
-  const resolution = await resolveRows(env.DB, eventId, normalized);
+  await requireImportProject(env, projectId, currentTime);
+  const resolution = await resolveRows(env.DB, projectId, normalized);
   if (resolution.some((row) => row.issues.length > 0)) {
     throw new DomainError("VALIDATION_FAILED", {
       rows: resolution.map((row) => ({
@@ -127,7 +129,7 @@ export async function commitImport(
       mutateRoster: selected?.entry_status !== "ACTIVE",
     };
   });
-  const now = new Date().toISOString();
+  const now = currentTime.toISOString();
   const statements: D1PreparedStatement[] = [];
   const newParticipants = resolved.filter((row) => row.createParticipant);
   for (const chunk of chunks(newParticipants, PARTICIPANT_CHUNK_SIZE)) {
@@ -135,26 +137,26 @@ export async function commitImport(
   }
   for (const chunk of chunks(resolved, ROSTER_CHUNK_SIZE)) {
     statements.push(
-      rosterUpsert(env.DB, chunk, eventId, actor.session.user.id, now),
+      rosterUpsert(env.DB, chunk, projectId, actor.session.user.id, now),
     );
   }
   const rosterMutations = resolved.filter((row) => row.mutateRoster);
   for (const chunk of chunks(rosterMutations, AUDIT_CHUNK_SIZE)) {
     statements.push(
-      importAuditInsert(env.DB, chunk, eventId, actor.session.user.id, now),
+      importAuditInsert(env.DB, chunk, projectId, actor.session.user.id, now),
     );
   }
   statements.push(
     env.DB.prepare(
-      "UPDATE events SET revision = revision + 1, updated_at = ? WHERE id = ?",
-    ).bind(now, eventId),
+      "UPDATE projects SET revision = revision + 1, updated_at = ? WHERE id = ?",
+    ).bind(now, projectId),
     env.DB.prepare(
-      `INSERT INTO import_runs
-       (id, event_id, actor_user_id, row_count, created_at, details_json)
+      `INSERT INTO project_import_runs
+       (id, project_id, actor_user_id, row_count, created_at, details_json)
        VALUES (?, ?, ?, ?, ?, '{}')`,
     ).bind(
       crypto.randomUUID(),
-      eventId,
+      projectId,
       actor.session.user.id,
       resolved.length,
       now,
@@ -169,9 +171,11 @@ export async function commitImport(
         guardId,
         actor,
         `EXISTS (
-           SELECT 1 FROM events WHERE id = ? AND status = 'PRE_REGISTRATION' AND revision = ?
+           SELECT 1 FROM projects
+           WHERE id = ? AND status = 'PRE_REGISTRATION' AND revision = ?
+             AND (end_date IS NULL OR end_date >= ?)
          )`,
-        [eventId, expectedEventRevision],
+        [projectId, expectedProjectRevision, toKstDate(currentTime)],
       ),
       statements,
       failureCode: "STALE_REVISION",
@@ -180,23 +184,30 @@ export async function commitImport(
     if (
       error instanceof Error &&
       error.message.includes(
-        "NOT NULL constraint failed: event_roster_entries.organization_id",
+        "NOT NULL constraint failed: project_roster_entries.organization_id",
       )
     ) {
       throw new DomainError("STALE_REVISION");
+    }
+    if (error instanceof DomainError) {
+      await closeExpiredProject(env, projectId, currentTime);
+      const latest = await findProject(env.DB, projectId);
+      if (latest?.status === "CLOSED") {
+        throw new DomainError("PROJECT_CLOSED");
+      }
     }
     throw error;
   }
   return {
     importedCount: resolved.length,
-    eventRevision: expectedEventRevision + 1,
+    projectRevision: expectedProjectRevision + 1,
   };
 }
 
-export async function getExportData(env: Env, actor: Actor, eventId: string) {
+export async function getExportData(env: Env, actor: Actor, projectId: string) {
   const [roster, summary] = await Promise.all([
-    getRoster(env, actor, eventId),
-    getSummary(env, actor, eventId),
+    getRoster(env, actor, projectId),
+    getSummary(env, actor, projectId),
   ]);
   return {
     명단: roster.map((row) => ({
@@ -210,8 +221,8 @@ export async function getExportData(env: Env, actor: Actor, eventId: string) {
     집계: summary.organizations.map((row) => ({
       조직: row.organizationName,
       예상: row.expected,
-      "당일 추가": row.dayOfAdded,
-      "당일 취소": row.dayOfCancelled,
+      "진행 중 추가": row.inProgressAdded,
+      "진행 중 취소": row.inProgressCancelled,
       최종: row.final,
       증감: row.delta,
     })),
@@ -220,12 +231,19 @@ export async function getExportData(env: Env, actor: Actor, eventId: string) {
 
 async function resolveRows(
   db: D1Database,
-  eventId: string,
+  projectId: string,
   rows: NormalizedImportRow[],
 ) {
   const organizations = (
     await db
-      .prepare("SELECT id, name, canonical_name, is_active FROM organizations")
+      .prepare(
+        `SELECT o.id, o.name, o.canonical_name,
+                (o.is_active = 1 AND po.is_active = 1) AS is_active
+         FROM project_organizations po
+         JOIN organizations o ON o.id = po.organization_id
+         WHERE po.project_id = ?`,
+      )
+      .bind(projectId)
       .all<{
         id: string;
         name: string;
@@ -239,9 +257,10 @@ async function resolveRows(
         `SELECT p.id, p.participant_id, p.name, p.organization_id, p.revision,
               r.id AS entry_id, r.status AS entry_status
        FROM participants p
-       LEFT JOIN event_roster_entries r ON r.participant_id = p.id AND r.event_id = ?`,
+       LEFT JOIN project_roster_entries r
+         ON r.participant_id = p.id AND r.project_id = ?`,
       )
-      .bind(eventId)
+      .bind(projectId)
       .all<{
         id: string;
         participant_id: string;
@@ -334,7 +353,7 @@ function participantInsert(
 function rosterUpsert(
   db: D1Database,
   rows: ResolvedImportRow[],
-  eventId: string,
+  projectId: string,
   actorId: string,
   now: string,
 ) {
@@ -347,15 +366,20 @@ function rosterUpsert(
          expected_organization_participant_count,
          expected_organization_revision_sum
        ) AS (VALUES ${values})
-       INSERT INTO event_roster_entries
-         (id, event_id, participant_id, organization_id, participant_name_snapshot,
-          organization_name_snapshot, source, status, was_expected_at_day_of, revision,
+       INSERT INTO project_roster_entries
+         (id, project_id, participant_id, organization_id, participant_name_snapshot,
+          organization_name_snapshot, source, status, was_expected_at_start, revision,
           created_by, updated_by, created_at, updated_at)
        SELECT i.entry_id, ?, p.id,
               CASE WHEN p.name = i.expected_name
                          AND p.organization_id = i.expected_organization_id
                          AND p.revision = i.expected_revision
                          AND o.is_active = 1
+                         AND EXISTS (
+                           SELECT 1 FROM project_organizations po
+                           WHERE po.project_id = ? AND po.organization_id = o.id
+                             AND po.is_active = 1
+                         )
                          AND o.canonical_name = i.expected_organization_canonical
                          AND (SELECT COUNT(*) FROM participants candidate
                               WHERE candidate.organization_id = i.expected_organization_id)
@@ -366,19 +390,19 @@ function rosterUpsert(
                              = i.expected_organization_revision_sum
                    THEN p.organization_id ELSE NULL END,
               p.name, o.name,
-              'PRE_EVENT', 'ACTIVE', 0, 0, ?, ?, ?, ?
+              'PRE_REGISTRATION', 'ACTIVE', 0, 0, ?, ?, ?, ?
        FROM incoming i JOIN participants p ON p.id = i.participant_id
        JOIN organizations o ON o.id = p.organization_id
        WHERE 1 = 1
-       ON CONFLICT(event_id, participant_id) DO UPDATE SET
-         status = CASE WHEN event_roster_entries.status = 'CANCELLED'
-                       THEN 'ACTIVE' ELSE event_roster_entries.status END,
-         updated_by = CASE WHEN event_roster_entries.status = 'CANCELLED'
-                           THEN excluded.updated_by ELSE event_roster_entries.updated_by END,
-         updated_at = CASE WHEN event_roster_entries.status = 'CANCELLED'
-                           THEN excluded.updated_at ELSE event_roster_entries.updated_at END,
-         revision = event_roster_entries.revision +
-                    CASE WHEN event_roster_entries.status = 'CANCELLED' THEN 1 ELSE 0 END`,
+       ON CONFLICT(project_id, participant_id) DO UPDATE SET
+         status = CASE WHEN project_roster_entries.status = 'CANCELLED'
+                       THEN 'ACTIVE' ELSE project_roster_entries.status END,
+         updated_by = CASE WHEN project_roster_entries.status = 'CANCELLED'
+                           THEN excluded.updated_by ELSE project_roster_entries.updated_by END,
+         updated_at = CASE WHEN project_roster_entries.status = 'CANCELLED'
+                           THEN excluded.updated_at ELSE project_roster_entries.updated_at END,
+         revision = project_roster_entries.revision +
+                    CASE WHEN project_roster_entries.status = 'CANCELLED' THEN 1 ELSE 0 END`,
     )
     .bind(
       ...rows.flatMap((row) => [
@@ -391,7 +415,8 @@ function rosterUpsert(
         row.organizationParticipantCountAfterInsert,
         row.organizationParticipantRevisionSum,
       ]),
-      eventId,
+      projectId,
+      projectId,
       actorId,
       actorId,
       now,
@@ -402,7 +427,7 @@ function rosterUpsert(
 function importAuditInsert(
   db: D1Database,
   rows: ResolvedImportRow[],
-  eventId: string,
+  projectId: string,
   actorId: string,
   now: string,
 ) {
@@ -419,7 +444,7 @@ function importAuditInsert(
     .bind(
       ...rows.flatMap((row) => [
         row.entryId,
-        JSON.stringify({ eventId, organizationId: row.organizationId }),
+        JSON.stringify({ projectId, organizationId: row.organizationId }),
       ]),
       actorId,
       now,
@@ -436,4 +461,15 @@ function chunks<T>(rows: T[], size: number): T[][] {
 
 function canonical(value: string): string {
   return value.normalize("NFKC").trim().toLocaleLowerCase();
+}
+
+async function requireImportProject(env: Env, projectId: string, now: Date) {
+  await closeExpiredProject(env, projectId, now);
+  const project = await findProject(env.DB, projectId);
+  if (!project) throw new DomainError("NOT_FOUND");
+  if (project.status === "CLOSED") throw new DomainError("PROJECT_CLOSED");
+  if (project.status !== "PRE_REGISTRATION") {
+    throw new DomainError("CONFLICT");
+  }
+  return project;
 }

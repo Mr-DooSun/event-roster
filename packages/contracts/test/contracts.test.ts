@@ -2,10 +2,10 @@ import { describe, expect, it } from "vitest";
 import type { Project } from "../src";
 import {
   CreateProjectRequestSchema,
-  EventStatusSchema,
-  HalfSchema,
   LoginIdSchema,
   PasswordSchema,
+  RosterCreateRequestSchema,
+  RosterSourceSchema,
   UpdateProjectRequestSchema,
 } from "../src";
 
@@ -33,16 +33,19 @@ describe("authentication contracts", () => {
   });
 });
 
-describe("event contracts", () => {
-  it("accepts only the fixed lifecycle and half-year values", () => {
-    expect(EventStatusSchema.options).toEqual([
-      "DRAFT",
+describe("roster contracts", () => {
+  it("uses project lifecycle sources and a strict participant creation union", () => {
+    expect(RosterSourceSchema.options).toEqual([
       "PRE_REGISTRATION",
-      "DAY_OF",
-      "CLOSED",
+      "IN_PROGRESS",
     ]);
-    expect(HalfSchema.options).toEqual(["H1", "H2"]);
-    expect(HalfSchema.safeParse("Q2").success).toBe(false);
+    expect(
+      RosterCreateRequestSchema.safeParse({
+        participantId: "participant-1",
+        newParticipant: { name: "모호함", organizationId: "org-1" },
+        expectedRevision: 0,
+      }).success,
+    ).toBe(false);
   });
 });
 

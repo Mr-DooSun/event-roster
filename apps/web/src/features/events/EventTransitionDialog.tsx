@@ -1,6 +1,6 @@
-import type { EventStatus } from "@event-roster/contracts";
 import { Button } from "../../components/ui/Button";
 import { Dialog } from "../../components/ui/Dialog";
+import type { EventStatus } from "./legacy-event-contracts";
 
 export function EventTransitionDialog({
   eventName,
