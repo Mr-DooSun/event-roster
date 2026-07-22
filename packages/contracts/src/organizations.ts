@@ -9,3 +9,12 @@ export const OrganizationSchema = z.object({
 });
 
 export type Organization = z.infer<typeof OrganizationSchema>;
+
+export interface ProjectOrganization {
+  organizationId: string;
+  name: string;
+  isActive: boolean;
+  masterIsActive: boolean;
+  activeProjectCount: number;
+  hasHistory: boolean;
+}

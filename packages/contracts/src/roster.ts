@@ -6,6 +6,12 @@ import { ParticipantIdSchema } from "./participants";
 export const RosterSourceSchema = z.enum(["PRE_EVENT", "DAY_OF"]);
 export type RosterSource = z.infer<typeof RosterSourceSchema>;
 
+export const ProjectRosterSourceSchema = z.enum([
+  "PRE_REGISTRATION",
+  "IN_PROGRESS",
+]);
+export type ProjectRosterSource = z.infer<typeof ProjectRosterSourceSchema>;
+
 export const RosterStatusSchema = z.enum(["ACTIVE", "CANCELLED"]);
 export type RosterStatus = z.infer<typeof RosterStatusSchema>;
 

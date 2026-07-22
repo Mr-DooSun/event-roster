@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  CreateProjectRequestSchema,
   EventStatusSchema,
   HalfSchema,
   LoginIdSchema,
   PasswordSchema,
+  UpdateProjectRequestSchema,
 } from "../src";
 
 describe("authentication contracts", () => {
@@ -33,4 +35,27 @@ describe("event contracts", () => {
     expect(HalfSchema.options).toEqual(["H1", "H2"]);
     expect(HalfSchema.safeParse("Q2").success).toBe(false);
   });
+});
+
+it("accepts duplicate-name project payloads with independently optional dates", () => {
+  expect(
+    CreateProjectRequestSchema.parse({
+      name: "상반기 리더십 캠프",
+      endDate: "2026-05-23",
+    }),
+  ).toEqual({ name: "상반기 리더십 캠프", endDate: "2026-05-23" });
+  expect(() =>
+    CreateProjectRequestSchema.parse({
+      name: "기간 역전",
+      startDate: "2026-05-24",
+      endDate: "2026-05-23",
+    }),
+  ).toThrow();
+  expect(
+    UpdateProjectRequestSchema.parse({
+      startDate: null,
+      endDate: null,
+      expectedRevision: 2,
+    }),
+  ).toEqual({ startDate: null, endDate: null, expectedRevision: 2 });
 });
