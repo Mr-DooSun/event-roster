@@ -7,6 +7,7 @@ import {
 import {
   DomainError,
   isProjectExpired,
+  toKstDate,
   transitionProject,
 } from "@event-roster/domain";
 import type { z } from "zod";
@@ -15,6 +16,7 @@ import { findProject, listProjects } from "../db/projects";
 import type { Env } from "../env";
 import type { Actor } from "../middleware/authentication";
 import { createOperatorGuard } from "./admin";
+import { closeExpiredProject } from "./project-expiration";
 
 export async function getProjects(env: Env, _actor: Actor): Promise<Project[]> {
   return listProjects(env.DB);
@@ -77,9 +79,12 @@ export async function updateProject(
   input: z.infer<typeof UpdateProjectRequestSchema>,
   now = new Date(),
 ): Promise<Project> {
+  await closeExpiredProject(env, projectId, now);
   const current = await findProject(env.DB, projectId);
   if (!current) throw new DomainError("NOT_FOUND");
-  if (current.status === "CLOSED" && input.name !== undefined) {
+  const closedDateOnly =
+    current.status === "CLOSED" && input.name === undefined;
+  if (current.status === "CLOSED" && !closedDateOnly) {
     throw new DomainError("PROJECT_CLOSED");
   }
   const nextName = input.name ?? current.name;
@@ -93,39 +98,54 @@ export async function updateProject(
     ...(nextEndDate === null ? {} : { endDate: nextEndDate }),
   });
   const timestamp = now.toISOString();
+  const today = toKstDate(now);
   const guardId = crypto.randomUUID();
-  await runGuardedAtomic(env.DB, {
-    guardId,
-    guardStatement: createOperatorGuard(
-      env.DB,
+  const mutationPredicate = closedDateOnly
+    ? "id = ? AND revision = ? AND status = 'CLOSED'"
+    : `id = ? AND revision = ? AND status <> 'CLOSED'
+       AND (end_date IS NULL OR end_date >= ?)`;
+  const mutationBindings: Array<string | number> = closedDateOnly
+    ? [projectId, input.expectedRevision]
+    : [projectId, input.expectedRevision, today];
+  try {
+    await runGuardedAtomic(env.DB, {
       guardId,
-      actor,
-      "EXISTS (SELECT 1 FROM projects WHERE id = ? AND revision = ? AND status = ?)",
-      [projectId, input.expectedRevision, current.status],
-    ),
-    statements: [
-      env.DB.prepare(
-        `UPDATE projects
-         SET name = ?, start_date = ?, end_date = ?,
-             revision = revision + 1, updated_at = ?
-         WHERE id = ?`,
-      ).bind(
-        validated.name,
-        validated.startDate ?? null,
-        validated.endDate ?? null,
-        timestamp,
-        projectId,
-      ),
-      auditStatement(
+      guardStatement: createOperatorGuard(
         env.DB,
-        actor.session.user.id,
-        "PROJECT_UPDATED",
-        projectId,
-        timestamp,
+        guardId,
+        actor,
+        `EXISTS (SELECT 1 FROM projects WHERE ${mutationPredicate})`,
+        mutationBindings,
       ),
-    ],
-    failureCode: "STALE_REVISION",
-  });
+      statements: [
+        env.DB.prepare(
+          `UPDATE projects
+           SET name = ?, start_date = ?, end_date = ?,
+               revision = revision + 1, updated_at = ?
+           WHERE ${mutationPredicate}`,
+        ).bind(
+          validated.name,
+          validated.startDate ?? null,
+          validated.endDate ?? null,
+          timestamp,
+          ...mutationBindings,
+        ),
+        auditStatement(
+          env.DB,
+          actor.session.user.id,
+          "PROJECT_UPDATED",
+          projectId,
+          timestamp,
+        ),
+      ],
+      failureCode: "STALE_REVISION",
+    });
+  } catch (error) {
+    if (!closedDateOnly) {
+      await translateExpiredMutationFailure(env, projectId, now, error);
+    }
+    throw error;
+  }
   return requireStoredProject(env.DB, projectId);
 }
 
@@ -137,8 +157,10 @@ export async function changeProjectStatus(
   expectedRevision: number,
   now = new Date(),
 ): Promise<Project> {
+  const expired = await closeExpiredProject(env, projectId, now);
   const current = await findProject(env.DB, projectId);
   if (!current) throw new DomainError("NOT_FOUND");
+  if (expired) throw new DomainError("PROJECT_CLOSED");
   transitionProject(current.status, targetStatus, actor.session.user.role);
   if (current.revision !== expectedRevision) {
     throw new DomainError("STALE_REVISION");
@@ -152,21 +174,29 @@ export async function changeProjectStatus(
   }
 
   const timestamp = now.toISOString();
+  const today = toKstDate(now);
   const closing = targetStatus === "CLOSED";
   const reopening = current.status === "CLOSED";
+  const mutationPredicate = reopening
+    ? "id = ? AND status = 'CLOSED' AND revision = ?"
+    : `id = ? AND status <> 'CLOSED' AND status = ? AND revision = ?
+       AND (end_date IS NULL OR end_date >= ?)`;
+  const mutationBindings: Array<string | number> = reopening
+    ? [projectId, expectedRevision]
+    : [projectId, current.status, expectedRevision, today];
   const statements: D1PreparedStatement[] = [
     env.DB.prepare(
       `UPDATE projects
        SET status = ?, revision = revision + 1, updated_at = ?,
            closed_at = ?, closed_by = ?, close_reason = ?
-       WHERE id = ?`,
+       WHERE ${mutationPredicate}`,
     ).bind(
       targetStatus,
       timestamp,
       closing ? timestamp : null,
       closing ? actor.session.user.id : null,
       closing ? "MANUAL" : null,
-      projectId,
+      ...mutationBindings,
     ),
   ];
 
@@ -184,21 +214,38 @@ export async function changeProjectStatus(
   );
 
   const guardId = crypto.randomUUID();
-  await runGuardedAtomic(env.DB, {
-    guardId,
-    guardStatement: createOperatorGuard(
-      env.DB,
+  try {
+    await runGuardedAtomic(env.DB, {
       guardId,
-      actor,
-      `EXISTS (
-         SELECT 1 FROM projects WHERE id = ? AND status = ? AND revision = ?
-       )`,
-      [projectId, current.status, expectedRevision],
-    ),
-    statements,
-    failureCode: "STALE_REVISION",
-  });
+      guardStatement: createOperatorGuard(
+        env.DB,
+        guardId,
+        actor,
+        `EXISTS (SELECT 1 FROM projects WHERE ${mutationPredicate})`,
+        mutationBindings,
+      ),
+      statements,
+      failureCode: "STALE_REVISION",
+    });
+  } catch (error) {
+    if (!reopening) {
+      await translateExpiredMutationFailure(env, projectId, now, error);
+    }
+    throw error;
+  }
   return requireStoredProject(env.DB, projectId);
+}
+
+async function translateExpiredMutationFailure(
+  env: Env,
+  projectId: string,
+  now: Date,
+  originalError: unknown,
+): Promise<void> {
+  if (!(originalError instanceof DomainError)) return;
+  await closeExpiredProject(env, projectId, now);
+  const latest = await findProject(env.DB, projectId);
+  if (latest?.status === "CLOSED") throw new DomainError("PROJECT_CLOSED");
 }
 
 function expectedSnapshotStatement(

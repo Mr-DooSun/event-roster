@@ -79,8 +79,8 @@ it("returns project detail and orders open projects before recently closed proje
 it("clears optional dates and rejects a stale patch", async () => {
   const operator = await seedOperator();
   const project = await seedProject(operator, {
-    startDate: "2026-05-22",
-    endDate: "2026-05-23",
+    startDate: "2099-05-22",
+    endDate: "2099-05-23",
   });
   const cleared = await authedRequest(
     operator,
@@ -114,6 +114,8 @@ it("clears optional dates and rejects a stale patch", async () => {
 });
 
 it("freezes expected snapshots on IN_PROGRESS and requires a valid reopen date", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-05-23T14:59:59.999Z"));
   const operator = await seedOperator();
   await seedOrganization();
   const project = await seedProject(operator, { endDate: "2026-05-23" });
@@ -155,7 +157,6 @@ it("freezes expected snapshots on IN_PROGRESS and requires a valid reopen date",
     code: "PROJECT_CLOSED",
     message: "종료된 프로젝트는 변경할 수 없습니다.",
   });
-  vi.useFakeTimers();
   vi.setSystemTime(new Date("2026-05-23T15:00:00.000Z"));
   expect(
     (
