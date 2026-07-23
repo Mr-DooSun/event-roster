@@ -83,18 +83,36 @@ it("restores fallback focus when the opening trigger is removed", () => {
   expect(screen.getByRole("button", { name: "대체 포커스" })).toHaveFocus();
 });
 
+it("restores fallback focus when the connected opening trigger becomes disabled", () => {
+  render(<DialogHarness disableTriggerOnClose />);
+  const trigger = screen.getByRole("button", { name: "대화상자 열기" });
+  trigger.focus();
+  fireEvent.click(trigger);
+
+  fireEvent.keyDown(screen.getByRole("dialog", { name: "확인" }), {
+    key: "Escape",
+  });
+
+  expect(trigger).toBeDisabled();
+  expect(screen.getByRole("button", { name: "대체 포커스" })).toHaveFocus();
+});
+
 function DialogHarness({
   removeTriggerOnOpen = false,
+  disableTriggerOnClose = false,
 }: {
   removeTriggerOnOpen?: boolean;
+  disableTriggerOnClose?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [triggerRemoved, setTriggerRemoved] = useState(false);
+  const [triggerDisabled, setTriggerDisabled] = useState(false);
   return (
     <>
       {!triggerRemoved ? (
         <button
           type="button"
+          disabled={triggerDisabled}
           onClick={() => {
             if (removeTriggerOnOpen) setTriggerRemoved(true);
             setOpen(true);
@@ -105,7 +123,13 @@ function DialogHarness({
       ) : null}
       <button type="button">대체 포커스</button>
       {open ? (
-        <Dialog title="확인" onClose={() => setOpen(false)}>
+        <Dialog
+          title="확인"
+          onClose={() => {
+            if (disableTriggerOnClose) setTriggerDisabled(true);
+            setOpen(false);
+          }}
+        >
           <button type="button">첫 작업</button>
         </Dialog>
       ) : null}

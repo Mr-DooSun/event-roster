@@ -37,14 +37,19 @@ export function Dialog({
     (focusable[0] ?? dialog).focus();
 
     return () => {
-      if (openingElement?.isConnected) {
+      if (openingElement && isEligibleFocusTarget(openingElement)) {
         openingElement.focus();
-        return;
+        if (document.activeElement === openingElement) return;
       }
-      const fallback = Array.from(
-        document.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
-      ).find((element) => !dialog.contains(element) && isFocusable(element));
-      fallback?.focus();
+      for (const fallback of document.querySelectorAll<HTMLElement>(
+        FOCUSABLE_SELECTOR,
+      )) {
+        if (dialog.contains(fallback) || !isEligibleFocusTarget(fallback)) {
+          continue;
+        }
+        fallback.focus();
+        if (document.activeElement === fallback) return;
+      }
     };
   }, []);
 
@@ -103,13 +108,13 @@ export function Dialog({
 function getFocusableElements(container: HTMLElement): HTMLElement[] {
   return Array.from(
     container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
-  ).filter(isFocusable);
+  ).filter(isEligibleFocusTarget);
 }
 
-function isFocusable(element: HTMLElement) {
+function isEligibleFocusTarget(element: HTMLElement) {
   return (
     element.isConnected &&
-    !element.hidden &&
-    element.getAttribute("aria-hidden") !== "true"
+    element.matches(FOCUSABLE_SELECTOR) &&
+    element.closest('[hidden], [aria-hidden="true"], [inert]') === null
   );
 }
