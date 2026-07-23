@@ -55,21 +55,38 @@ export function OrganizationDetailPage({
     value: string;
     returnFocus?: HTMLElement;
   } | null>(null);
+  const instanceActive = useRef(true);
   const activeOrganizationId = useRef(organizationId);
   activeOrganizationId.current = organizationId;
   const detailGeneration = useRef(0);
   const auditGeneration = useRef(0);
   const auditPaginationRequest = useRef<AuditPaginationRequest | null>(null);
 
+  useEffect(() => {
+    instanceActive.current = true;
+    return () => {
+      instanceActive.current = false;
+      detailGeneration.current += 1;
+      auditGeneration.current += 1;
+      auditPaginationRequest.current = null;
+    };
+  }, []);
+
   const loadDetail = useCallback(async () => {
     const requestedOrganizationId = organizationId;
-    if (activeOrganizationId.current !== requestedOrganizationId) return false;
+    if (
+      !instanceActive.current ||
+      activeOrganizationId.current !== requestedOrganizationId
+    ) {
+      return false;
+    }
     const generation = ++detailGeneration.current;
     try {
       const next = await api.get<OrganizationDetail>(
         `/organizations/${encodeURIComponent(requestedOrganizationId)}`,
       );
       if (
+        !instanceActive.current ||
         generation !== detailGeneration.current ||
         activeOrganizationId.current !== requestedOrganizationId
       ) {
@@ -81,6 +98,7 @@ export function OrganizationDetailPage({
       return true;
     } catch {
       if (
+        instanceActive.current &&
         generation === detailGeneration.current &&
         activeOrganizationId.current === requestedOrganizationId
       ) {
@@ -92,7 +110,12 @@ export function OrganizationDetailPage({
 
   const loadInitialAudit = useCallback(async () => {
     const requestedOrganizationId = organizationId;
-    if (activeOrganizationId.current !== requestedOrganizationId) return false;
+    if (
+      !instanceActive.current ||
+      activeOrganizationId.current !== requestedOrganizationId
+    ) {
+      return false;
+    }
     const generation = ++auditGeneration.current;
     auditPaginationRequest.current = null;
     try {
@@ -105,6 +128,7 @@ export function OrganizationDetailPage({
         )}/audit?limit=50`,
       );
       if (
+        instanceActive.current &&
         generation === auditGeneration.current &&
         activeOrganizationId.current === requestedOrganizationId
       ) {
@@ -115,6 +139,7 @@ export function OrganizationDetailPage({
       return true;
     } catch {
       if (
+        instanceActive.current &&
         generation === auditGeneration.current &&
         activeOrganizationId.current === requestedOrganizationId
       ) {
@@ -131,6 +156,8 @@ export function OrganizationDetailPage({
     setDetailError(null);
     setAuditError(null);
     setMessage(null);
+    setShowStatusConfirmation(false);
+    setTemporaryPassword(null);
     void loadDetail();
     void loadInitialAudit();
   }, [loadDetail, loadInitialAudit]);
@@ -155,22 +182,42 @@ export function OrganizationDetailPage({
     setMessage(null);
     try {
       await api.patch(`/organizations/${requestedOrganizationId}`, input);
-      if (activeOrganizationId.current !== requestedOrganizationId) return;
+      if (
+        !instanceActive.current ||
+        activeOrganizationId.current !== requestedOrganizationId
+      ) {
+        return;
+      }
       const [detailReloaded] = await Promise.all([
         loadDetail(),
         loadInitialAudit(),
       ]);
-      if (activeOrganizationId.current !== requestedOrganizationId) return;
+      if (
+        !instanceActive.current ||
+        activeOrganizationId.current !== requestedOrganizationId
+      ) {
+        return;
+      }
       if (!detailReloaded) {
         setMessage(
           "조직 변경은 반영됐지만 최신 조직 정보를 불러오지 못했습니다.",
         );
       }
     } catch (error) {
-      if (activeOrganizationId.current !== requestedOrganizationId) return;
+      if (
+        !instanceActive.current ||
+        activeOrganizationId.current !== requestedOrganizationId
+      ) {
+        return;
+      }
       if (error instanceof ApiError && error.status === 409) {
         const reloaded = await loadDetail();
-        if (activeOrganizationId.current !== requestedOrganizationId) return;
+        if (
+          !instanceActive.current ||
+          activeOrganizationId.current !== requestedOrganizationId
+        ) {
+          return;
+        }
         setMessage(
           reloaded
             ? "다른 관리 변경이 먼저 반영되어 최신 조직 정보를 불러왔습니다."
@@ -185,6 +232,7 @@ export function OrganizationDetailPage({
   async function loadMoreAudit() {
     const requestedOrganizationId = organizationId;
     if (
+      !instanceActive.current ||
       activeOrganizationId.current !== requestedOrganizationId ||
       !auditNextCursor ||
       auditPaginationRequest.current
@@ -205,6 +253,7 @@ export function OrganizationDetailPage({
         )}/audit?limit=50&cursor=${encodeURIComponent(cursor)}`,
       );
       if (
+        !instanceActive.current ||
         generation !== auditGeneration.current ||
         activeOrganizationId.current !== requestedOrganizationId ||
         auditPaginationRequest.current !== request
@@ -216,6 +265,7 @@ export function OrganizationDetailPage({
       setAuditError(null);
     } catch {
       if (
+        instanceActive.current &&
         generation === auditGeneration.current &&
         activeOrganizationId.current === requestedOrganizationId &&
         auditPaginationRequest.current === request
@@ -231,14 +281,35 @@ export function OrganizationDetailPage({
 
   async function reloadAfterManagerMutation() {
     const requestedOrganizationId = organizationId;
-    if (activeOrganizationId.current !== requestedOrganizationId) return false;
+    if (
+      !instanceActive.current ||
+      activeOrganizationId.current !== requestedOrganizationId
+    ) {
+      return false;
+    }
     const [detailReloaded] = await Promise.all([
       loadDetail(),
       loadInitialAudit(),
     ]);
     return (
-      activeOrganizationId.current === requestedOrganizationId && detailReloaded
+      instanceActive.current &&
+      activeOrganizationId.current === requestedOrganizationId &&
+      detailReloaded
     );
+  }
+
+  function showTemporaryPassword(value: string, returnFocus?: HTMLElement) {
+    const requestedOrganizationId = organizationId;
+    if (
+      !instanceActive.current ||
+      activeOrganizationId.current !== requestedOrganizationId
+    ) {
+      return;
+    }
+    setTemporaryPassword({
+      value,
+      ...(returnFocus ? { returnFocus } : {}),
+    });
   }
 
   if (!organization && !detailError) {
@@ -321,12 +392,7 @@ export function OrganizationDetailPage({
           <OrganizationManagersPanel
             organization={organization}
             onChanged={reloadAfterManagerMutation}
-            onTemporaryPassword={(value, returnFocus) =>
-              setTemporaryPassword({
-                value,
-                ...(returnFocus ? { returnFocus } : {}),
-              })
-            }
+            onTemporaryPassword={showTemporaryPassword}
           />
           <Card className="er-panel">
             <h2>연결 프로젝트</h2>

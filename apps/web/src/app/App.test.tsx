@@ -274,6 +274,123 @@ it("does not reload organization A audit or message after navigating to B", asyn
   ).not.toBeInTheDocument();
 });
 
+it("closes organization A status confirmation when navigating to B", async () => {
+  window.history.replaceState(null, "", "/organizations/org-a");
+  mockApi.get.mockImplementation((path: string) => {
+    if (path === "/organizations/org-a") {
+      return Promise.resolve({
+        ...organizationDetail(),
+        id: "org-a",
+        name: "A 조직",
+      });
+    }
+    if (path === "/organizations/org-b") {
+      return Promise.resolve({
+        ...organizationDetail(),
+        id: "org-b",
+        name: "B 조직",
+      });
+    }
+    if (path.endsWith("/audit?limit=50")) {
+      return Promise.resolve({ items: [], nextCursor: null });
+    }
+    return Promise.resolve([]);
+  });
+
+  render(<App />);
+  await screen.findByRole("heading", { name: "A 조직" });
+  fireEvent.click(screen.getByRole("button", { name: "조직 사용 중지" }));
+  expect(
+    screen.getByRole("dialog", { name: "조직 상태 변경" }),
+  ).toHaveTextContent("A 조직");
+
+  act(() => {
+    window.history.pushState(null, "", "/organizations/org-b");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  });
+  expect(await screen.findByRole("heading", { name: "B 조직" })).toBeVisible();
+  expect(
+    screen.queryByRole("dialog", { name: "조직 상태 변경" }),
+  ).not.toBeInTheDocument();
+});
+
+it("ignores a late organization A temporary password after navigating to B", async () => {
+  window.history.replaceState(null, "", "/organizations/org-a");
+  const provision = deferred<{
+    manager: {
+      userId: string;
+      loginId: string;
+      displayName: string;
+      isActive: boolean;
+      assignmentRole: "MANAGER";
+      assignedAt: string;
+    };
+    temporaryPassword: string;
+  }>();
+  mockApi.get.mockImplementation((path: string) => {
+    if (path === "/organizations/org-a") {
+      return Promise.resolve({
+        ...organizationDetail(),
+        id: "org-a",
+        name: "A 조직",
+      });
+    }
+    if (path === "/organizations/org-b") {
+      return Promise.resolve({
+        ...organizationDetail(),
+        id: "org-b",
+        name: "B 조직",
+      });
+    }
+    if (path.endsWith("/audit?limit=50")) {
+      return Promise.resolve({ items: [], nextCursor: null });
+    }
+    return Promise.resolve([]);
+  });
+  mockApi.post.mockReturnValue(provision.promise);
+
+  render(<App />);
+  await screen.findByRole("heading", { name: "A 조직" });
+  fireEvent.click(screen.getByRole("button", { name: "새 담당자 발급" }));
+  fireEvent.change(screen.getByLabelText("영문 로그인 ID"), {
+    target: { value: "late-manager" },
+  });
+  fireEvent.change(screen.getByLabelText("표시 이름"), {
+    target: { value: "늦은 담당자" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "계정 발급 및 지정" }));
+
+  act(() => {
+    window.history.pushState(null, "", "/organizations/org-b");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  });
+  expect(await screen.findByRole("heading", { name: "B 조직" })).toBeVisible();
+
+  await act(async () => {
+    provision.resolve({
+      manager: {
+        userId: "late-manager",
+        loginId: "late-manager",
+        displayName: "늦은 담당자",
+        isActive: true,
+        assignmentRole: "MANAGER",
+        assignedAt: "2026-07-24T00:00:00.000Z",
+      },
+      temporaryPassword: "late-secret-marker",
+    });
+    await provision.promise;
+    await Promise.resolve();
+  });
+
+  expect(screen.queryByText("late-secret-marker")).not.toBeInTheDocument();
+  expect(
+    screen.queryByText(
+      "담당자 변경은 반영됐지만 최신 조직 정보를 불러오지 못했습니다.",
+    ),
+  ).not.toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "B 조직" })).toBeVisible();
+});
+
 it("assigns existing and newly provisioned organization managers", async () => {
   window.history.replaceState(null, "", "/organizations/org-1");
   let failNextDetailReload = false;

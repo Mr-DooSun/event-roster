@@ -53,9 +53,11 @@ function route(path: string, operator: boolean) {
   if (path === "/users" && operator) return <UsersPage />;
   const organizationMatch = path.match(/^\/organizations\/([^/]+)$/);
   if (organizationMatch?.[1] && operator) {
+    const organizationId = decodeURIComponent(organizationMatch[1]);
     return (
       <OrganizationDetailPage
-        organizationId={decodeURIComponent(organizationMatch[1])}
+        key={organizationId}
+        organizationId={organizationId}
       />
     );
   }

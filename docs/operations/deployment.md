@@ -26,7 +26,7 @@ corepack pnpm@10.28.1 --filter @event-roster/worker exec wrangler d1 create even
 
 출력된 실제 `database_id`를 `apps/worker/wrangler.jsonc`의 `DB` binding에 반영한다. 추측한 ID나 테스트용 0 UUID를 운영 설정에 사용하지 않는다.
 
-기존 D1을 `0003_organization_leadership.sql`로 올리는 경우 먼저 원격 전체 export를 만든다. 백업은 main checkout과 linked worktree를 포함한 어떤 저장소 안에도 잠시라도 만들지 않는다. 아래 절차를 저장소 루트에서 실행해 이미 존재하는 저장소 밖 상위 디렉터리의 절대 경로를 직접 입력한다. 절차는 모든 worktree의 실제 경로와 비교한 뒤 mode 0700 실행별 전용 디렉터리를 원자적으로 만들고 export·체크섬의 기존 파일·symbolic link와 권한을 검사한다. `backups/`와 `event-roster-d1-*/`는 방어적으로 Git에서 제외하지만 운영 백업 위치로 사용하지 않는다.
+기존 D1을 `0003_organization_leadership.sql`로 올리는 경우 먼저 원격 전체 export를 만든다. 백업은 main checkout과 linked worktree를 포함한 어떤 저장소 안에도 잠시라도 만들지 않는다. 아래 절차를 저장소 루트에서 실행해 이미 존재하는 저장소 밖 상위 디렉터리의 절대 경로를 직접 입력한다. 절차는 canonicalization 전에 입력 경로의 leaf부터 `/`까지 각 구성요소를 `test -L`로 검사한다. symbolic link 구성요소와 존재하지 않는 tail은 모두 중단하며, 이 검사는 macOS zsh와 Linux bash에서 동일하게 동작한다. 이후 모든 worktree의 실제 경로와 비교하고 mode 0700 실행별 전용 디렉터리를 원자적으로 만든 뒤 export·체크섬의 기존 파일·symbolic link와 권한을 검사한다. `backups/`와 `event-roster-d1-*/`는 방어적으로 Git에서 제외하지만 운영 백업 위치로 사용하지 않는다.
 
 ```bash
 set -eu
@@ -37,6 +37,22 @@ case "$EVENT_ROSTER_BACKUP_PARENT" in
   /*) ;;
   *) echo "절대 경로가 필요합니다." >&2; exit 1 ;;
 esac
+while [ "$EVENT_ROSTER_BACKUP_PARENT" != "/" ] && [ "${EVENT_ROSTER_BACKUP_PARENT%/}" != "$EVENT_ROSTER_BACKUP_PARENT" ]; do
+  EVENT_ROSTER_BACKUP_PARENT="${EVENT_ROSTER_BACKUP_PARENT%/}"
+done
+EVENT_ROSTER_PATH_COMPONENT="$EVENT_ROSTER_BACKUP_PARENT"
+while [ "$EVENT_ROSTER_PATH_COMPONENT" != "/" ]; do
+  if [ -L "$EVENT_ROSTER_PATH_COMPONENT" ]; then
+    echo "백업 상위 경로에 symbolic link 구성요소가 있습니다: $EVENT_ROSTER_PATH_COMPONENT" >&2
+    exit 1
+  fi
+  if [ ! -e "$EVENT_ROSTER_PATH_COMPONENT" ]; then
+    echo "백업 상위 경로의 모든 구성요소가 이미 존재해야 합니다: $EVENT_ROSTER_PATH_COMPONENT" >&2
+    exit 1
+  fi
+  EVENT_ROSTER_PATH_COMPONENT="${EVENT_ROSTER_PATH_COMPONENT%/*}"
+  test -n "$EVENT_ROSTER_PATH_COMPONENT" || EVENT_ROSTER_PATH_COMPONENT="/"
+done
 test -d "$EVENT_ROSTER_BACKUP_PARENT"
 EVENT_ROSTER_BACKUP_PARENT="$(cd "$EVENT_ROSTER_BACKUP_PARENT" && pwd -P)"
 EVENT_ROSTER_WORKTREE_LIST="$(git -c core.quotePath=false worktree list --porcelain)"

@@ -22,7 +22,7 @@
 ## D1 백업과 복원
 
 1. 프로젝트별 Excel 내보내기로 업무상 복구 가능한 명단·집계 사본을 정기 확보한다.
-2. 원격 변경 전 [배포 절차](deployment.md)의 보안 백업 명령으로 D1 export를 생성한다. main checkout과 모든 linked worktree 밖의 명시적 절대 경로만 사용하고, mode 0700 실행별 디렉터리 안의 export와 체크섬 파일이 각각 mode 0600인지 확인한다. 저장소의 `backups/`와 `event-roster-d1-*/`는 운영 백업 위치로 사용하지 않는다.
+2. 원격 변경 전 [배포 절차](deployment.md)의 보안 백업 명령으로 D1 export를 생성한다. symbolic link 구성요소가 전혀 없는, main checkout과 모든 linked worktree 밖의 명시적 절대 경로만 사용한다. mode 0700 실행별 디렉터리 안의 export와 체크섬 파일이 각각 mode 0600인지 확인한다. 저장소의 `backups/`와 `event-roster-d1-*/`는 운영 백업 위치로 사용하지 않는다.
 3. export가 `users`, `organizations`, `user_organizations`, `projects`, `project_organizations`를 포함하고 각 행 수가 예상과 일치하는지 확인한다.
 4. 복원은 운영 DB에 바로 덮어쓰지 않고 별도 격리 D1에 import한다. 운영 Worker는 이 단계에서 격리 D1을 바라보지 않는다.
 5. `0003` 적용 전 export를 복원할 때는 격리 D1에 복원한 다음 저장소의 모든 migration을 다시 적용해 `0003_organization_leadership.sql`까지 완료한다. migration 완료 전 운영 binding을 전환하지 않는다.
