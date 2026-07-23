@@ -5,11 +5,23 @@
   "workers_dev": true,
   "compatibility_date": "2026-07-21",
   "compatibility_flags": ["nodejs_compat"],
-  "triggers": { "crons": ["0 15 * * *"] },
+  "vars": {
+    "APP_ORIGIN": "https://event-roster.event-roster.workers.dev"
+  },
+  "triggers": {
+    "crons": ["0 15 * * *"]
+  },
   "assets": {
     "directory": "../web/dist",
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
     "run_worker_first": ["/api/*"]
-  }
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "event-roster",
+      "database_id": "f9ade047-c0eb-4487-b03f-0142b9f896f5"
+    }
+  ]
 }
