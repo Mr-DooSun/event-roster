@@ -80,6 +80,9 @@ it("preserves legacy project, roster, snapshot, import, audit, and organization 
     assigned_by: null,
     has_assigned_at: 1,
   });
+  expect(
+    (await env.MIGRATION_DB.prepare("PRAGMA foreign_key_check").all()).results,
+  ).toEqual([]);
 
   expect(
     await env.MIGRATION_DB.prepare(
@@ -127,9 +130,6 @@ it("preserves legacy project, roster, snapshot, import, audit, and organization 
       "SELECT details_json FROM audit_logs WHERE id='malformed-audit'",
     ).first(),
   ).toEqual({ details_json: "not-json" });
-  expect(
-    (await env.MIGRATION_DB.prepare("PRAGMA foreign_key_check").all()).results,
-  ).toEqual([]);
   for (const legacyTable of [
     "events",
     "event_roster_entries",

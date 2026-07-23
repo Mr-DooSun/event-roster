@@ -183,8 +183,10 @@ export async function createUser(
     ).bind(id, passwordHash, now),
     ...input.organizationIds.map((organizationId) =>
       env.DB.prepare(
-        "INSERT INTO user_organizations (user_id, organization_id) VALUES (?, ?)",
-      ).bind(id, organizationId),
+        `INSERT INTO user_organizations
+         (user_id, organization_id, assignment_role, assigned_by, assigned_at)
+         VALUES (?, ?, 'MANAGER', ?, ?)`,
+      ).bind(id, organizationId, actor.session.user.id, now),
     ),
     env.DB.prepare(
       `INSERT INTO audit_logs
@@ -266,8 +268,10 @@ export async function updateUser(
       ),
       ...input.organizationIds.map((organizationId) =>
         env.DB.prepare(
-          "INSERT INTO user_organizations (user_id, organization_id) VALUES (?, ?)",
-        ).bind(id, organizationId),
+          `INSERT INTO user_organizations
+           (user_id, organization_id, assignment_role, assigned_by, assigned_at)
+           VALUES (?, ?, 'MANAGER', ?, ?)`,
+        ).bind(id, organizationId, actor.session.user.id, now),
       ),
     );
   }
