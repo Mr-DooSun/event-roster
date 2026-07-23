@@ -1,5 +1,5 @@
 import type { Organization } from "@event-roster/contracts";
-import { useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 
 export type OrganizationComboboxSelection =
   | { kind: "EXISTING"; organizationId: string }
@@ -42,6 +42,7 @@ export function OrganizationCombobox({
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);
+  const optionRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const options = useMemo<ComboboxOption[]>(() => {
     const canonicalQuery = canonicalizeOrganizationInput(query);
     const existing: ExistingOption[] = organizations
@@ -68,6 +69,11 @@ export function OrganizationCombobox({
       : existing;
   }, [linkedOrganizationIds, organizations, query]);
 
+  useEffect(() => {
+    if (activeIndex < 0) return;
+    optionRefs.current[activeIndex]?.scrollIntoView?.({ block: "nearest" });
+  }, [activeIndex]);
+
   function optionId(index: number) {
     return `${listboxId}-option-${index}`;
   }
@@ -92,7 +98,7 @@ export function OrganizationCombobox({
     if (options.length === 0) return;
     setOpen(true);
     setActiveIndex((current) => {
-      let next = current;
+      let next = current < 0 ? (direction === 1 ? -1 : 0) : current;
       for (let attempts = 0; attempts < options.length; attempts += 1) {
         next = (next + direction + options.length) % options.length;
         if (!options[next]?.disabled) return next;
@@ -170,6 +176,9 @@ export function OrganizationCombobox({
                     : `new-${option.name}`
                 }
                 id={optionId(index)}
+                ref={(element) => {
+                  optionRefs.current[index] = element;
+                }}
                 className="er-combobox-option"
                 type="button"
                 role="option"

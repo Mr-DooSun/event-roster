@@ -1,8 +1,9 @@
 import type {
   Organization,
   ProjectOrganization,
+  ProjectOrganizationMutationResult,
 } from "@event-roster/contracts";
-import { type FormEvent, useMemo, useState } from "react";
+import { type FormEvent, useEffect, useMemo, useState } from "react";
 import { Button } from "../../components/ui/Button";
 import { Card } from "../../components/ui/Card";
 import { Dialog } from "../../components/ui/Dialog";
@@ -19,7 +20,8 @@ export interface ProjectOrganizationsPanelProps {
   projectRevision: number;
   memberships: ProjectOrganization[];
   allOrganizations: Organization[];
-  canAdminister: boolean;
+  canMutateMemberships: boolean;
+  canManageOrganizations: boolean;
   onChanged(): Promise<void>;
   onProjectClosed?(): Promise<void>;
 }
@@ -34,7 +36,8 @@ export function ProjectOrganizationsPanel({
   projectRevision,
   memberships,
   allOrganizations,
-  canAdminister,
+  canMutateMemberships,
+  canManageOrganizations,
   onChanged,
   onProjectClosed,
 }: ProjectOrganizationsPanelProps) {
@@ -51,6 +54,12 @@ export function ProjectOrganizationsPanel({
   } | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<PanelMessage | null>(null);
+  const [observedProjectRevision, setObservedProjectRevision] =
+    useState(projectRevision);
+
+  useEffect(() => {
+    setObservedProjectRevision(projectRevision);
+  }, [projectRevision]);
 
   function selectOrganization(selection: OrganizationComboboxSelection) {
     setMessage(null);
@@ -63,15 +72,25 @@ export function ProjectOrganizationsPanel({
     setPendingSelection(selection);
   }
 
-  async function mutate(operation: () => Promise<unknown>) {
+  async function mutate(
+    operation: () => Promise<ProjectOrganizationMutationResult>,
+  ) {
     if (busy) return false;
     setBusy(true);
     setMessage(null);
     try {
-      await operation();
+      const result = await operation();
+      setObservedProjectRevision(result.projectRevision);
       setPendingSelection(null);
       setNewConfirmation(null);
-      await onChanged();
+      try {
+        await onChanged();
+      } catch {
+        setMessage({
+          tone: "error",
+          text: "조직 변경은 반영됐지만 최신 정보를 불러오지 못했습니다.",
+        });
+      }
       return true;
     } catch (error) {
       if (error instanceof ApiError) {
@@ -118,28 +137,37 @@ export function ProjectOrganizationsPanel({
     event.preventDefault();
     if (pendingSelection?.kind !== "EXISTING") return;
     await mutate(() =>
-      api.post(`/projects/${projectId}/organizations`, {
-        organizationId: pendingSelection.organizationId,
-        expectedProjectRevision: projectRevision,
-      }),
+      api.post<ProjectOrganizationMutationResult>(
+        `/projects/${projectId}/organizations`,
+        {
+          organizationId: pendingSelection.organizationId,
+          expectedProjectRevision: observedProjectRevision,
+        },
+      ),
     );
   }
 
   async function confirmCreate() {
     if (!newConfirmation) return;
     await mutate(() =>
-      api.post(`/projects/${projectId}/organizations`, {
-        newOrganizationName: newConfirmation.name,
-        expectedProjectRevision: projectRevision,
-      }),
+      api.post<ProjectOrganizationMutationResult>(
+        `/projects/${projectId}/organizations`,
+        {
+          newOrganizationName: newConfirmation.name,
+          expectedProjectRevision: observedProjectRevision,
+        },
+      ),
     );
   }
 
   async function setActive(membership: ProjectOrganization, active: boolean) {
     await mutate(() =>
-      api.patch(
+      api.patch<ProjectOrganizationMutationResult>(
         `/projects/${projectId}/organizations/${membership.organizationId}`,
-        { isActive: active, expectedProjectRevision: projectRevision },
+        {
+          isActive: active,
+          expectedProjectRevision: observedProjectRevision,
+        },
       ),
     );
   }
@@ -149,14 +177,14 @@ export function ProjectOrganizationsPanel({
       {message ? (
         <StatusMessage tone={message.tone}>{message.text}</StatusMessage>
       ) : null}
-      {canAdminister ? (
+      {canManageOrganizations ? (
         <Card className="er-panel">
           <h2>조직 추가</h2>
           <form className="er-inline-form" onSubmit={addExisting}>
             <OrganizationCombobox
               organizations={allOrganizations}
               linkedOrganizationIds={linkedOrganizationIds}
-              disabled={busy}
+              disabled={busy || !canMutateMemberships}
               onSelect={selectOrganization}
               onQueryChange={() => setPendingSelection(null)}
             />
@@ -165,6 +193,7 @@ export function ProjectOrganizationsPanel({
               variant="primary"
               disabled={
                 busy ||
+                !canMutateMemberships ||
                 !pendingSelection ||
                 pendingSelection.kind !== "EXISTING"
               }
@@ -184,7 +213,8 @@ export function ProjectOrganizationsPanel({
               <OrganizationMembershipRow
                 key={membership.organizationId}
                 membership={membership}
-                canAdminister={canAdminister}
+                canMutateMemberships={canMutateMemberships}
+                canManageOrganizations={canManageOrganizations}
                 busy={busy}
                 onSetActive={(active) => setActive(membership, active)}
               />
@@ -192,7 +222,7 @@ export function ProjectOrganizationsPanel({
           </ul>
         )}
       </Card>
-      {canAdminister && newConfirmation ? (
+      {canMutateMemberships && newConfirmation ? (
         <Dialog
           title="새 조직 생성 후 추가"
           onClose={() => setNewConfirmation(null)}
@@ -217,12 +247,14 @@ export function ProjectOrganizationsPanel({
 
 function OrganizationMembershipRow({
   membership,
-  canAdminister,
+  canMutateMemberships,
+  canManageOrganizations,
   busy,
   onSetActive,
 }: {
   membership: ProjectOrganization;
-  canAdminister: boolean;
+  canMutateMemberships: boolean;
+  canManageOrganizations: boolean;
   busy: boolean;
   onSetActive: (active: boolean) => Promise<void>;
 }) {
@@ -243,7 +275,7 @@ function OrganizationMembershipRow({
           <span>추가 관리자 {membership.managerCount}명</span>
           <span>현재 명단 {membership.rosterCount}명</span>
         </div>
-        {canAdminister ? (
+        {canManageOrganizations ? (
           <a
             href={`/organizations/${encodeURIComponent(membership.organizationId)}`}
           >
@@ -251,7 +283,7 @@ function OrganizationMembershipRow({
           </a>
         ) : null}
       </div>
-      {canAdminister ? (
+      {canMutateMemberships ? (
         <div className="er-action-row">
           <Button
             type="button"

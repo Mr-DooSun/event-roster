@@ -485,7 +485,8 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
             projectRevision={project.revision}
             memberships={memberships}
             allOrganizations={allOrganizations}
-            canAdminister={operator && project.status !== "CLOSED"}
+            canMutateMemberships={operator && project.status !== "CLOSED"}
+            canManageOrganizations={operator}
             onChanged={reloadAfterChildMutation}
             onProjectClosed={handleChildProjectClosed}
           />

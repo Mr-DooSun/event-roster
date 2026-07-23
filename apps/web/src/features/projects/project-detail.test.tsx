@@ -46,8 +46,14 @@ beforeEach(() => {
   mockApi.get.mockReset();
   mockApi.post.mockReset();
   mockApi.patch.mockReset();
-  mockApi.post.mockResolvedValue(undefined);
-  mockApi.patch.mockResolvedValue(undefined);
+  mockApi.post.mockResolvedValue({
+    organization: organizationMembership(),
+    projectRevision: 8,
+  });
+  mockApi.patch.mockResolvedValue({
+    organization: organizationMembership(),
+    projectRevision: 8,
+  });
   mockApi.get.mockImplementation(defaultGet);
   mockRole.current = "OPERATOR";
 });
@@ -106,6 +112,56 @@ it("adds an existing organization with the observed project revision", async () 
   );
 });
 
+it("chains mutation response revisions even when refresh fails without a rerender", async () => {
+  const onChanged = vi.fn().mockRejectedValue(new Error("refresh failed"));
+  mockApi.post
+    .mockResolvedValueOnce({
+      organization: organizationMembership(),
+      projectRevision: 8,
+    })
+    .mockResolvedValueOnce({
+      organization: organizationMembership({
+        organizationId: "org-2",
+        name: "2팀",
+      }),
+      projectRevision: 9,
+    });
+  render(
+    <ProjectOrganizationsPanel
+      projectId="project-1"
+      projectRevision={7}
+      memberships={[]}
+      allOrganizations={[
+        { id: "org-1", name: "1팀", isActive: true },
+        { id: "org-2", name: "2팀", isActive: true },
+      ]}
+      canMutateMemberships
+      canManageOrganizations
+      onChanged={onChanged}
+    />,
+  );
+
+  const input = screen.getByRole("combobox", {
+    name: "조직 이름 검색 또는 입력",
+  });
+  fireEvent.change(input, { target: { value: "1팀" } });
+  fireEvent.click(screen.getByRole("option", { name: "1팀" }));
+  fireEvent.click(screen.getByRole("button", { name: "프로젝트에 추가" }));
+  await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1));
+
+  fireEvent.change(input, { target: { value: "2팀" } });
+  fireEvent.click(screen.getByRole("option", { name: "2팀" }));
+  fireEvent.click(screen.getByRole("button", { name: "프로젝트에 추가" }));
+
+  await waitFor(() =>
+    expect(mockApi.post).toHaveBeenLastCalledWith(
+      "/projects/project-1/organizations",
+      { organizationId: "org-2", expectedProjectRevision: 8 },
+    ),
+  );
+  expect(mockApi.post).toHaveBeenCalledTimes(2);
+});
+
 it("renders one unified add flow with existing results before create", () => {
   render(
     <ProjectOrganizationsPanel
@@ -116,7 +172,8 @@ it("renders one unified add flow with existing results before create", () => {
         { id: "org-1", name: "E2E 1팀", isActive: true },
         { id: "org-2", name: "E2E 운영팀", isActive: true },
       ]}
-      canAdminister
+      canMutateMemberships
+      canManageOrganizations
       onChanged={vi.fn().mockResolvedValue(undefined)}
     />,
   );
@@ -149,7 +206,8 @@ it("suppresses exact-name creation and keeps linked organizations disabled", () 
         { id: "org-1", name: "Ｅ２Ｅ 1팀", isActive: true },
         { id: "org-2", name: "다른 팀", isActive: true },
       ]}
-      canAdminister
+      canMutateMemberships
+      canManageOrganizations
       onChanged={vi.fn().mockResolvedValue(undefined)}
     />,
   );
@@ -176,7 +234,8 @@ it("selects the active combobox option with the keyboard", () => {
         { id: "org-1", name: "기획팀", isActive: true },
         { id: "org-2", name: "개발팀", isActive: true },
       ]}
-      canAdminister
+      canMutateMemberships
+      canManageOrganizations
       onChanged={vi.fn().mockResolvedValue(undefined)}
     />,
   );
@@ -194,6 +253,43 @@ it("selects the active combobox option with the keyboard", () => {
   expect(screen.getByRole("button", { name: "프로젝트에 추가" })).toBeEnabled();
 });
 
+it("starts ArrowUp at the final enabled option and scrolls it into view", async () => {
+  render(
+    <ProjectOrganizationsPanel
+      projectId="project-1"
+      projectRevision={7}
+      memberships={[]}
+      allOrganizations={[
+        { id: "org-1", name: "기획팀", isActive: true },
+        { id: "org-2", name: "개발팀", isActive: true },
+        { id: "org-3", name: "운영팀", isActive: true },
+      ]}
+      canMutateMemberships
+      canManageOrganizations
+      onChanged={vi.fn().mockResolvedValue(undefined)}
+    />,
+  );
+
+  const input = screen.getByRole("combobox", {
+    name: "조직 이름 검색 또는 입력",
+  });
+  fireEvent.focus(input);
+  const finalOption = screen.getByRole("option", { name: "운영팀" });
+  const scrollIntoView = vi.fn();
+  Object.defineProperty(finalOption, "scrollIntoView", {
+    configurable: true,
+    value: scrollIntoView,
+  });
+
+  fireEvent.keyDown(input, { key: "ArrowUp" });
+
+  expect(input).toHaveAttribute("aria-activedescendant", finalOption.id);
+  expect(finalOption).toHaveAttribute("aria-selected", "true");
+  await waitFor(() =>
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest" }),
+  );
+});
+
 it("requires explicit confirmation before creating a global organization", async () => {
   render(
     <ProjectOrganizationsPanel
@@ -201,7 +297,8 @@ it("requires explicit confirmation before creating a global organization", async
       projectRevision={7}
       memberships={[]}
       allOrganizations={[]}
-      canAdminister
+      canMutateMemberships
+      canManageOrganizations
       onChanged={vi.fn().mockResolvedValue(undefined)}
     />,
   );
@@ -247,7 +344,8 @@ it("reloads a recoverable name conflict without replaying or clearing the query"
       projectRevision={7}
       memberships={[]}
       allOrganizations={[]}
-      canAdminister
+      canMutateMemberships
+      canManageOrganizations
       onChanged={onChanged}
     />,
   );
@@ -284,7 +382,8 @@ it("reloads a stale project revision without replaying or clearing the query", a
       projectRevision={7}
       memberships={[]}
       allOrganizations={[{ id: "org-1", name: "기획팀", isActive: true }]}
-      canAdminister
+      canMutateMemberships
+      canManageOrganizations
       onChanged={onChanged}
     />,
   );
@@ -324,7 +423,8 @@ it("renders leadership metadata and only operator management links", () => {
       projectRevision={7}
       memberships={memberships}
       allOrganizations={[]}
-      canAdminister
+      canMutateMemberships
+      canManageOrganizations
       onChanged={onChanged}
     />,
   );
@@ -343,12 +443,40 @@ it("renders leadership metadata and only operator management links", () => {
       projectRevision={7}
       memberships={memberships}
       allOrganizations={[]}
-      canAdminister={false}
+      canMutateMemberships={false}
+      canManageOrganizations={false}
       onChanged={onChanged}
     />,
   );
   expect(
     screen.queryByRole("link", { name: "조직 관리에서 담당자 지정" }),
+  ).not.toBeInTheDocument();
+});
+
+it("separates disabled membership mutations from operator organization management", () => {
+  render(
+    <ProjectOrganizationsPanel
+      projectId="project-1"
+      projectRevision={7}
+      memberships={[organizationMembership()]}
+      allOrganizations={[]}
+      canMutateMemberships={false}
+      canManageOrganizations
+      onChanged={vi.fn().mockResolvedValue(undefined)}
+    />,
+  );
+
+  expect(
+    screen.getByRole("combobox", { name: "조직 이름 검색 또는 입력" }),
+  ).toBeDisabled();
+  expect(
+    screen.getByRole("button", { name: "프로젝트에 추가" }),
+  ).toBeDisabled();
+  expect(
+    screen.getByRole("link", { name: "조직 관리에서 담당자 지정" }),
+  ).toHaveAttribute("href", "/organizations/org-1");
+  expect(
+    screen.queryByRole("button", { name: /사용 중지|다시 사용/ }),
   ).not.toBeInTheDocument();
 });
 
@@ -361,7 +489,8 @@ it("chains project revisions for deactivation and reactivation", async () => {
       projectRevision={7}
       memberships={[membership]}
       allOrganizations={[]}
-      canAdminister
+      canMutateMemberships
+      canManageOrganizations
       onChanged={onChanged}
     />,
   );
@@ -380,7 +509,8 @@ it("chains project revisions for deactivation and reactivation", async () => {
       projectRevision={8}
       memberships={[{ ...membership, isActive: false }]}
       allOrganizations={[]}
-      canAdminister
+      canMutateMemberships
+      canManageOrganizations
       onChanged={onChanged}
     />,
   );
@@ -878,9 +1008,21 @@ it("refreshes once and hides organization controls when the project closes", asy
   ).toBeVisible();
   expect(screen.getByText("종료")).toBeVisible();
   expect(projectReads).toBe(2);
+  const preservedInput = screen.getByRole("combobox", {
+    name: "조직 이름 검색 또는 입력",
+  });
+  expect(preservedInput).toHaveValue("종료 중 조직");
+  expect(preservedInput).toBeDisabled();
   expect(
-    screen.queryByRole("button", { name: /프로젝트에 추가|사용 중지/ }),
+    screen.getByRole("button", { name: "프로젝트에 추가" }),
+  ).toBeDisabled();
+  expect(
+    screen.queryByRole("button", { name: /사용 중지|다시 사용/ }),
   ).not.toBeInTheDocument();
+  expect(
+    screen.getByRole("link", { name: "조직 관리에서 담당자 지정" }),
+  ).toBeVisible();
+  expect(mockApi.post).toHaveBeenCalledTimes(1);
 });
 
 async function defaultGet(path: string) {
