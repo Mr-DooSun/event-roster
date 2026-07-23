@@ -1,0 +1,59 @@
+name: Deploy production
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-worker
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Verify and deploy Worker
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Install dependencies
+        run: corepack pnpm@10.28.1 install --frozen-lockfile
+
+      - name: Install Chromium
+        run: corepack pnpm@10.28.1 --filter @event-roster/web exec playwright install --with-deps chromium
+
+      - name: Run unit and integration tests
+        run: corepack pnpm@10.28.1 test
+
+      - name: Run type checks
+        run: corepack pnpm@10.28.1 check
+
+      - name: Check formatting
+        run: corepack pnpm@10.28.1 format:check
+
+      - name: Build web assets
+        run: corepack pnpm@10.28.1 --filter @event-roster/web build
+
+      - name: Run browser end-to-end tests
+        run: corepack pnpm@10.28.1 --filter @event-roster/web run e2e
+
+      - name: Validate Worker bundle
+        run: corepack pnpm@10.28.1 --filter @event-roster/worker exec wrangler deploy --dry-run
+
+      - name: Deploy production Worker
+        run: corepack pnpm@10.28.1 --filter @event-roster/worker exec wrangler deploy
