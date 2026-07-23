@@ -428,14 +428,60 @@ a {
   outline: 3px solid rgb(37 87 214 / 15%);
   outline-offset: -3px;
 }
-.er-project-organization-forms {
+.er-organization-combobox {
+  position: relative;
+  flex: 1 1 20rem;
+  min-width: 0;
+}
+.er-combobox-list {
+  position: absolute;
+  z-index: 10;
+  top: calc(100% + var(--er-space-1));
+  right: 0;
+  left: 0;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
-  gap: var(--er-space-4);
+  max-height: 18rem;
+  overflow-y: auto;
+  border: 1px solid var(--er-color-border);
+  border-radius: var(--er-radius-sm);
+  padding: var(--er-space-1);
+  background: var(--er-color-surface);
+  box-shadow: var(--er-shadow-card);
+}
+.er-combobox-option {
+  width: 100%;
+  border: 0;
+  border-radius: var(--er-radius-sm);
+  padding: var(--er-space-3);
+  color: var(--er-color-ink);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.er-combobox-option:hover,
+.er-combobox-option[aria-selected="true"] {
+  color: var(--er-color-primary);
+  background: var(--er-color-info-soft);
+}
+.er-combobox-option:focus-visible {
+  outline: 3px solid rgb(37 87 214 / 15%);
+  outline-offset: -3px;
+}
+.er-combobox-option:disabled {
+  color: var(--er-color-muted);
+  background: var(--er-color-canvas);
+  cursor: not-allowed;
 }
 .er-organization-membership {
   display: grid;
-  gap: var(--er-space-1);
+  gap: var(--er-space-2);
+}
+.er-membership-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--er-space-2) var(--er-space-4);
+  color: var(--er-color-muted);
+  font-size: 0.875rem;
 }
 .er-action-row--wrap {
   flex-wrap: wrap;
@@ -571,5 +617,14 @@ th {
     align-items: stretch;
     flex-direction: column;
     gap: var(--er-space-3);
+  }
+  .er-organization-combobox {
+    flex-basis: auto;
+    width: 100%;
+  }
+  .er-membership-meta {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: var(--er-space-1);
   }
 }

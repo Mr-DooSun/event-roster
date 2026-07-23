@@ -1,5 +1,5 @@
 import "@testing-library/jest-dom/vitest";
-import type { Project } from "@event-roster/contracts";
+import type { Project, ProjectOrganization } from "@event-roster/contracts";
 import {
   act,
   cleanup,
@@ -88,64 +88,89 @@ it("shows project status, dates, and automatic closing in the header", async () 
   expect(screen.getByText("자동 종료")).toBeVisible();
 });
 
-it("adds an existing organization from the organization tab", async () => {
+it("adds an existing organization with the observed project revision", async () => {
   render(<ProjectDetailPage projectId="project-1" />);
   fireEvent.click(await screen.findByRole("tab", { name: "조직" }));
-  fireEvent.change(screen.getByRole("combobox", { name: "기존 조직 검색" }), {
-    target: { value: "1팀" },
-  });
+  fireEvent.change(
+    screen.getByRole("combobox", { name: "조직 이름 검색 또는 입력" }),
+    { target: { value: "1팀" } },
+  );
   fireEvent.click(screen.getByRole("option", { name: "1팀" }));
   fireEvent.click(screen.getByRole("button", { name: "프로젝트에 추가" }));
 
   await waitFor(() =>
     expect(mockApi.post).toHaveBeenCalledWith(
       "/projects/project-1/organizations",
-      { organizationId: "org-1" },
+      { organizationId: "org-1", expectedProjectRevision: 1 },
     ),
   );
 });
 
-it("searches existing organizations with an accessible combobox and leads zero results to creation", () => {
+it("renders one unified add flow with existing results before create", () => {
   render(
     <ProjectOrganizationsPanel
       projectId="project-1"
+      projectRevision={7}
       memberships={[]}
       allOrganizations={[
-        { id: "org-1", name: "기획팀", isActive: true },
-        { id: "org-2", name: "개발팀", isActive: true },
+        { id: "org-1", name: "E2E 1팀", isActive: true },
+        { id: "org-2", name: "E2E 운영팀", isActive: true },
       ]}
       canAdminister
       onChanged={vi.fn().mockResolvedValue(undefined)}
     />,
   );
 
-  const search = screen.getByRole("combobox", { name: "기존 조직 검색" });
-  expect(search).toHaveAttribute("aria-controls", "existing-organizations");
-  fireEvent.change(search, { target: { value: "개발" } });
-  expect(screen.getByRole("option", { name: "개발팀" })).toBeVisible();
+  expect(screen.getByRole("heading", { name: "조직 추가" })).toBeVisible();
   expect(
-    screen.queryByRole("option", { name: "기획팀" }),
+    screen.queryByRole("heading", { name: "기존 조직 연결" }),
   ).not.toBeInTheDocument();
-  fireEvent.keyDown(search, { key: "Enter" });
-  expect(search).toHaveValue("개발팀");
-  expect(search).toHaveAttribute("aria-expanded", "false");
-  expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
   expect(
-    screen.queryByText("검색 결과가 없습니다. 아래에서 새 조직을 추가하세요."),
+    screen.queryByRole("heading", { name: "새 조직 연결" }),
   ).not.toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "프로젝트에 추가" })).toBeEnabled();
 
-  fireEvent.change(search, { target: { value: "새로운 연구소" } });
-  expect(
-    screen.getByText("검색 결과가 없습니다. 아래에서 새 조직을 추가하세요."),
-  ).toBeVisible();
-  expect(screen.getByLabelText("새 조직 이름")).toHaveValue("새로운 연구소");
+  const input = screen.getByRole("combobox", {
+    name: "조직 이름 검색 또는 입력",
+  });
+  fireEvent.change(input, { target: { value: "E2E" } });
+  const options = screen.getAllByRole("option");
+  expect(options[0]).toHaveAccessibleName("E2E 1팀");
+  expect(options[1]).toHaveAccessibleName("E2E 운영팀");
+  expect(options[2]).toHaveAccessibleName("“E2E” 새 조직 생성 후 추가");
 });
 
-it("moves the combobox active option with arrow keys and closes it with Escape", () => {
+it("suppresses exact-name creation and keeps linked organizations disabled", () => {
   render(
     <ProjectOrganizationsPanel
       projectId="project-1"
+      projectRevision={7}
+      memberships={[organizationMembership()]}
+      allOrganizations={[
+        { id: "org-1", name: "Ｅ２Ｅ 1팀", isActive: true },
+        { id: "org-2", name: "다른 팀", isActive: true },
+      ]}
+      canAdminister
+      onChanged={vi.fn().mockResolvedValue(undefined)}
+    />,
+  );
+
+  const input = screen.getByRole("combobox", {
+    name: "조직 이름 검색 또는 입력",
+  });
+  fireEvent.change(input, { target: { value: "e2e 1팀" } });
+  expect(
+    screen.getByRole("option", { name: /Ｅ２Ｅ 1팀.*이미 추가됨/ }),
+  ).toBeDisabled();
+  expect(
+    screen.queryByRole("option", { name: /새 조직 생성 후 추가/ }),
+  ).not.toBeInTheDocument();
+});
+
+it("selects the active combobox option with the keyboard", () => {
+  render(
+    <ProjectOrganizationsPanel
+      projectId="project-1"
+      projectRevision={7}
       memberships={[]}
       allOrganizations={[
         { id: "org-1", name: "기획팀", isActive: true },
@@ -156,102 +181,203 @@ it("moves the combobox active option with arrow keys and closes it with Escape",
     />,
   );
 
-  const search = screen.getByRole("combobox", { name: "기존 조직 검색" });
-  fireEvent.focus(search);
-  fireEvent.keyDown(search, { key: "ArrowDown" });
-  const firstOption = screen.getByRole("option", { name: "기획팀" });
-  expect(firstOption.id).not.toBe("");
-  expect(search).toHaveAttribute("aria-activedescendant", firstOption.id);
-  expect(firstOption).toHaveAttribute("aria-selected", "true");
-
-  fireEvent.keyDown(search, { key: "ArrowDown" });
+  const input = screen.getByRole("combobox", {
+    name: "조직 이름 검색 또는 입력",
+  });
+  fireEvent.focus(input);
+  fireEvent.keyDown(input, { key: "ArrowDown" });
+  fireEvent.keyDown(input, { key: "ArrowDown" });
   const secondOption = screen.getByRole("option", { name: "개발팀" });
-  expect(search).toHaveAttribute("aria-activedescendant", secondOption.id);
-  expect(secondOption).toHaveAttribute("aria-selected", "true");
-  fireEvent.keyDown(search, { key: "ArrowUp" });
-  expect(search).toHaveAttribute("aria-activedescendant", firstOption.id);
-
-  fireEvent.keyDown(search, { key: "Escape" });
-  expect(search).toHaveAttribute("aria-expanded", "false");
-  expect(search).not.toHaveAttribute("aria-activedescendant");
-  expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+  expect(input).toHaveAttribute("aria-activedescendant", secondOption.id);
+  fireEvent.keyDown(input, { key: "Enter" });
+  expect(input).toHaveValue("개발팀");
+  expect(screen.getByRole("button", { name: "프로젝트에 추가" })).toBeEnabled();
 });
 
-it("creates a new organization and hides controls in read-only mode", async () => {
-  const onChanged = vi.fn().mockResolvedValue(undefined);
-  const view = render(
+it("requires explicit confirmation before creating a global organization", async () => {
+  render(
     <ProjectOrganizationsPanel
       projectId="project-1"
+      projectRevision={7}
+      memberships={[]}
+      allOrganizations={[]}
+      canAdminister
+      onChanged={vi.fn().mockResolvedValue(undefined)}
+    />,
+  );
+
+  const input = screen.getByRole("combobox", {
+    name: "조직 이름 검색 또는 입력",
+  });
+  fireEvent.change(input, { target: { value: "  신규 조직  " } });
+  fireEvent.click(
+    screen.getByRole("option", { name: "“신규 조직” 새 조직 생성 후 추가" }),
+  );
+  expect(
+    screen.getByText("전역 조직으로 생성한 뒤 이 프로젝트에 추가합니다."),
+  ).toBeVisible();
+  expect(mockApi.post).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "생성 후 추가" }));
+
+  await waitFor(() =>
+    expect(mockApi.post).toHaveBeenCalledWith(
+      "/projects/project-1/organizations",
+      { newOrganizationName: "신규 조직", expectedProjectRevision: 7 },
+    ),
+  );
+});
+
+it("reloads a recoverable name conflict without replaying or clearing the query", async () => {
+  const onChanged = vi.fn().mockResolvedValue(undefined);
+  mockApi.post.mockRejectedValueOnce(
+    new ApiError(409, {
+      code: "CONFLICT",
+      message: "exists",
+      requestId: "request-conflict",
+      details: {
+        organizationId: "org-existing",
+        organizationName: "신규 조직",
+        reason: "ORGANIZATION_NAME_EXISTS",
+      },
+    }),
+  );
+  render(
+    <ProjectOrganizationsPanel
+      projectId="project-1"
+      projectRevision={7}
       memberships={[]}
       allOrganizations={[]}
       canAdminister
       onChanged={onChanged}
     />,
   );
-  fireEvent.change(screen.getByLabelText("새 조직 이름"), {
-    target: { value: "신규 조직" },
+
+  const input = screen.getByRole("combobox", {
+    name: "조직 이름 검색 또는 입력",
   });
-  fireEvent.click(screen.getByRole("button", { name: "새 조직 추가" }));
-  await waitFor(() =>
-    expect(mockApi.post).toHaveBeenCalledWith(
-      "/projects/project-1/organizations",
-      { newOrganizationName: "신규 조직" },
+  fireEvent.change(input, { target: { value: "신규 조직" } });
+  fireEvent.click(screen.getByRole("option", { name: /새 조직 생성 후 추가/ }));
+  fireEvent.click(screen.getByRole("button", { name: "생성 후 추가" }));
+
+  expect(
+    await screen.findByText(
+      "같은 이름의 조직이 이미 생성되어 최신 조직 목록을 불러왔습니다. 기존 조직을 선택해 주세요.",
     ),
+  ).toBeVisible();
+  expect(input).toHaveValue("신규 조직");
+  expect(onChanged).toHaveBeenCalledTimes(1);
+  expect(mockApi.post).toHaveBeenCalledTimes(1);
+});
+
+it("reloads a stale project revision without replaying or clearing the query", async () => {
+  const onChanged = vi.fn().mockResolvedValue(undefined);
+  mockApi.post.mockRejectedValueOnce(
+    new ApiError(409, {
+      code: "STALE_REVISION",
+      message: "stale",
+      requestId: "request-stale",
+    }),
   );
+  render(
+    <ProjectOrganizationsPanel
+      projectId="project-1"
+      projectRevision={7}
+      memberships={[]}
+      allOrganizations={[{ id: "org-1", name: "기획팀", isActive: true }]}
+      canAdminister
+      onChanged={onChanged}
+    />,
+  );
+
+  const input = screen.getByRole("combobox", {
+    name: "조직 이름 검색 또는 입력",
+  });
+  fireEvent.change(input, { target: { value: "기획팀" } });
+  fireEvent.click(screen.getByRole("option", { name: "기획팀" }));
+  fireEvent.click(screen.getByRole("button", { name: "프로젝트에 추가" }));
+
+  expect(
+    await screen.findByText(
+      "다른 변경이 먼저 반영되어 최신 프로젝트 정보를 불러왔습니다. 조직을 다시 선택해 주세요.",
+    ),
+  ).toBeVisible();
+  expect(input).toHaveValue("기획팀");
+  expect(onChanged).toHaveBeenCalledTimes(1);
+  expect(mockApi.post).toHaveBeenCalledTimes(1);
+});
+
+it("renders leadership metadata and only operator management links", () => {
+  const memberships = [
+    organizationMembership(),
+    organizationMembership({
+      organizationId: "org-2",
+      name: "2팀",
+      primaryLeader: { userId: "leader-1", displayName: "김대표" },
+      managerCount: 2,
+      rosterCount: 11,
+    }),
+  ];
+  const onChanged = vi.fn().mockResolvedValue(undefined);
+  const view = render(
+    <ProjectOrganizationsPanel
+      projectId="project-1"
+      projectRevision={7}
+      memberships={memberships}
+      allOrganizations={[]}
+      canAdminister
+      onChanged={onChanged}
+    />,
+  );
+
+  expect(screen.getByText("대표 조직장 미지정")).toBeVisible();
+  expect(screen.getByText("김대표")).toBeVisible();
+  expect(screen.getByText("추가 관리자 2명")).toBeVisible();
+  expect(screen.getByText("현재 명단 11명")).toBeVisible();
+  expect(
+    screen.getAllByRole("link", { name: "조직 관리에서 담당자 지정" })[1],
+  ).toHaveAttribute("href", "/organizations/org-2");
 
   view.rerender(
     <ProjectOrganizationsPanel
       projectId="project-1"
-      memberships={[
-        {
-          organizationId: "org-1",
-          name: "1팀",
-          isActive: false,
-          masterIsActive: true,
-          activeProjectCount: 2,
-          hasHistory: true,
-        },
-      ]}
+      projectRevision={7}
+      memberships={memberships}
       allOrganizations={[]}
       canAdminister={false}
       onChanged={onChanged}
     />,
   );
   expect(
-    screen.queryByRole("button", { name: /다시 사용|사용 중지|이름 저장/ }),
+    screen.queryByRole("link", { name: "조직 관리에서 담당자 지정" }),
   ).not.toBeInTheDocument();
 });
 
-it("deactivates and reactivates a project organization", async () => {
+it("chains project revisions for deactivation and reactivation", async () => {
   const onChanged = vi.fn().mockResolvedValue(undefined);
-  const membership = {
-    organizationId: "org-1",
-    name: "1팀",
-    isActive: true,
-    masterIsActive: true,
-    activeProjectCount: 1,
-    hasHistory: true,
-  };
+  const membership = organizationMembership();
   const view = render(
     <ProjectOrganizationsPanel
       projectId="project-1"
+      projectRevision={7}
       memberships={[membership]}
       allOrganizations={[]}
       canAdminister
       onChanged={onChanged}
     />,
   );
+
   fireEvent.click(screen.getByRole("button", { name: "사용 중지" }));
   await waitFor(() =>
     expect(mockApi.patch).toHaveBeenCalledWith(
       "/projects/project-1/organizations/org-1",
-      { isActive: false },
+      { isActive: false, expectedProjectRevision: 7 },
     ),
   );
 
   view.rerender(
     <ProjectOrganizationsPanel
       projectId="project-1"
+      projectRevision={8}
       memberships={[{ ...membership, isActive: false }]}
       allOrganizations={[]}
       canAdminister
@@ -260,95 +386,11 @@ it("deactivates and reactivates a project organization", async () => {
   );
   fireEvent.click(screen.getByRole("button", { name: "다시 사용" }));
   await waitFor(() =>
-    expect(mockApi.post).toHaveBeenCalledWith(
-      "/projects/project-1/organizations",
-      { organizationId: "org-1" },
+    expect(mockApi.patch).toHaveBeenCalledWith(
+      "/projects/project-1/organizations/org-1",
+      { isActive: true, expectedProjectRevision: 8 },
     ),
   );
-});
-
-it("confirms the global impact before renaming", async () => {
-  render(
-    <ProjectOrganizationsPanel
-      projectId="project-1"
-      memberships={[
-        {
-          organizationId: "org-1",
-          name: "1팀",
-          isActive: true,
-          masterIsActive: true,
-          activeProjectCount: 2,
-          hasHistory: true,
-        },
-      ]}
-      allOrganizations={[]}
-      canAdminister
-      onChanged={vi.fn().mockResolvedValue(undefined)}
-    />,
-  );
-  fireEvent.change(screen.getByLabelText("1팀 조직 이름"), {
-    target: { value: "변경 조직" },
-  });
-  fireEvent.click(screen.getByRole("button", { name: "이름 저장" }));
-  expect(
-    screen.getByText("이 변경은 현재 2개 활성 프로젝트에 반영됩니다."),
-  ).toBeVisible();
-  expect(mockApi.patch).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole("button", { name: "변경 확인" }));
-  await waitFor(() =>
-    expect(mockApi.patch).toHaveBeenCalledWith("/organizations/org-1", {
-      name: "변경 조직",
-    }),
-  );
-});
-
-it("separates project deactivation from operator-only global deactivation", async () => {
-  const membership = {
-    organizationId: "org-1",
-    name: "1팀",
-    isActive: true,
-    masterIsActive: true,
-    activeProjectCount: 3,
-    hasHistory: true,
-  };
-  const view = render(
-    <ProjectOrganizationsPanel
-      projectId="project-1"
-      memberships={[membership]}
-      allOrganizations={[]}
-      canAdminister
-      onChanged={vi.fn().mockResolvedValue(undefined)}
-    />,
-  );
-
-  expect(screen.getByRole("button", { name: "사용 중지" })).toBeVisible();
-  fireEvent.click(screen.getByRole("button", { name: "전체 사용 중지" }));
-  expect(mockApi.patch).not.toHaveBeenCalled();
-  expect(
-    screen.getByText(
-      "현재 연결된 활성 프로젝트 3개를 포함해, 이 조직은 전체 프로젝트에서 신규 연결과 신규 참가자 선택이 차단됩니다. 계속하시겠습니까?",
-    ),
-  ).toBeVisible();
-  fireEvent.click(screen.getByRole("button", { name: "전체 사용 중지 확인" }));
-  await waitFor(() =>
-    expect(mockApi.patch).toHaveBeenCalledWith("/organizations/org-1", {
-      isActive: false,
-    }),
-  );
-
-  view.rerender(
-    <ProjectOrganizationsPanel
-      projectId="project-1"
-      memberships={[{ ...membership, masterIsActive: false }]}
-      allOrganizations={[]}
-      canAdminister
-      onChanged={vi.fn().mockResolvedValue(undefined)}
-    />,
-  );
-  expect(screen.getByLabelText("1팀 조직 이름")).toBeDisabled();
-  expect(
-    screen.queryByRole("button", { name: "전체 사용 중지" }),
-  ).not.toBeInTheDocument();
 });
 
 it("keeps inactive membership roster rows read-only for managers", async () => {
@@ -364,6 +406,9 @@ it("keeps inactive membership roster rows read-only for managers", async () => {
           masterIsActive: true,
           activeProjectCount: 0,
           hasHistory: true,
+          primaryLeader: null,
+          managerCount: 0,
+          rosterCount: 1,
         },
       ];
     }
@@ -431,58 +476,6 @@ it("keeps inactive membership roster rows read-only for managers", async () => {
   expect(
     await screen.findByRole("button", { name: "참가자 추가" }),
   ).toBeVisible();
-});
-
-it("discards a hidden rename confirmation before administration returns", async () => {
-  const membership = {
-    organizationId: "org-1",
-    name: "1팀",
-    isActive: true,
-    masterIsActive: true,
-    activeProjectCount: 2,
-    hasHistory: true,
-  };
-  const onChanged = vi.fn().mockResolvedValue(undefined);
-  const view = render(
-    <ProjectOrganizationsPanel
-      projectId="project-1"
-      memberships={[membership]}
-      allOrganizations={[]}
-      canAdminister
-      onChanged={onChanged}
-    />,
-  );
-  fireEvent.change(screen.getByLabelText("1팀 조직 이름"), {
-    target: { value: "변경 조직" },
-  });
-  fireEvent.click(screen.getByRole("button", { name: "이름 저장" }));
-  expect(screen.getByRole("button", { name: "변경 확인" })).toBeVisible();
-
-  view.rerender(
-    <ProjectOrganizationsPanel
-      projectId="project-1"
-      memberships={[membership]}
-      allOrganizations={[]}
-      canAdminister={false}
-      onChanged={onChanged}
-    />,
-  );
-  expect(
-    screen.queryByRole("button", { name: "변경 확인" }),
-  ).not.toBeInTheDocument();
-
-  view.rerender(
-    <ProjectOrganizationsPanel
-      projectId="project-1"
-      memberships={[membership]}
-      allOrganizations={[]}
-      canAdminister
-      onChanged={onChanged}
-    />,
-  );
-  expect(
-    screen.queryByRole("button", { name: "변경 확인" }),
-  ).not.toBeInTheDocument();
 });
 
 it("confirms the exhaustive next transition action", async () => {
@@ -859,6 +852,9 @@ it("refreshes once and hides organization controls when the project closes", asy
           masterIsActive: true,
           activeProjectCount: 1,
           hasHistory: true,
+          primaryLeader: null,
+          managerCount: 0,
+          rosterCount: 0,
         },
       ];
     }
@@ -868,58 +864,22 @@ it("refreshes once and hides organization controls when the project closes", asy
 
   render(<ProjectDetailPage projectId="project-1" />);
   fireEvent.click(await screen.findByRole("tab", { name: "조직" }));
-  fireEvent.change(screen.getByLabelText("새 조직 이름"), {
-    target: { value: "종료 중 조직" },
-  });
-  fireEvent.click(screen.getByRole("button", { name: "새 조직 추가" }));
+  fireEvent.change(
+    screen.getByRole("combobox", { name: "조직 이름 검색 또는 입력" }),
+    {
+      target: { value: "종료 중 조직" },
+    },
+  );
+  fireEvent.click(screen.getByRole("option", { name: /새 조직 생성 후 추가/ }));
+  fireEvent.click(screen.getByRole("button", { name: "생성 후 추가" }));
 
   expect(
-    await screen.findByText("프로젝트가 종료되어 변경할 수 없습니다."),
+    await screen.findByText("프로젝트가 종료되어 조직을 변경할 수 없습니다."),
   ).toBeVisible();
   expect(screen.getByText("종료")).toBeVisible();
   expect(projectReads).toBe(2);
   expect(
-    screen.queryByRole("button", { name: /새 조직 추가|사용 중지|이름 저장/ }),
-  ).not.toBeInTheDocument();
-});
-
-it("closes an organization rename dialog when the project closes", async () => {
-  let projectReads = 0;
-  mockApi.get.mockImplementation(async (path: string) => {
-    if (path === "/projects/project-1") {
-      projectReads += 1;
-      return projectReads === 1 ? project : closedProject();
-    }
-    if (path === "/projects/project-1/organizations") {
-      return [
-        {
-          organizationId: "org-1",
-          name: "1팀",
-          isActive: true,
-          masterIsActive: true,
-          activeProjectCount: 1,
-          hasHistory: true,
-        },
-      ];
-    }
-    return defaultGet(path);
-  });
-  mockApi.patch.mockRejectedValueOnce(projectClosedError());
-
-  render(<ProjectDetailPage projectId="project-1" />);
-  fireEvent.click(await screen.findByRole("tab", { name: "조직" }));
-  fireEvent.change(screen.getByLabelText("1팀 조직 이름"), {
-    target: { value: "변경 시도" },
-  });
-  fireEvent.click(screen.getByRole("button", { name: "이름 저장" }));
-  fireEvent.click(screen.getByRole("button", { name: "변경 확인" }));
-
-  expect(
-    await screen.findByText("프로젝트가 종료되어 변경할 수 없습니다."),
-  ).toBeVisible();
-  expect(projectReads).toBe(2);
-  expect(
-    screen.queryByRole("button", { name: "변경 확인" }),
+    screen.queryByRole("button", { name: /프로젝트에 추가|사용 중지/ }),
   ).not.toBeInTheDocument();
 });
 
@@ -996,6 +956,23 @@ function closedProject() {
     closedAt: "2026-07-22T00:00:00.000Z",
     closedBy: "operator-1",
     closeReason: "MANUAL" as const,
+  };
+}
+
+function organizationMembership(
+  overrides: Partial<ProjectOrganization> = {},
+): ProjectOrganization {
+  return {
+    organizationId: "org-1",
+    name: "Ｅ２Ｅ 1팀",
+    isActive: true,
+    masterIsActive: true,
+    activeProjectCount: 1,
+    hasHistory: true,
+    primaryLeader: null,
+    managerCount: 0,
+    rosterCount: 0,
+    ...overrides,
   };
 }
 

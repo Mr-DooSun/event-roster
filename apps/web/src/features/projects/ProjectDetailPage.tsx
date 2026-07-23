@@ -482,6 +482,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
           <ProjectOrganizationsPanel
             key={project.id}
             projectId={project.id}
+            projectRevision={project.revision}
             memberships={memberships}
             allOrganizations={allOrganizations}
             canAdminister={operator && project.status !== "CLOSED"}
