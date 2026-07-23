@@ -1,5 +1,7 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 import { Button } from "../components/ui/Button";
+import { OrganizationDetailPage } from "../features/admin/OrganizationDetailPage";
+import { OrganizationsPage } from "../features/admin/OrganizationsPage";
 import { UsersPage } from "../features/admin/UsersPage";
 import { useAuth } from "../features/auth/AuthProvider";
 import { ProjectDetailPage } from "../features/projects/ProjectDetailPage";
@@ -32,7 +34,12 @@ export function AppShell() {
       <div className="er-app-body">
         <nav className="er-nav" aria-label="주 메뉴">
           <NavLink href="/projects">프로젝트</NavLink>
-          {operator ? <NavLink href="/users">계정</NavLink> : null}
+          {operator ? (
+            <>
+              <NavLink href="/organizations">조직 관리</NavLink>
+              <NavLink href="/users">계정</NavLink>
+            </>
+          ) : null}
         </nav>
         <main className="er-content">{route(path, operator)}</main>
       </div>
@@ -42,7 +49,16 @@ export function AppShell() {
 
 function route(path: string, operator: boolean) {
   if (path === "/" || path === "/projects") return <ProjectsPage />;
+  if (path === "/organizations" && operator) return <OrganizationsPage />;
   if (path === "/users" && operator) return <UsersPage />;
+  const organizationMatch = path.match(/^\/organizations\/([^/]+)$/);
+  if (organizationMatch?.[1] && operator) {
+    return (
+      <OrganizationDetailPage
+        organizationId={decodeURIComponent(organizationMatch[1])}
+      />
+    );
+  }
   const importMatch = path.match(/^\/projects\/([^/]+)\/import$/);
   if (importMatch?.[1] && operator) {
     return (

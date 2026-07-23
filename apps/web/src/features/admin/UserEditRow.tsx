@@ -1,7 +1,6 @@
 import type { Role } from "@event-roster/contracts";
 import { useState } from "react";
 import { Button } from "../../components/ui/Button";
-import type { OrganizationView } from "./UserForm";
 
 export interface UserView {
   id: string;
@@ -12,23 +11,20 @@ export interface UserView {
   organizationIds: string[];
 }
 
-type UserUpdate = Omit<UserView, "id" | "loginId">;
+type UserUpdate = Pick<UserView, "displayName" | "role" | "isActive">;
 
 export function UserEditRow({
   user,
-  organizations,
   onSave,
   onReset,
 }: {
   user: UserView;
-  organizations: OrganizationView[];
   onSave: (id: string, input: UserUpdate) => Promise<void>;
   onReset: (id: string) => Promise<void>;
 }) {
   const [displayName, setDisplayName] = useState(user.displayName);
   const [role, setRole] = useState<Role>(user.role);
   const [isActive, setIsActive] = useState(user.isActive);
-  const [organizationIds, setOrganizationIds] = useState(user.organizationIds);
   return (
     <tr>
       <td>
@@ -45,40 +41,11 @@ export function UserEditRow({
           className="er-control er-control--select"
           aria-label={`${user.loginId} 역할`}
           value={role}
-          onChange={(event) => {
-            const next = event.currentTarget.value as Role;
-            setRole(next);
-            if (next === "OPERATOR") setOrganizationIds([]);
-          }}
+          onChange={(event) => setRole(event.currentTarget.value as Role)}
         >
           <option value="OPERATOR">운영자</option>
           <option value="ORGANIZATION_MANAGER">조직 담당자</option>
         </select>
-        {role === "ORGANIZATION_MANAGER" ? (
-          <div className="er-compact-checks">
-            {organizations
-              .filter((item) => item.isActive)
-              .map((organization) => (
-                <label className="er-checkbox" key={organization.id}>
-                  <input
-                    className="er-checkbox__input"
-                    type="checkbox"
-                    checked={organizationIds.includes(organization.id)}
-                    onChange={(event) => {
-                      const checked = event.currentTarget.checked;
-                      setOrganizationIds((current) =>
-                        checked
-                          ? [...current, organization.id]
-                          : current.filter((id) => id !== organization.id),
-                      );
-                    }}
-                  />
-                  <span className="er-checkbox__box" aria-hidden="true" />
-                  <span>{organization.name}</span>
-                </label>
-              ))}
-          </div>
-        ) : null}
       </td>
       <td>
         <label className="er-toggle">
@@ -105,7 +72,6 @@ export function UserEditRow({
                 displayName,
                 role,
                 isActive,
-                organizationIds,
               })
             }
           >

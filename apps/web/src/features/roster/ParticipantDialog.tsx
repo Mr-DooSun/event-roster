@@ -1,8 +1,8 @@
+import type { Organization } from "@event-roster/contracts";
 import { useEffect, useState } from "react";
 import { Button } from "../../components/ui/Button";
 import { Dialog } from "../../components/ui/Dialog";
 import { TextInput } from "../../components/ui/TextInput";
-import type { OrganizationView } from "../admin/UserForm";
 
 export interface ParticipantView {
   id: string;
@@ -29,7 +29,7 @@ export function ParticipantDialog({
   onClose,
 }: {
   participants: ParticipantView[];
-  organizations: OrganizationView[];
+  organizations: Organization[];
   onAdd: (input: ExistingParticipantConfirmation) => Promise<void>;
   onCreateAndAdd: (input: {
     name: string;

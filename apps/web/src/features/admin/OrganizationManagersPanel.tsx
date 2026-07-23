@@ -1,0 +1,374 @@
+import type {
+  OrganizationAssignmentRole,
+  OrganizationDetail,
+  OrganizationManager,
+} from "@event-roster/contracts";
+import { type FormEvent, useState } from "react";
+import { Button } from "../../components/ui/Button";
+import { Card } from "../../components/ui/Card";
+import { Dialog } from "../../components/ui/Dialog";
+import { StatusMessage } from "../../components/ui/StatusMessage";
+import { TextInput } from "../../components/ui/TextInput";
+import { ApiError } from "../../lib/api";
+import { useAuth } from "../auth/AuthProvider";
+
+interface AssignableManager {
+  userId: string;
+  loginId: string;
+  displayName: string;
+  isActive: boolean;
+}
+
+export interface OrganizationManagersPanelProps {
+  organization: OrganizationDetail;
+  onChanged(): Promise<void>;
+  onTemporaryPassword(value: string): void;
+}
+
+export function OrganizationManagersPanel({
+  organization,
+  onChanged,
+  onTemporaryPassword,
+}: OrganizationManagersPanelProps) {
+  const { api } = useAuth();
+  const [mode, setMode] = useState<"EXISTING" | "NEW" | null>(null);
+  const [query, setQuery] = useState("");
+  const [candidates, setCandidates] = useState<AssignableManager[]>([]);
+  const [selectedUserId, setSelectedUserId] = useState("");
+  const [loginId, setLoginId] = useState("");
+  const [displayName, setDisplayName] = useState("");
+  const [assignmentRole, setAssignmentRole] =
+    useState<OrganizationAssignmentRole>("MANAGER");
+  const [primaryTarget, setPrimaryTarget] =
+    useState<OrganizationManager | null>(null);
+  const [primaryDisposition, setPrimaryDisposition] = useState<
+    "REMOVE" | "MANAGER"
+  >("MANAGER");
+  const [removeManager, setRemoveManager] =
+    useState<OrganizationManager | null>(null);
+  const [removePrimary, setRemovePrimary] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+
+  async function searchCandidates(event: FormEvent) {
+    event.preventDefault();
+    setMessage(null);
+    try {
+      const next = await api.get<AssignableManager[]>(
+        `/organizations/${encodeURIComponent(
+          organization.id,
+        )}/assignable-users?query=${encodeURIComponent(query.trim())}`,
+      );
+      setCandidates(next);
+      setSelectedUserId(next[0]?.userId ?? "");
+    } catch {
+      setMessage("지정 가능한 계정을 찾지 못했습니다.");
+    }
+  }
+
+  async function assignExisting(event: FormEvent) {
+    event.preventDefault();
+    if (!selectedUserId) return;
+    await mutate(async () => {
+      await api.post(`/organizations/${organization.id}/managers`, {
+        kind: "EXISTING",
+        userId: selectedUserId,
+        assignmentRole,
+      });
+      setMode(null);
+    });
+  }
+
+  async function provision(event: FormEvent) {
+    event.preventDefault();
+    await mutate(async () => {
+      const result = await api.post<{
+        manager: OrganizationManager;
+        temporaryPassword?: string;
+      }>(`/organizations/${organization.id}/managers`, {
+        kind: "NEW",
+        loginId: loginId.trim(),
+        displayName: displayName.trim(),
+        assignmentRole,
+      });
+      if (result.temporaryPassword) {
+        onTemporaryPassword(result.temporaryPassword);
+      }
+      setMode(null);
+      setLoginId("");
+      setDisplayName("");
+    });
+  }
+
+  async function replacePrimary() {
+    if (!primaryTarget) return;
+    await mutate(async () => {
+      await api.patch(`/organizations/${organization.id}/primary`, {
+        userId: primaryTarget.userId,
+        expectedPrimaryUserId: organization.primaryLeader?.userId ?? null,
+        previousPrimaryDisposition: primaryDisposition,
+      });
+      setPrimaryTarget(null);
+    });
+  }
+
+  async function removePrimaryAssignment() {
+    await mutate(async () => {
+      await api.patch(`/organizations/${organization.id}/primary`, {
+        userId: null,
+        expectedPrimaryUserId: organization.primaryLeader?.userId ?? null,
+        previousPrimaryDisposition: "REMOVE",
+      });
+      setRemovePrimary(false);
+    });
+  }
+
+  async function removeManagerAssignment() {
+    if (!removeManager) return;
+    await mutate(async () => {
+      await api.delete(
+        `/organizations/${organization.id}/managers/${encodeURIComponent(
+          removeManager.userId,
+        )}`,
+      );
+      setRemoveManager(null);
+    });
+  }
+
+  async function mutate(operation: () => Promise<void>) {
+    setMessage(null);
+    try {
+      await operation();
+      await onChanged();
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 409) {
+        await onChanged();
+        setMessage(
+          "다른 관리 변경이 먼저 반영되어 최신 조직 정보를 불러왔습니다.",
+        );
+      } else {
+        setMessage("담당자 변경을 반영하지 못했습니다.");
+      }
+    }
+  }
+
+  function openAssignment(nextMode: "EXISTING" | "NEW") {
+    setMode(nextMode);
+    setAssignmentRole(
+      organization.primaryLeader ? "MANAGER" : "PRIMARY_LEADER",
+    );
+    setMessage(null);
+  }
+
+  return (
+    <Card className="er-panel">
+      <div className="er-section-heading">
+        <div>
+          <h2>조직 담당자</h2>
+          <p className="er-muted">
+            대표 조직장과 추가 관리자는 명단 관리 권한이 같습니다.
+          </p>
+        </div>
+        <div className="er-action-row er-action-row--wrap">
+          <Button type="button" onClick={() => openAssignment("EXISTING")}>
+            기존 계정 지정
+          </Button>
+          <Button
+            type="button"
+            variant="primary"
+            onClick={() => openAssignment("NEW")}
+          >
+            새 담당자 발급
+          </Button>
+        </div>
+      </div>
+      {message ? (
+        <StatusMessage tone={message.includes("최신") ? "info" : "error"}>
+          {message}
+        </StatusMessage>
+      ) : null}
+      {organization.managers.length === 0 ? (
+        <p className="er-muted">지정된 담당자가 없습니다.</p>
+      ) : (
+        <ul className="er-manager-list">
+          {organization.managers.map((manager) => (
+            <li key={manager.userId}>
+              <div>
+                <strong>{manager.displayName}</strong>
+                <span className="er-muted">{manager.loginId}</span>
+                <span>
+                  {manager.assignmentRole === "PRIMARY_LEADER"
+                    ? "대표 조직장"
+                    : "추가 관리자"}
+                  {!manager.isActive ? " · 비활성 계정" : ""}
+                </span>
+              </div>
+              <div className="er-action-row er-action-row--wrap">
+                {manager.assignmentRole === "PRIMARY_LEADER" ? (
+                  <Button type="button" onClick={() => setRemovePrimary(true)}>
+                    대표 지정 해제
+                  </Button>
+                ) : (
+                  <>
+                    <Button
+                      type="button"
+                      onClick={() => setPrimaryTarget(manager)}
+                      aria-label={`${manager.displayName} 대표로 지정`}
+                    >
+                      대표로 지정
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="danger"
+                      onClick={() => setRemoveManager(manager)}
+                      aria-label={`${manager.displayName} 담당 해제`}
+                    >
+                      담당 해제
+                    </Button>
+                  </>
+                )}
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+      {mode === "EXISTING" ? (
+        <Dialog title="기존 담당자 지정" onClose={() => setMode(null)}>
+          <form className="er-form-grid" onSubmit={searchCandidates}>
+            <TextInput
+              label="계정 검색"
+              value={query}
+              onChange={(event) => setQuery(event.currentTarget.value)}
+            />
+            <Button type="submit">계정 찾기</Button>
+          </form>
+          <form className="er-form-grid" onSubmit={assignExisting}>
+            <label className="er-field">
+              <span>지정할 계정</span>
+              <select
+                className="er-control er-control--select"
+                value={selectedUserId}
+                onChange={(event) =>
+                  setSelectedUserId(event.currentTarget.value)
+                }
+              >
+                <option value="">계정을 선택하세요</option>
+                {candidates.map((candidate) => (
+                  <option key={candidate.userId} value={candidate.userId}>
+                    {candidate.displayName} · {candidate.loginId}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <AssignmentRoleField
+              value={assignmentRole}
+              onChange={setAssignmentRole}
+            />
+            <Button type="submit" variant="primary" disabled={!selectedUserId}>
+              담당자로 지정
+            </Button>
+          </form>
+        </Dialog>
+      ) : null}
+      {mode === "NEW" ? (
+        <Dialog title="새 담당자 발급" onClose={() => setMode(null)}>
+          <form className="er-form-grid" onSubmit={provision}>
+            <TextInput
+              label="영문 로그인 ID"
+              required
+              value={loginId}
+              onChange={(event) => setLoginId(event.currentTarget.value)}
+            />
+            <TextInput
+              label="표시 이름"
+              required
+              value={displayName}
+              onChange={(event) => setDisplayName(event.currentTarget.value)}
+            />
+            <AssignmentRoleField
+              value={assignmentRole}
+              onChange={setAssignmentRole}
+            />
+            <Button
+              type="submit"
+              variant="primary"
+              disabled={!loginId.trim() || !displayName.trim()}
+            >
+              계정 발급 및 지정
+            </Button>
+          </form>
+        </Dialog>
+      ) : null}
+      {primaryTarget ? (
+        <Dialog title="대표 조직장 변경" onClose={() => setPrimaryTarget(null)}>
+          <p>{primaryTarget.displayName} 계정을 대표 조직장으로 지정합니다.</p>
+          <label className="er-field">
+            <span>기존 대표 처리</span>
+            <select
+              className="er-control er-control--select"
+              value={primaryDisposition}
+              onChange={(event) =>
+                setPrimaryDisposition(
+                  event.currentTarget.value as "REMOVE" | "MANAGER",
+                )
+              }
+            >
+              <option value="MANAGER">추가 관리자로 유지</option>
+              <option value="REMOVE">조직 담당에서 해제</option>
+            </select>
+          </label>
+          <Button type="button" variant="primary" onClick={replacePrimary}>
+            대표 변경 확인
+          </Button>
+        </Dialog>
+      ) : null}
+      {removeManager ? (
+        <Dialog title="담당자 해제" onClose={() => setRemoveManager(null)}>
+          <p>{removeManager.displayName} 계정의 조직 담당을 해제합니다.</p>
+          <Button
+            type="button"
+            variant="danger"
+            onClick={removeManagerAssignment}
+          >
+            담당 해제 확인
+          </Button>
+        </Dialog>
+      ) : null}
+      {removePrimary ? (
+        <Dialog title="대표 지정 해제" onClose={() => setRemovePrimary(false)}>
+          <p>대표 조직장 지정을 해제하면 이 조직은 대표 없이 유지됩니다.</p>
+          <Button
+            type="button"
+            variant="danger"
+            onClick={removePrimaryAssignment}
+          >
+            대표 해제 확인
+          </Button>
+        </Dialog>
+      ) : null}
+    </Card>
+  );
+}
+
+function AssignmentRoleField({
+  value,
+  onChange,
+}: {
+  value: OrganizationAssignmentRole;
+  onChange(value: OrganizationAssignmentRole): void;
+}) {
+  return (
+    <label className="er-field">
+      <span>조직별 역할</span>
+      <select
+        className="er-control er-control--select"
+        value={value}
+        onChange={(event) =>
+          onChange(event.currentTarget.value as OrganizationAssignmentRole)
+        }
+      >
+        <option value="PRIMARY_LEADER">대표 조직장</option>
+        <option value="MANAGER">추가 관리자</option>
+      </select>
+    </label>
+  );
+}

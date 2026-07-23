@@ -3,37 +3,26 @@ import { type FormEvent, useState } from "react";
 import { Button } from "../../components/ui/Button";
 import { TextInput } from "../../components/ui/TextInput";
 
-export interface OrganizationView {
-  id: string;
-  name: string;
-  isActive: boolean;
-}
-
 export interface UserCreateInput {
   loginId: string;
   displayName: string;
   role: Role;
-  organizationIds: string[];
 }
 
 export function UserForm({
-  organizations,
   onSubmit,
 }: {
-  organizations: OrganizationView[];
   onSubmit: (input: UserCreateInput) => Promise<void>;
 }) {
   const [loginId, setLoginId] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [role, setRole] = useState<Role>("OPERATOR");
-  const [organizationIds, setOrganizationIds] = useState<string[]>([]);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    await onSubmit({ loginId, displayName, role, organizationIds });
+    await onSubmit({ loginId, displayName, role });
     setLoginId("");
     setDisplayName("");
-    setOrganizationIds([]);
   }
 
   return (
@@ -61,31 +50,6 @@ export function UserForm({
           <option value="ORGANIZATION_MANAGER">조직 담당자</option>
         </select>
       </label>
-      {role === "ORGANIZATION_MANAGER" ? (
-        <fieldset className="er-check-group">
-          <legend>담당 조직</legend>
-          {organizations
-            .filter((item) => item.isActive)
-            .map((organization) => (
-              <label className="er-checkbox" key={organization.id}>
-                <input
-                  className="er-checkbox__input"
-                  type="checkbox"
-                  checked={organizationIds.includes(organization.id)}
-                  onChange={(event) =>
-                    setOrganizationIds((current) =>
-                      event.currentTarget.checked
-                        ? [...current, organization.id]
-                        : current.filter((id) => id !== organization.id),
-                    )
-                  }
-                />
-                <span className="er-checkbox__box" aria-hidden="true" />
-                <span>{organization.name}</span>
-              </label>
-            ))}
-        </fieldset>
-      ) : null}
       <Button type="submit" variant="primary">
         계정 만들기
       </Button>

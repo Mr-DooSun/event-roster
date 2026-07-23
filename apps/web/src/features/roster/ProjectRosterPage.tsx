@@ -1,11 +1,10 @@
-import type { Project } from "@event-roster/contracts";
+import type { Organization, Project } from "@event-roster/contracts";
 import { useMemo, useState } from "react";
 import { Button } from "../../components/ui/Button";
 import { Card } from "../../components/ui/Card";
 import { StatusMessage } from "../../components/ui/StatusMessage";
 import { ApiError } from "../../lib/api";
 import type { ExportData } from "../../lib/excel/download-workbook";
-import type { OrganizationView } from "../admin/UserForm";
 import { useAuth } from "../auth/AuthProvider";
 import {
   type ExistingParticipantConfirmation,
@@ -19,7 +18,7 @@ export interface ProjectRosterPageProps {
   project: Project;
   rows: RosterView[];
   participants: ParticipantView[];
-  organizations: OrganizationView[];
+  organizations: Organization[];
   canMutate: boolean;
   onChanged(): Promise<void>;
 }

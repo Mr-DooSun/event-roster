@@ -66,6 +66,15 @@ function actionLabel(action: string) {
     ROSTER_REACTIVATED: "참석 복원",
     ROSTER_IMPORTED: "엑셀 명단 반영",
     PROJECT_REOPENED: "프로젝트 재개",
+    ORGANIZATION_CREATED: "조직 생성",
+    ORGANIZATION_RENAMED: "조직 이름 변경",
+    ORGANIZATION_DEACTIVATED: "조직 사용 중지",
+    ORGANIZATION_REACTIVATED: "조직 다시 사용",
+    ORGANIZATION_PRIMARY_ASSIGNED: "대표 조직장 지정",
+    ORGANIZATION_PRIMARY_REPLACED: "대표 조직장 변경",
+    ORGANIZATION_PRIMARY_REMOVED: "대표 조직장 해제",
+    ORGANIZATION_MANAGER_ASSIGNED: "조직 담당자 지정",
+    ORGANIZATION_MANAGER_REMOVED: "조직 담당자 해제",
   };
   return labels[action] ?? action;
 }

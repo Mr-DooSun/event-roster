@@ -10,7 +10,6 @@ import { Button } from "../../components/ui/Button";
 import { Dialog } from "../../components/ui/Dialog";
 import { StatusMessage } from "../../components/ui/StatusMessage";
 import { ApiError } from "../../lib/api";
-import type { OrganizationView } from "../admin/UserForm";
 import { useAuth } from "../auth/AuthProvider";
 import { AuditPanel, type AuditView } from "../roster/AuditPanel";
 import type { ParticipantView } from "../roster/ParticipantDialog";
@@ -378,13 +377,11 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
         memberships.some(
           (membership) => membership.isActive && membership.masterIsActive,
         )));
-  const rosterOrganizations: OrganizationView[] = memberships.map(
-    (membership) => ({
-      id: membership.organizationId,
-      name: membership.name,
-      isActive: membership.isActive && membership.masterIsActive,
-    }),
-  );
+  const rosterOrganizations: Organization[] = memberships.map((membership) => ({
+    id: membership.organizationId,
+    name: membership.name,
+    isActive: membership.isActive && membership.masterIsActive,
+  }));
   const childContext = {
     projectId: project.id,
     generation: loadGeneration.current,

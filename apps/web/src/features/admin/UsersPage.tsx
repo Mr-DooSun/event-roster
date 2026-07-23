@@ -4,16 +4,11 @@ import { StatusMessage } from "../../components/ui/StatusMessage";
 import { useAuth } from "../auth/AuthProvider";
 import { TemporaryPasswordDialog } from "./TemporaryPasswordDialog";
 import { UserEditRow, type UserView } from "./UserEditRow";
-import {
-  type OrganizationView,
-  type UserCreateInput,
-  UserForm,
-} from "./UserForm";
+import { type UserCreateInput, UserForm } from "./UserForm";
 
 export function UsersPage() {
   const { api } = useAuth();
   const [users, setUsers] = useState<UserView[]>([]);
-  const [organizations, setOrganizations] = useState<OrganizationView[]>([]);
   const [temporaryPassword, setTemporaryPassword] = useState<string | null>(
     null,
   );
@@ -21,12 +16,7 @@ export function UsersPage() {
 
   const load = useCallback(async () => {
     try {
-      const [nextUsers, nextOrganizations] = await Promise.all([
-        api.get<UserView[]>("/users"),
-        api.get<OrganizationView[]>("/organizations"),
-      ]);
-      setUsers(nextUsers);
-      setOrganizations(nextOrganizations);
+      setUsers(await api.get<UserView[]>("/users"));
     } catch {
       setError("계정 목록을 불러오지 못했습니다.");
     }
@@ -60,7 +50,7 @@ export function UsersPage() {
 
   async function saveUser(
     userId: string,
-    input: Omit<UserView, "id" | "loginId">,
+    input: Pick<UserView, "displayName" | "role" | "isActive">,
   ) {
     try {
       await api.patch(`/users/${userId}`, input);
@@ -81,7 +71,7 @@ export function UsersPage() {
       {error ? <StatusMessage tone="error">{error}</StatusMessage> : null}
       <Card className="er-panel">
         <h2>새 계정</h2>
-        <UserForm organizations={organizations} onSubmit={create} />
+        <UserForm onSubmit={create} />
       </Card>
       <Card className="er-panel">
         <h2>계정 목록</h2>
@@ -101,7 +91,6 @@ export function UsersPage() {
                 <UserEditRow
                   key={user.id}
                   user={user}
-                  organizations={organizations}
                   onSave={saveUser}
                   onReset={reset}
                 />

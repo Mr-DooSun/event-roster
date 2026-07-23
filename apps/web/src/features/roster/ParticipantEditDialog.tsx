@@ -1,8 +1,8 @@
+import type { Organization } from "@event-roster/contracts";
 import { useState } from "react";
 import { Button } from "../../components/ui/Button";
 import { Dialog } from "../../components/ui/Dialog";
 import { TextInput } from "../../components/ui/TextInput";
-import type { OrganizationView } from "../admin/UserForm";
 import type { ParticipantView } from "./ParticipantDialog";
 
 export function ParticipantEditDialog({
@@ -13,7 +13,7 @@ export function ParticipantEditDialog({
   onClose,
 }: {
   participant: ParticipantView;
-  organizations: OrganizationView[];
+  organizations: Organization[];
   allowOrganizationChange: boolean;
   onSave: (input: {
     name: string;
