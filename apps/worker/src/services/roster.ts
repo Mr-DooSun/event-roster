@@ -4,7 +4,6 @@ import type {
   RosterStatus,
 } from "@event-roster/contracts";
 import { DomainError, toKstDate } from "@event-roster/domain";
-import { encodeBase64Url } from "../auth/refresh-token";
 import { runGuardedAtomic } from "../db/atomic";
 import {
   findProjectOrganization,
@@ -19,6 +18,11 @@ import {
 } from "../db/roster";
 import type { Env } from "../env";
 import type { Actor } from "../middleware/authentication";
+import {
+  decodeCursor,
+  encodeCursor,
+  sanitizeAuditDetails,
+} from "./audit-pages";
 import { closeExpiredProject } from "./project-expiration";
 
 export async function getRoster(env: Env, actor: Actor, projectId: string) {
@@ -490,11 +494,7 @@ export async function getAuditPage(
     })),
     nextCursor:
       hasMore && last
-        ? encodeBase64Url(
-            new TextEncoder().encode(
-              JSON.stringify({ occurredAt: last.occurred_at, id: last.id }),
-            ),
-          )
+        ? encodeCursor({ occurredAt: last.occurred_at, id: last.id })
         : null,
   };
 }
@@ -703,37 +703,6 @@ async function translateClosedFailure(
   await closeExpiredProject(env, projectId, now);
   const project = await findProject(env.DB, projectId);
   if (project?.status === "CLOSED") throw new DomainError("PROJECT_CLOSED");
-}
-
-function decodeCursor(cursor: string): { occurredAt: string; id: string } {
-  try {
-    const normalized = cursor.replace(/-/g, "+").replace(/_/g, "/");
-    const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "=");
-    const value = JSON.parse(
-      new TextDecoder().decode(
-        Uint8Array.from(atob(padded), (char) => char.charCodeAt(0)),
-      ),
-    ) as { occurredAt?: unknown; id?: unknown };
-    if (typeof value.occurredAt !== "string" || typeof value.id !== "string") {
-      throw new Error();
-    }
-    return { occurredAt: value.occurredAt, id: value.id };
-  } catch {
-    throw new DomainError("VALIDATION_FAILED");
-  }
-}
-
-function sanitizeAuditDetails(raw: string): Record<string, string> {
-  try {
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-    const details: Record<string, string> = {};
-    for (const key of ["projectId", "organizationId"] as const) {
-      if (typeof parsed[key] === "string") details[key] = parsed[key];
-    }
-    return details;
-  } catch {
-    return {};
-  }
 }
 
 function mapReturnedRoster(

@@ -1,12 +1,7 @@
 import type { Role } from "@event-roster/contracts";
 import { DomainError } from "@event-roster/domain";
 import { BcryptPasswordHasher } from "../auth/password";
-import {
-  findAdminUserState,
-  findOrganization,
-  listOrganizations,
-  listUsers,
-} from "../db/admin";
+import { findAdminUserState, listUsers } from "../db/admin";
 import { runGuardedAtomic } from "../db/atomic";
 import type { Env } from "../env";
 import type { Actor } from "../middleware/authentication";
@@ -18,124 +13,6 @@ const hasher = new BcryptPasswordHasher();
 export function requireAdministrativeOperator(actor: Actor): void {
   requireOperator(actor);
   if (actor.session.user.isBootstrap) throw new DomainError("FORBIDDEN");
-}
-
-export async function getOrganizations(env: Env, actor: Actor) {
-  return listOrganizations(
-    env.DB,
-    actor.session.user.role === "OPERATOR"
-      ? undefined
-      : actor.session.user.organizationIds,
-  );
-}
-
-export async function createOrganization(env: Env, actor: Actor, name: string) {
-  const id = crypto.randomUUID();
-  const now = new Date().toISOString();
-  const guardId = crypto.randomUUID();
-  try {
-    await runGuardedAtomic(env.DB, {
-      guardId,
-      guardStatement: createOperatorGuard(
-        env.DB,
-        guardId,
-        actor,
-        "NOT EXISTS (SELECT 1 FROM organizations WHERE canonical_name = ?)",
-        [canonicalizeOrganizationName(name)],
-      ),
-      statements: [
-        env.DB.prepare(
-          `INSERT INTO organizations
-           (id, name, canonical_name, is_active, created_at, updated_at)
-           VALUES (?, ?, ?, 1, ?, ?)`,
-        ).bind(id, name, canonicalizeOrganizationName(name), now, now),
-      ],
-      failureCode: "CONFLICT",
-    });
-  } catch (error) {
-    throwConstraintConflict(error);
-  }
-  return { id, name, isActive: true };
-}
-
-export async function updateOrganization(
-  env: Env,
-  actor: Actor,
-  id: string,
-  input: { name?: string | undefined; isActive?: boolean | undefined },
-) {
-  const current = await findOrganization(env.DB, id);
-  if (!current) throw new DomainError("NOT_FOUND");
-  const name = input.name ?? current.name;
-  const isActive = input.isActive ?? current.isActive;
-  const now = new Date().toISOString();
-  const action =
-    input.isActive === false && current.isActive
-      ? "ORGANIZATION_DEACTIVATED"
-      : input.isActive === true && !current.isActive
-        ? "ORGANIZATION_REACTIVATED"
-        : "ORGANIZATION_UPDATED";
-  const guardId = crypto.randomUUID();
-  try {
-    await runGuardedAtomic(env.DB, {
-      guardId,
-      guardStatement: createOperatorGuard(
-        env.DB,
-        guardId,
-        actor,
-        `EXISTS (
-           SELECT 1 FROM organizations
-           WHERE id = ? AND name = ? AND canonical_name = ? AND is_active = ?
-         )`,
-        [id, current.name, current.canonicalName, current.isActive ? 1 : 0],
-      ),
-      statements: [
-        env.DB.prepare(
-          `UPDATE organizations
-           SET name = COALESCE(?, name),
-               canonical_name = COALESCE(?, canonical_name),
-               is_active = COALESCE(?, is_active),
-               updated_at = ?
-           WHERE id = ? AND name = ? AND canonical_name = ? AND is_active = ?`,
-        ).bind(
-          input.name ?? null,
-          input.name === undefined
-            ? null
-            : canonicalizeOrganizationName(input.name),
-          input.isActive === undefined ? null : input.isActive ? 1 : 0,
-          now,
-          id,
-          current.name,
-          current.canonicalName,
-          current.isActive ? 1 : 0,
-        ),
-        env.DB.prepare(
-          `INSERT INTO audit_logs
-           (id, actor_user_id, action, entity_type, entity_id, occurred_at, details_json)
-           VALUES (?, ?, ?, 'ORGANIZATION', ?, ?, '{}')`,
-        ).bind(crypto.randomUUID(), actor.session.user.id, action, id, now),
-      ],
-      failureCode: "CONFLICT",
-    });
-  } catch (error) {
-    throwConstraintConflict(error);
-  }
-  const activeProjectCount =
-    (
-      await env.DB.prepare(
-        `SELECT COUNT(*) AS count FROM project_organizations
-         WHERE organization_id = ? AND is_active = 1`,
-      )
-        .bind(id)
-        .first<{ count: number }>()
-    )?.count ?? 0;
-  return {
-    id,
-    name,
-    isActive,
-    masterIsActive: isActive,
-    activeProjectCount,
-  };
 }
 
 export async function getUsers(env: Env) {
@@ -415,10 +292,6 @@ function createTemporaryPassword(): string {
     (value) =>
       TEMPORARY_PASSWORD_ALPHABET[value % TEMPORARY_PASSWORD_ALPHABET.length],
   ).join("");
-}
-
-export function canonicalizeOrganizationName(value: string): string {
-  return value.normalize("NFKC").trim().toLocaleLowerCase();
 }
 
 function throwConstraintConflict(error: unknown): never {

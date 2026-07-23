@@ -14,7 +14,8 @@ import {
 import { findProject } from "../db/projects";
 import type { Env } from "../env";
 import type { Actor } from "../middleware/authentication";
-import { canonicalizeOrganizationName, createOperatorGuard } from "./admin";
+import { createOperatorGuard } from "./admin";
+import { canonicalizeOrganizationName } from "./organizations";
 import { closeExpiredProject } from "./project-expiration";
 
 export async function getProjectOrganizations(

@@ -6,15 +6,37 @@ import { assertExactOrigin } from "../http/origin";
 import { requireActor } from "../middleware/authentication";
 import { requireFullSession } from "../middleware/authorization";
 import { requireCsrf } from "../middleware/csrf";
+import { requireAdministrativeOperator } from "../services/admin";
 import {
   createOrganization,
-  getOrganizations,
-  requireAdministrativeOperator,
+  getAssignableManagerAccounts,
+  getOrganizationAuditPage,
+  getOrganizationDetail,
+  getOrganizationSummaries,
   updateOrganization,
-} from "../services/admin";
+} from "../services/organizations";
 
 const OrganizationCreateSchema = z.object({
   name: z.string().trim().min(1).max(100),
+});
+
+const OrganizationListQuerySchema = z
+  .object({
+    query: z.string().trim().max(100).default(""),
+    status: z.enum(["ALL", "ACTIVE", "INACTIVE"]).default("ALL"),
+    leaderStatus: z.enum(["ALL", "ASSIGNED", "UNASSIGNED"]).default("ALL"),
+  })
+  .strict();
+
+const AssignableQuerySchema = z
+  .object({
+    query: z.string().trim().max(100).default(""),
+  })
+  .strict();
+
+const AuditQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+  cursor: z.string().min(1).optional(),
 });
 
 export const organizationRoutes = new Hono<{ Bindings: Env }>();
@@ -22,7 +44,43 @@ export const organizationRoutes = new Hono<{ Bindings: Env }>();
 organizationRoutes.get("/organizations", async (c) => {
   const actor = await requireActor(c.req.raw, c.env);
   requireFullSession(actor);
-  return c.json(await getOrganizations(c.env, actor));
+  const query = OrganizationListQuerySchema.parse(c.req.query());
+  return c.json(await getOrganizationSummaries(c.env, actor, query));
+});
+
+organizationRoutes.get("/organizations/:id/assignable-users", async (c) => {
+  const actor = await requireActor(c.req.raw, c.env);
+  requireFullSession(actor);
+  const query = AssignableQuerySchema.parse(c.req.query());
+  return c.json(
+    await getAssignableManagerAccounts(
+      c.env,
+      actor,
+      c.req.param("id"),
+      query.query,
+    ),
+  );
+});
+
+organizationRoutes.get("/organizations/:id/audit", async (c) => {
+  const actor = await requireActor(c.req.raw, c.env);
+  requireFullSession(actor);
+  const query = AuditQuerySchema.parse(c.req.query());
+  return c.json(
+    await getOrganizationAuditPage(
+      c.env,
+      actor,
+      c.req.param("id"),
+      query.limit,
+      query.cursor ?? null,
+    ),
+  );
+});
+
+organizationRoutes.get("/organizations/:id", async (c) => {
+  const actor = await requireActor(c.req.raw, c.env);
+  requireFullSession(actor);
+  return c.json(await getOrganizationDetail(c.env, actor, c.req.param("id")));
 });
 
 organizationRoutes.post("/organizations", async (c) => {

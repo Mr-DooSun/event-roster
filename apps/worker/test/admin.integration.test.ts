@@ -2,7 +2,7 @@ import { env } from "cloudflare:workers";
 import { beforeEach, expect, it } from "vitest";
 import type { Env } from "../src/env";
 import { requireActor } from "../src/middleware/authentication";
-import { updateOrganization } from "../src/services/admin";
+import { updateOrganization } from "../src/services/organizations";
 import {
   authedRequest,
   seedManager,
@@ -209,6 +209,31 @@ it("rejects a stale deactivate after a concurrent rename without losing or audit
     canonical_name: "concurrent rename",
     is_active: 1,
   });
+  expect(
+    (
+      await env.DB.prepare(
+        "SELECT COUNT(*) AS count FROM audit_logs WHERE entity_type = 'ORGANIZATION' AND entity_id = 'org-1'",
+      ).first<{ count: number }>()
+    )?.count,
+  ).toBe(0);
+});
+
+it("revalidates the operator session for a no-op organization update", async () => {
+  const operator = await seedOperator();
+  await seedOrganization();
+  const actor = await requireActor(
+    new Request("https://event-roster.test", {
+      headers: authenticatedHeaders(operator),
+    }),
+    env as Env,
+  );
+  await env.DB.prepare("UPDATE auth_sessions SET revoked_at = ? WHERE id = ?")
+    .bind("2026-07-23T00:00:00.000Z", actor.session.id)
+    .run();
+
+  await expect(
+    updateOrganization(env as Env, actor, "org-1", { name: "1팀" }),
+  ).rejects.toMatchObject({ code: "CONFLICT" });
   expect(
     (
       await env.DB.prepare(
