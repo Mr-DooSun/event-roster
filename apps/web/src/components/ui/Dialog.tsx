@@ -14,11 +14,13 @@ export function Dialog({
   title,
   children,
   closeLabel = "닫기",
+  hideDefaultCloseAction = false,
   onClose,
 }: {
   title: string;
   children: ReactNode;
   closeLabel?: string;
+  hideDefaultCloseAction?: boolean;
   onClose: () => void;
 }) {
   const dialogRef = useRef<HTMLElement>(null);
@@ -97,9 +99,11 @@ export function Dialog({
       >
         <h2>{title}</h2>
         {children}
-        <Button type="button" onClick={onClose}>
-          {closeLabel}
-        </Button>
+        {hideDefaultCloseAction ? null : (
+          <Button type="button" onClick={onClose}>
+            {closeLabel}
+          </Button>
+        )}
       </section>
     </div>
   );

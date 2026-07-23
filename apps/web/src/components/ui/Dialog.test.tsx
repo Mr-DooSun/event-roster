@@ -36,6 +36,25 @@ it("uses a caller-provided acknowledgement label", () => {
   expect(onClose).toHaveBeenCalledOnce();
 });
 
+it("lets a form provide its own close action without rendering a duplicate", () => {
+  render(
+    <Dialog title="새 프로젝트" onClose={vi.fn()} hideDefaultCloseAction>
+      <form>
+        <button type="button">폼 닫기</button>
+        <button type="submit">프로젝트 만들기</button>
+      </form>
+    </Dialog>,
+  );
+
+  expect(
+    screen.queryByRole("button", { name: "닫기" }),
+  ).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "폼 닫기" })).toBeVisible();
+  expect(
+    screen.getByRole("button", { name: "프로젝트 만들기" }),
+  ).toBeVisible();
+});
+
 it("moves focus inside and traps Tab in both directions", () => {
   render(<DialogHarness />);
   const trigger = screen.getByRole("button", { name: "대화상자 열기" });
