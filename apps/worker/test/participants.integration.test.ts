@@ -204,7 +204,9 @@ it("allows a manager scoped to both snapshot and master organizations to edit a 
   }>();
   const manager = await seedManager("org-1");
   await env.DB.prepare(
-    "INSERT INTO user_organizations (user_id, organization_id) VALUES ('manager-user', 'org-2')",
+    `INSERT INTO user_organizations
+     (user_id, organization_id, assignment_role, assigned_by, assigned_at)
+     VALUES ('manager-user', 'org-2', 'MANAGER', NULL, '2026-07-23T00:00:00.000Z')`,
   ).run();
 
   const response = await authedRequest(

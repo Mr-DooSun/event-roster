@@ -2,10 +2,10 @@ import { applyD1Migrations } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { expect, it } from "vitest";
 
-it("preserves legacy project, roster, snapshot, import, and audit data", async () => {
-  const [initial, projectModel] = env.TEST_MIGRATIONS;
-  if (!initial || !projectModel)
-    throw new Error("expected migrations 0001 and 0002");
+it("preserves legacy project, roster, snapshot, import, audit, and organization assignments", async () => {
+  const [initial, projectModel, organizationLeadership] = env.TEST_MIGRATIONS;
+  if (!initial || !projectModel || !organizationLeadership)
+    throw new Error("expected migrations 0001, 0002 and 0003");
   const legacyInProgressStatus = ["DAY", "OF"].join("_");
   const legacyPreRegistrationSource = ["PRE", "EVENT"].join("_");
 
@@ -19,6 +19,14 @@ it("preserves legacy project, roster, snapshot, import, and audit data", async (
        session_version, created_at, updated_at)
       VALUES ('migration-user', 'migration-user', 'migration-user', '이관 사용자',
        'OPERATOR', 1, 0, 1, '2026-01-01', '2026-01-01')`),
+    env.MIGRATION_DB.prepare(`INSERT INTO users
+      (id, login_id, login_id_canonical, display_name, role, is_active, is_bootstrap,
+       session_version, created_at, updated_at)
+      VALUES ('migration-manager', 'migration-manager', 'migration-manager', '이관 담당자',
+       'ORGANIZATION_MANAGER', 1, 0, 1, '2026-01-01', '2026-01-01')`),
+    env.MIGRATION_DB.prepare(
+      "INSERT INTO user_organizations (user_id, organization_id) VALUES ('migration-manager', 'migration-org')",
+    ),
     env.MIGRATION_DB.prepare(`INSERT INTO participants
       (id, participant_id, name, organization_id, revision, created_at, updated_at)
       VALUES ('migration-person', 'P-MIGRATION', '이관 참가자', 'migration-org', 2,
@@ -61,7 +69,17 @@ it("preserves legacy project, roster, snapshot, import, and audit data", async (
     imports: await countMigrationRows("import_runs"),
   };
 
-  await applyD1Migrations(env.MIGRATION_DB, [projectModel]);
+  await applyD1Migrations(env.MIGRATION_DB, [projectModel, organizationLeadership]);
+
+  expect(
+    await env.MIGRATION_DB.prepare(`SELECT assignment_role, assigned_by,
+      assigned_at IS NOT NULL AS has_assigned_at FROM user_organizations
+      WHERE user_id='migration-manager' AND organization_id='migration-org'`).first(),
+  ).toEqual({
+    assignment_role: "MANAGER",
+    assigned_by: null,
+    has_assigned_at: 1,
+  });
 
   expect(
     await env.MIGRATION_DB.prepare(

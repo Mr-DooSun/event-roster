@@ -925,9 +925,11 @@ async function setupManagerReuseProject() {
   }>();
   const manager = await seedManager("org-1");
   await env.DB.prepare(
-    "INSERT INTO user_organizations (user_id, organization_id) VALUES (?, 'org-2')",
+    `INSERT INTO user_organizations
+     (user_id, organization_id, assignment_role, assigned_by, assigned_at)
+     VALUES (?, 'org-2', 'MANAGER', NULL, ?)`,
   )
-    .bind(manager.userId)
+    .bind(manager.userId, "2026-07-23T00:00:00.000Z")
     .run();
   return { fixture, manager, targetProject };
 }

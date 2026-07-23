@@ -53,7 +53,9 @@ describe("initial D1 schema", () => {
   it("enforces foreign keys and append-only logs", async () => {
     await expect(
       env.DB.prepare(
-        "INSERT INTO user_organizations (user_id, organization_id) VALUES ('missing-user', 'missing-org')",
+        `INSERT INTO user_organizations
+         (user_id, organization_id, assignment_role, assigned_by, assigned_at)
+         VALUES ('missing-user', 'missing-org', 'MANAGER', NULL, '2026-07-23T00:00:00.000Z')`,
       ).run(),
     ).rejects.toThrow();
 
@@ -86,5 +88,60 @@ describe("initial D1 schema", () => {
         "UPDATE security_events SET event_type = 'MUTATED' WHERE id = 'security-1'",
       ).run(),
     ).rejects.toThrow();
+  });
+
+  it("allows managers and enforces one primary leader per organization", async () => {
+    const organizationId = "organization-leadership";
+    await insertOrganization(organizationId, "조직 대표");
+    for (const [id, loginId, displayName] of [
+      ["primary-leader", "primary-leader", "대표 담당자"],
+      ["manager-leader", "manager-leader", "추가 담당자"],
+    ]) {
+      await env.DB.prepare(
+        `INSERT INTO users
+         (id, login_id, login_id_canonical, display_name, role, is_active, is_bootstrap,
+          session_version, created_at, updated_at)
+         VALUES (?, ?, ?, ?, 'ORGANIZATION_MANAGER', 1, 0, 1, ?, ?)`,
+      )
+        .bind(
+          id,
+          loginId,
+          loginId,
+          displayName,
+          "2026-07-23T00:00:00.000Z",
+          "2026-07-23T00:00:00.000Z",
+        )
+        .run();
+    }
+
+    await env.DB.prepare(
+      `INSERT INTO user_organizations
+       (user_id, organization_id, assignment_role, assigned_by, assigned_at)
+       VALUES (?, ?, 'PRIMARY_LEADER', NULL, ?)`,
+    )
+      .bind("primary-leader", organizationId, "2026-07-23T00:00:00.000Z")
+      .run();
+
+    await expect(
+      env.DB.prepare(
+        `INSERT INTO user_organizations
+         (user_id, organization_id, assignment_role, assigned_by, assigned_at)
+         VALUES (?, ?, 'PRIMARY_LEADER', NULL, ?)`,
+      )
+        .bind(
+          "manager-leader",
+          organizationId,
+          "2026-07-23T00:00:00.000Z",
+        )
+        .run(),
+    ).rejects.toThrow();
+
+    await env.DB.prepare(
+      `INSERT INTO user_organizations
+       (user_id, organization_id, assignment_role, assigned_by, assigned_at)
+       VALUES (?, ?, 'MANAGER', NULL, ?)`,
+    )
+      .bind("manager-leader", organizationId, "2026-07-23T00:00:00.000Z")
+      .run();
   });
 });

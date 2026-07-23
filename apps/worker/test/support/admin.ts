@@ -44,9 +44,11 @@ export async function seedManager(
     "UPDATE users SET role = 'ORGANIZATION_MANAGER' WHERE id = 'manager-user'",
   ).run();
   await env.DB.prepare(
-    "INSERT INTO user_organizations (user_id, organization_id) VALUES ('manager-user', ?)",
+    `INSERT INTO user_organizations
+     (user_id, organization_id, assignment_role, assigned_by, assigned_at)
+     VALUES ('manager-user', ?, 'MANAGER', NULL, ?)`,
   )
-    .bind(organizationId)
+    .bind(organizationId, "2026-07-23T00:00:00.000Z")
     .run();
   return {
     ...(await login("manager-02", "manager-password-123")),
