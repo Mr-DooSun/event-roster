@@ -107,6 +107,13 @@ describe("organization contracts", () => {
         previousPrimaryDisposition: "REMOVE",
       }).userId,
     ).toBeNull();
+    expect(
+      OrganizationPrimaryPatchRequestSchema.safeParse({
+        userId: null,
+        expectedPrimaryUserId: "user-1",
+        previousPrimaryDisposition: "MANAGER",
+      }).success,
+    ).toBe(false);
   });
 });
 

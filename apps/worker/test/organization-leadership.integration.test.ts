@@ -1,7 +1,15 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, expect, it } from "vitest";
+import type { Env } from "../src/env";
+import { requireActor } from "../src/middleware/authentication";
+import { assignOrganizationManager } from "../src/services/organizations";
 import { authedRequest, seedOperator, seedOrganization } from "./support/admin";
-import { login, resetAuthState, seedUser } from "./support/auth";
+import {
+  authenticatedHeaders,
+  login,
+  resetAuthState,
+  seedUser,
+} from "./support/auth";
 import {
   seedLeadershipFixture,
   seedOperatorWithTwoOrganizations,
@@ -425,6 +433,94 @@ it("revokes an existing account session when assigning it", async () => {
   ).toEqual({ session_version: 2 });
 });
 
+it("returns the committed existing-manager snapshot if the assignment is removed immediately after commit", async () => {
+  const operator = await seedOperatorWithTwoOrganizations();
+  await seedUser({ id: "snapshot-user", loginId: "snapshot-user" });
+  await env.DB.prepare(
+    "UPDATE users SET role='ORGANIZATION_MANAGER', display_name='스냅샷 담당자' WHERE id='snapshot-user'",
+  ).run();
+  const actor = await requireActor(
+    new Request("https://event-roster.test", {
+      headers: authenticatedHeaders(operator),
+    }),
+    env as Env,
+  );
+  const raceDb = dbDeletingAssignmentAfterBatch("org-1", "snapshot-user");
+
+  await expect(
+    assignOrganizationManager({ ...(env as Env), DB: raceDb }, actor, "org-1", {
+      kind: "EXISTING",
+      userId: "snapshot-user",
+      assignmentRole: "MANAGER",
+    }),
+  ).resolves.toEqual({
+    manager: {
+      userId: "snapshot-user",
+      loginId: "snapshot-user",
+      displayName: "스냅샷 담당자",
+      isActive: true,
+      assignmentRole: "MANAGER",
+      assignedAt: expect.any(String),
+    },
+  });
+});
+
+it("returns a new account temporary password even if its assignment is removed immediately after commit", async () => {
+  const operator = await seedOperatorWithTwoOrganizations();
+  const actor = await requireActor(
+    new Request("https://event-roster.test", {
+      headers: authenticatedHeaders(operator),
+    }),
+    env as Env,
+  );
+  let committedUserId: string | null = null;
+  const raceDb = {
+    prepare: (query: string) => env.DB.prepare(query),
+    batch: async (statements: D1PreparedStatement[]) => {
+      const results = await env.DB.batch(statements);
+      const user = await env.DB.prepare(
+        "SELECT id FROM users WHERE login_id='new-snapshot-user'",
+      ).first<{ id: string }>();
+      committedUserId = user?.id ?? null;
+      await env.DB.prepare(
+        "DELETE FROM user_organizations WHERE organization_id='org-1' AND user_id=?",
+      )
+        .bind(committedUserId)
+        .run();
+      return results;
+    },
+  } as D1Database;
+
+  const result = await assignOrganizationManager(
+    { ...(env as Env), DB: raceDb },
+    actor,
+    "org-1",
+    {
+      kind: "NEW",
+      loginId: "new-snapshot-user",
+      displayName: "신규 스냅샷 담당자",
+      assignmentRole: "PRIMARY_LEADER",
+    },
+  );
+
+  expect(result).toEqual({
+    manager: {
+      userId: committedUserId,
+      loginId: "new-snapshot-user",
+      displayName: "신규 스냅샷 담당자",
+      isActive: true,
+      assignmentRole: "PRIMARY_LEADER",
+      assignedAt: expect.any(String),
+    },
+    temporaryPassword: expect.stringMatching(/^.{20}$/),
+  });
+  expect(committedUserId).not.toBeNull();
+  expect(
+    (await login("new-snapshot-user", result.temporaryPassword ?? "")).body
+      .session.sessionKind,
+  ).toBe("MUST_CHANGE_PASSWORD");
+});
+
 it("rejects inactive organizations, inactive targets, wrong roles, duplicates, and a second primary", async () => {
   const { operator } = await seedTwoManagersAndPrimary();
   await seedOrganization("org-inactive", "비활성 조직", false);
@@ -844,3 +940,21 @@ it("allows only non-bootstrap operators with full sessions to mutate organizatio
     ).status,
   ).toBe(201);
 });
+
+function dbDeletingAssignmentAfterBatch(
+  organizationId: string,
+  userId: string,
+): D1Database {
+  return {
+    prepare: (query: string) => env.DB.prepare(query),
+    batch: async (statements: D1PreparedStatement[]) => {
+      const results = await env.DB.batch(statements);
+      await env.DB.prepare(
+        "DELETE FROM user_organizations WHERE organization_id=? AND user_id=?",
+      )
+        .bind(organizationId, userId)
+        .run();
+      return results;
+    },
+  } as D1Database;
+}

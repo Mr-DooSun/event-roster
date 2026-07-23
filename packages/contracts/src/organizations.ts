@@ -82,7 +82,12 @@ export const OrganizationPrimaryPatchRequestSchema = z
     expectedPrimaryUserId: z.string().trim().min(1).nullable(),
     previousPrimaryDisposition: z.enum(["REMOVE", "MANAGER"]),
   })
-  .strict();
+  .strict()
+  .refine(
+    (value) =>
+      value.userId !== null || value.previousPrimaryDisposition === "REMOVE",
+    { path: ["previousPrimaryDisposition"] },
+  );
 export type OrganizationPrimaryPatchRequest = z.infer<
   typeof OrganizationPrimaryPatchRequestSchema
 >;

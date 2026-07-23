@@ -292,6 +292,7 @@ export async function assignOrganizationManager(
   };
   const statements: D1PreparedStatement[] = [];
   let temporaryPassword: string | undefined;
+  let manager: OrganizationManager;
 
   if (input.kind === "NEW") {
     temporaryPassword = createTemporaryPassword();
@@ -337,6 +338,22 @@ export async function assignOrganizationManager(
         },
       ),
     );
+    manager = {
+      userId,
+      loginId: input.loginId,
+      displayName: input.displayName,
+      isActive: true,
+      assignmentRole: input.assignmentRole,
+      assignedAt: now,
+    };
+  } else {
+    const account = await findManagerAccountSnapshot(env.DB, userId);
+    if (!account) throw new DomainError("CONFLICT");
+    manager = {
+      ...account,
+      assignmentRole: input.assignmentRole,
+      assignedAt: now,
+    };
   }
 
   statements.push(
@@ -414,8 +431,6 @@ export async function assignOrganizationManager(
     throwConstraintConflict(error);
   }
 
-  const manager = await findAssignedManager(env.DB, organizationId, userId);
-  if (!manager) throw new DomainError("INTERNAL_ERROR");
   return temporaryPassword ? { manager, temporaryPassword } : { manager };
 }
 
@@ -628,13 +643,34 @@ export function canonicalizeOrganizationName(value: string): string {
   return value.normalize("NFKC").trim().toLocaleLowerCase();
 }
 
-async function findAssignedManager(
+async function findManagerAccountSnapshot(
   db: D1Database,
-  organizationId: string,
   userId: string,
-): Promise<OrganizationManager | null> {
-  const detail = await findOrganizationDetail(db, organizationId);
-  return detail?.managers.find((manager) => manager.userId === userId) ?? null;
+): Promise<Pick<
+  OrganizationManager,
+  "userId" | "loginId" | "displayName" | "isActive"
+> | null> {
+  const row = await db
+    .prepare(
+      `SELECT id, login_id, display_name, is_active FROM users
+       WHERE id = ? AND role = 'ORGANIZATION_MANAGER'
+         AND is_active = 1 AND is_bootstrap = 0`,
+    )
+    .bind(userId)
+    .first<{
+      id: string;
+      login_id: string;
+      display_name: string;
+      is_active: number;
+    }>();
+  return row
+    ? {
+        userId: row.id,
+        loginId: row.login_id,
+        displayName: row.display_name,
+        isActive: row.is_active === 1,
+      }
+    : null;
 }
 
 async function findPrimaryUserId(
