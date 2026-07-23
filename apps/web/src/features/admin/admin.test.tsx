@@ -205,7 +205,7 @@ it("searches and filters organization summaries", async () => {
 
   expect(await screen.findByLabelText("조직 이름 검색")).toBeVisible();
   expect(screen.getByLabelText("대표 조직장 상태")).toBeVisible();
-  expect(screen.getByText("대표 조직장 미지정")).toBeVisible();
+  expect(await screen.findByText("대표 조직장 미지정")).toBeVisible();
   expect(screen.getByText("추가 관리자 2명")).toBeVisible();
   expect(screen.getByText("연결 프로젝트 3개")).toBeVisible();
   expect(screen.getByRole("link", { name: "1팀 상세 관리" })).toHaveAttribute(
@@ -279,6 +279,74 @@ it("keeps a duplicate organization name in its creation dialog", async () => {
   expect(within(dialog).getByLabelText("조직 이름")).toHaveValue("중복 조직");
 });
 
+it("keeps the newest organization search when responses arrive out of order", async () => {
+  const first = deferred<Response>();
+  const second = deferred<Response>();
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/auth/login")) {
+        return Promise.resolve(Response.json(auth()));
+      }
+      if (url.includes("query=%EC%B2%AB%EB%B2%88%EC%A7%B8")) {
+        return first.promise;
+      }
+      if (url.includes("query=%EB%91%90%EB%B2%88%EC%A7%B8")) {
+        return second.promise;
+      }
+      if (url.includes("/organizations?")) {
+        return Promise.resolve(Response.json([]));
+      }
+      throw new Error(`unexpected request: ${url}`);
+    }),
+  );
+  render(
+    <AuthProvider restoreOnMount={false}>
+      <Gate>
+        <OrganizationsPage />
+      </Gate>
+    </AuthProvider>,
+  );
+  await login();
+  const search = await screen.findByLabelText("조직 이름 검색");
+  fireEvent.change(search, { target: { value: "첫번째" } });
+  fireEvent.submit(screen.getByRole("form", { name: "조직 검색 및 필터" }));
+  fireEvent.change(search, { target: { value: "두번째" } });
+  fireEvent.submit(screen.getByRole("form", { name: "조직 검색 및 필터" }));
+
+  second.resolve(
+    Response.json([
+      {
+        id: "org-newest",
+        name: "두번째 결과",
+        isActive: true,
+        primaryLeader: null,
+        managerCount: 0,
+        projectCount: 0,
+      },
+    ]),
+  );
+  expect(await screen.findByText("두번째 결과")).toBeVisible();
+
+  first.resolve(
+    Response.json([
+      {
+        id: "org-stale",
+        name: "첫번째 결과",
+        isActive: true,
+        primaryLeader: null,
+        managerCount: 0,
+        projectCount: 0,
+      },
+    ]),
+  );
+  await waitFor(() =>
+    expect(screen.queryByText("첫번째 결과")).not.toBeInTheDocument(),
+  );
+  expect(screen.getByText("두번째 결과")).toBeVisible();
+});
+
 function Gate({ children }: { children: React.ReactNode }) {
   return useAuth().auth ? children : <LoginPage />;
 }
@@ -309,4 +377,12 @@ function auth() {
       },
     },
   };
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((next) => {
+    resolve = next;
+  });
+  return { promise, resolve };
 }

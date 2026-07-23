@@ -2,7 +2,13 @@ import type {
   OrganizationDetail,
   OrganizationProject,
 } from "@event-roster/contracts";
-import { type FormEvent, useCallback, useEffect, useState } from "react";
+import {
+  type FormEvent,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { Button } from "../../components/ui/Button";
 import { Card } from "../../components/ui/Card";
 import { Dialog } from "../../components/ui/Dialog";
@@ -40,9 +46,12 @@ export function OrganizationDetailPage({
   const [auditError, setAuditError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [showStatusConfirmation, setShowStatusConfirmation] = useState(false);
-  const [temporaryPassword, setTemporaryPassword] = useState<string | null>(
-    null,
-  );
+  const [temporaryPassword, setTemporaryPassword] = useState<{
+    value: string;
+    returnFocus?: HTMLElement;
+  } | null>(null);
+  const auditGeneration = useRef(0);
+  const auditPaginationRequest = useRef<string | null>(null);
 
   const loadDetail = useCallback(async () => {
     try {
@@ -52,22 +61,32 @@ export function OrganizationDetailPage({
       setOrganization(next);
       setName(next.name);
       setDetailError(null);
+      return true;
     } catch {
       setDetailError("조직 정보를 불러오지 못했습니다.");
+      return false;
     }
   }, [api, organizationId]);
 
   const loadInitialAudit = useCallback(async () => {
+    const generation = ++auditGeneration.current;
+    auditPaginationRequest.current = null;
     try {
       const page = await api.get<{
         items: AuditView[];
         nextCursor: string | null;
       }>(`/organizations/${encodeURIComponent(organizationId)}/audit?limit=50`);
-      setAudit(page.items);
-      setAuditNextCursor(page.nextCursor);
-      setAuditError(null);
+      if (generation === auditGeneration.current) {
+        setAudit(page.items);
+        setAuditNextCursor(page.nextCursor);
+        setAuditError(null);
+      }
+      return true;
     } catch {
-      setAuditError("변경 이력을 불러오지 못했습니다.");
+      if (generation === auditGeneration.current) {
+        setAuditError("변경 이력을 불러오지 못했습니다.");
+      }
+      return false;
     }
   }, [api, organizationId]);
 
@@ -101,12 +120,22 @@ export function OrganizationDetailPage({
     setMessage(null);
     try {
       await api.patch(`/organizations/${organizationId}`, input);
-      await Promise.all([loadDetail(), loadInitialAudit()]);
+      const [detailReloaded] = await Promise.all([
+        loadDetail(),
+        loadInitialAudit(),
+      ]);
+      if (!detailReloaded) {
+        setMessage(
+          "조직 변경은 반영됐지만 최신 조직 정보를 불러오지 못했습니다.",
+        );
+      }
     } catch (error) {
       if (error instanceof ApiError && error.status === 409) {
-        await loadDetail();
+        const reloaded = await loadDetail();
         setMessage(
-          "다른 관리 변경이 먼저 반영되어 최신 조직 정보를 불러왔습니다.",
+          reloaded
+            ? "다른 관리 변경이 먼저 반영되어 최신 조직 정보를 불러왔습니다."
+            : "다른 관리 변경이 먼저 반영되었지만 최신 조직 정보를 불러오지 못했습니다.",
         );
       } else {
         setMessage("조직 정보를 변경하지 못했습니다.");
@@ -115,7 +144,10 @@ export function OrganizationDetailPage({
   }
 
   async function loadMoreAudit() {
-    if (!auditNextCursor) return;
+    if (!auditNextCursor || auditPaginationRequest.current) return;
+    const cursor = auditNextCursor;
+    const generation = auditGeneration.current;
+    auditPaginationRequest.current = cursor;
     try {
       const page = await api.get<{
         items: AuditView[];
@@ -123,14 +155,34 @@ export function OrganizationDetailPage({
       }>(
         `/organizations/${encodeURIComponent(
           organizationId,
-        )}/audit?limit=50&cursor=${encodeURIComponent(auditNextCursor)}`,
+        )}/audit?limit=50&cursor=${encodeURIComponent(cursor)}`,
       );
+      if (
+        generation !== auditGeneration.current ||
+        auditPaginationRequest.current !== cursor
+      ) {
+        return;
+      }
       setAudit((current) => [...current, ...page.items]);
       setAuditNextCursor(page.nextCursor);
       setAuditError(null);
     } catch {
-      setAuditError("변경 이력을 더 불러오지 못했습니다.");
+      if (generation === auditGeneration.current) {
+        setAuditError("변경 이력을 더 불러오지 못했습니다.");
+      }
+    } finally {
+      if (auditPaginationRequest.current === cursor) {
+        auditPaginationRequest.current = null;
+      }
     }
+  }
+
+  async function reloadAfterManagerMutation() {
+    const [detailReloaded] = await Promise.all([
+      loadDetail(),
+      loadInitialAudit(),
+    ]);
+    return detailReloaded;
   }
 
   if (!organization && !detailError) {
@@ -146,7 +198,9 @@ export function OrganizationDetailPage({
         <StatusMessage tone="error">{detailError}</StatusMessage>
       ) : null}
       {message ? (
-        <StatusMessage tone={message.includes("최신") ? "info" : "error"}>
+        <StatusMessage
+          tone={message.includes("불러오지 못했습니다") ? "error" : "info"}
+        >
           {message}
         </StatusMessage>
       ) : null}
@@ -210,8 +264,13 @@ export function OrganizationDetailPage({
           </Card>
           <OrganizationManagersPanel
             organization={organization}
-            onChanged={loadDetail}
-            onTemporaryPassword={setTemporaryPassword}
+            onChanged={reloadAfterManagerMutation}
+            onTemporaryPassword={(value, returnFocus) =>
+              setTemporaryPassword({
+                value,
+                ...(returnFocus ? { returnFocus } : {}),
+              })
+            }
           />
           <Card className="er-panel">
             <h2>연결 프로젝트</h2>
@@ -274,8 +333,14 @@ export function OrganizationDetailPage({
       ) : null}
       {temporaryPassword ? (
         <TemporaryPasswordDialog
-          value={temporaryPassword}
-          onClose={() => setTemporaryPassword(null)}
+          value={temporaryPassword.value}
+          onClose={() => {
+            const returnFocus = temporaryPassword.returnFocus;
+            setTemporaryPassword(null);
+            queueMicrotask(() => {
+              if (returnFocus?.isConnected) returnFocus.focus();
+            });
+          }}
         />
       ) : null}
     </div>

@@ -109,6 +109,7 @@ it("routes an organization URL to operator administration detail", async () => {
 it("assigns existing and newly provisioned organization managers", async () => {
   window.history.replaceState(null, "", "/organizations/org-1");
   let failNextDetailReload = false;
+  let auditCalls = 0;
   mockApi.get.mockImplementation((path: string) => {
     if (path === "/organizations/org-1") {
       if (failNextDetailReload) {
@@ -118,7 +119,23 @@ it("assigns existing and newly provisioned organization managers", async () => {
       return Promise.resolve(organizationDetail());
     }
     if (path === "/organizations/org-1/audit?limit=50") {
-      return Promise.resolve({ items: [], nextCursor: null });
+      auditCalls += 1;
+      return Promise.resolve({
+        items:
+          auditCalls > 1
+            ? [
+                {
+                  id: "audit-assigned",
+                  actorUserId: "operator-1",
+                  action: "ORGANIZATION_MANAGER_ASSIGNED",
+                  entityType: "USER_ORGANIZATION",
+                  entityId: "user-3",
+                  occurredAt: "2026-07-23T00:00:00.000Z",
+                },
+              ]
+            : [],
+        nextCursor: null,
+      });
     }
     if (
       path === "/organizations/org-1/assignable-users?query=%EC%8B%A0%EA%B7%9C"
@@ -174,8 +191,19 @@ it("assigns existing and newly provisioned organization managers", async () => {
       assignmentRole: "MANAGER",
     }),
   );
+  await waitFor(() =>
+    expect(
+      mockApi.get.mock.calls.filter(
+        ([path]) => path === "/organizations/org-1/audit?limit=50",
+      ),
+    ).toHaveLength(2),
+  );
+  expect(await screen.findByText("조직 담당자 지정")).toBeVisible();
 
-  fireEvent.click(screen.getByRole("button", { name: "새 담당자 발급" }));
+  const newManagerTrigger = screen.getByRole("button", {
+    name: "새 담당자 발급",
+  });
+  fireEvent.click(newManagerTrigger);
   fireEvent.change(screen.getByLabelText("영문 로그인 ID"), {
     target: { value: "new-manager" },
   });
@@ -187,12 +215,19 @@ it("assigns existing and newly provisioned organization managers", async () => {
   });
   fireEvent.click(screen.getByRole("button", { name: "계정 발급 및 지정" }));
   expect(await screen.findByText("abcdefghjkmnpqrstuvw")).toBeVisible();
+  expect(
+    await screen.findByText(
+      "담당자 변경은 반영됐지만 최신 조직 정보를 불러오지 못했습니다.",
+    ),
+  ).toBeVisible();
   expect(mockApi.post).toHaveBeenCalledWith("/organizations/org-1/managers", {
     kind: "NEW",
     loginId: "new-manager",
     displayName: "새 담당자",
     assignmentRole: "MANAGER",
   });
+  fireEvent.click(screen.getByRole("button", { name: "닫기" }));
+  await waitFor(() => expect(newManagerTrigger).toHaveFocus());
 });
 
 it("replaces and removes organization leadership assignments explicitly", async () => {
@@ -225,6 +260,13 @@ it("replaces and removes organization leadership assignments explicitly", async 
       previousPrimaryDisposition: "MANAGER",
     }),
   );
+  await waitFor(() =>
+    expect(
+      mockApi.get.mock.calls.filter(
+        ([path]) => path === "/organizations/org-1/audit?limit=50",
+      ),
+    ).toHaveLength(2),
+  );
 
   fireEvent.click(
     screen.getByRole("button", { name: "추가 관리자 1 담당 해제" }),
@@ -235,6 +277,13 @@ it("replaces and removes organization leadership assignments explicitly", async 
       "/organizations/org-1/managers/manager-2",
     ),
   );
+  await waitFor(() =>
+    expect(
+      mockApi.get.mock.calls.filter(
+        ([path]) => path === "/organizations/org-1/audit?limit=50",
+      ),
+    ).toHaveLength(3),
+  );
 
   fireEvent.click(screen.getByRole("button", { name: "대표 지정 해제" }));
   fireEvent.click(screen.getByRole("button", { name: "대표 해제 확인" }));
@@ -244,6 +293,13 @@ it("replaces and removes organization leadership assignments explicitly", async 
       expectedPrimaryUserId: "leader-1",
       previousPrimaryDisposition: "REMOVE",
     }),
+  );
+  await waitFor(() =>
+    expect(
+      mockApi.get.mock.calls.filter(
+        ([path]) => path === "/organizations/org-1/audit?limit=50",
+      ),
+    ).toHaveLength(4),
   );
 });
 
@@ -321,6 +377,137 @@ it("edits organization state, renders projects, and paginates audit history", as
   expect(screen.getByText("조직 이름 변경")).toBeVisible();
   fireEvent.click(screen.getByRole("button", { name: "이력 더 보기" }));
   expect(await screen.findByText("조직 담당자 지정")).toBeVisible();
+});
+
+it("does not claim a conflict reload succeeded when detail refresh fails", async () => {
+  window.history.replaceState(null, "", "/organizations/org-1");
+  let detailCalls = 0;
+  mockApi.get.mockImplementation((path: string) => {
+    if (path === "/organizations/org-1") {
+      detailCalls += 1;
+      return detailCalls === 1
+        ? Promise.resolve(organizationDetail())
+        : Promise.reject(new Error("reload failed"));
+    }
+    if (path === "/organizations/org-1/audit?limit=50") {
+      return Promise.resolve({ items: [], nextCursor: null });
+    }
+    return Promise.resolve([]);
+  });
+  mockApi.patch.mockRejectedValue(
+    new ApiError(409, {
+      code: "CONFLICT",
+      message: "conflict",
+      requestId: "request-1",
+    }),
+  );
+
+  render(<App />);
+  fireEvent.click(
+    await screen.findByRole("button", { name: "조직 사용 중지" }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "상태 변경 확인" }));
+
+  expect(
+    await screen.findByText(
+      "다른 관리 변경이 먼저 반영되었지만 최신 조직 정보를 불러오지 못했습니다.",
+    ),
+  ).toBeVisible();
+  expect(
+    screen.queryByText(
+      "다른 관리 변경이 먼저 반영되어 최신 조직 정보를 불러왔습니다.",
+    ),
+  ).not.toBeInTheDocument();
+});
+
+it("reports a successful organization mutation whose detail reload fails", async () => {
+  window.history.replaceState(null, "", "/organizations/org-1");
+  let detailCalls = 0;
+  mockApi.get.mockImplementation((path: string) => {
+    if (path === "/organizations/org-1") {
+      detailCalls += 1;
+      return detailCalls === 1
+        ? Promise.resolve(organizationDetail())
+        : Promise.reject(new Error("reload failed"));
+    }
+    if (path === "/organizations/org-1/audit?limit=50") {
+      return Promise.resolve({ items: [], nextCursor: null });
+    }
+    return Promise.resolve([]);
+  });
+  mockApi.patch.mockResolvedValue({ ...organizationDetail(), name: "운영팀" });
+
+  render(<App />);
+  fireEvent.change(await screen.findByLabelText("조직 이름"), {
+    target: { value: "운영팀" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "이름 저장" }));
+
+  expect(
+    await screen.findByText(
+      "조직 변경은 반영됐지만 최신 조직 정보를 불러오지 못했습니다.",
+    ),
+  ).toBeVisible();
+  expect(
+    screen.queryByText("조직 정보를 변경하지 못했습니다."),
+  ).not.toBeInTheDocument();
+});
+
+it("prevents duplicate in-flight requests for the same audit cursor", async () => {
+  window.history.replaceState(null, "", "/organizations/org-1");
+  const nextPage = deferred<{
+    items: Array<{
+      id: string;
+      actorUserId: string;
+      action: string;
+      entityType: string;
+      entityId: string;
+      occurredAt: string;
+    }>;
+    nextCursor: null;
+  }>();
+  mockApi.get.mockImplementation((path: string) => {
+    if (path === "/organizations/org-1") {
+      return Promise.resolve(organizationDetail());
+    }
+    if (path === "/organizations/org-1/audit?limit=50") {
+      return Promise.resolve({
+        items: [],
+        nextCursor: "cursor-1",
+      });
+    }
+    if (path === "/organizations/org-1/audit?limit=50&cursor=cursor-1") {
+      return nextPage.promise;
+    }
+    return Promise.resolve([]);
+  });
+
+  render(<App />);
+  const loadMore = await screen.findByRole("button", { name: "이력 더 보기" });
+  fireEvent.click(loadMore);
+  fireEvent.click(loadMore);
+  expect(
+    mockApi.get.mock.calls.filter(
+      ([path]) =>
+        path === "/organizations/org-1/audit?limit=50&cursor=cursor-1",
+    ),
+  ).toHaveLength(1);
+
+  nextPage.resolve({
+    items: [
+      {
+        id: "audit-2",
+        actorUserId: "operator-1",
+        action: "ORGANIZATION_MANAGER_ASSIGNED",
+        entityType: "USER_ORGANIZATION",
+        entityId: "manager-2",
+        occurredAt: "2026-07-22T00:00:00.000Z",
+      },
+    ],
+    nextCursor: null,
+  });
+  expect(await screen.findByText("조직 담당자 지정")).toBeVisible();
+  expect(screen.getAllByText("조직 담당자 지정")).toHaveLength(1);
 });
 
 it("keeps organization administration hidden from managers", async () => {
@@ -410,4 +597,12 @@ function organizationDetail() {
       },
     ],
   };
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((next) => {
+    resolve = next;
+  });
+  return { promise, resolve };
 }

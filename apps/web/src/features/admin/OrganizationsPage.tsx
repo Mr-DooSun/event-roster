@@ -1,5 +1,11 @@
 import type { OrganizationSummary } from "@event-roster/contracts";
-import { type FormEvent, useCallback, useEffect, useState } from "react";
+import {
+  type FormEvent,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { Button } from "../../components/ui/Button";
 import { Card } from "../../components/ui/Card";
 import { Dialog } from "../../components/ui/Dialog";
@@ -22,17 +28,23 @@ export function OrganizationsPage() {
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [createError, setCreateError] = useState<string | null>(null);
+  const loadGeneration = useRef(0);
 
   const load = useCallback(async () => {
+    const generation = ++loadGeneration.current;
     setError(null);
     const search = `query=${encodeURIComponent(
       submittedQuery,
     )}&status=${status}&leaderStatus=${leaderStatus}`;
     try {
-      setOrganizations(
-        await api.get<OrganizationSummary[]>(`/organizations?${search}`),
+      const next = await api.get<OrganizationSummary[]>(
+        `/organizations?${search}`,
       );
+      if (generation !== loadGeneration.current) return;
+      setOrganizations(next);
+      setError(null);
     } catch {
+      if (generation !== loadGeneration.current) return;
       setError("조직 목록을 불러오지 못했습니다.");
     }
   }, [api, leaderStatus, status, submittedQuery]);

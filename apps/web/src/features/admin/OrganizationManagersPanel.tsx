@@ -3,7 +3,7 @@ import type {
   OrganizationDetail,
   OrganizationManager,
 } from "@event-roster/contracts";
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useRef, useState } from "react";
 import { Button } from "../../components/ui/Button";
 import { Card } from "../../components/ui/Card";
 import { Dialog } from "../../components/ui/Dialog";
@@ -21,8 +21,8 @@ interface AssignableManager {
 
 export interface OrganizationManagersPanelProps {
   organization: OrganizationDetail;
-  onChanged(): Promise<void>;
-  onTemporaryPassword(value: string): void;
+  onChanged(): Promise<boolean>;
+  onTemporaryPassword(value: string, returnFocus?: HTMLElement): void;
 }
 
 export function OrganizationManagersPanel({
@@ -48,6 +48,7 @@ export function OrganizationManagersPanel({
     useState<OrganizationManager | null>(null);
   const [removePrimary, setRemovePrimary] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const newManagerTrigger = useRef<HTMLButtonElement | null>(null);
 
   async function searchCandidates(event: FormEvent) {
     event.preventDefault();
@@ -91,7 +92,10 @@ export function OrganizationManagersPanel({
         assignmentRole,
       });
       if (result.temporaryPassword) {
-        onTemporaryPassword(result.temporaryPassword);
+        onTemporaryPassword(
+          result.temporaryPassword,
+          newManagerTrigger.current ?? undefined,
+        );
       }
       setMode(null);
       setLoginId("");
@@ -138,16 +142,23 @@ export function OrganizationManagersPanel({
     setMessage(null);
     try {
       await operation();
-      await onChanged();
     } catch (error) {
       if (error instanceof ApiError && error.status === 409) {
-        await onChanged();
+        const reloaded = await onChanged();
         setMessage(
-          "다른 관리 변경이 먼저 반영되어 최신 조직 정보를 불러왔습니다.",
+          reloaded
+            ? "다른 관리 변경이 먼저 반영되어 최신 조직 정보를 불러왔습니다."
+            : "다른 관리 변경이 먼저 반영되었지만 최신 조직 정보를 불러오지 못했습니다.",
         );
       } else {
         setMessage("담당자 변경을 반영하지 못했습니다.");
       }
+      return;
+    }
+    if (!(await onChanged())) {
+      setMessage(
+        "담당자 변경은 반영됐지만 최신 조직 정보를 불러오지 못했습니다.",
+      );
     }
   }
 
@@ -175,14 +186,19 @@ export function OrganizationManagersPanel({
           <Button
             type="button"
             variant="primary"
-            onClick={() => openAssignment("NEW")}
+            onClick={(event) => {
+              newManagerTrigger.current = event.currentTarget;
+              openAssignment("NEW");
+            }}
           >
             새 담당자 발급
           </Button>
         </div>
       </div>
       {message ? (
-        <StatusMessage tone={message.includes("최신") ? "info" : "error"}>
+        <StatusMessage
+          tone={message.includes("불러오지 못했습니다") ? "error" : "info"}
+        >
           {message}
         </StatusMessage>
       ) : null}
