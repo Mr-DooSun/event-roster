@@ -6,6 +6,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { ProjectFormDialog } from "./ProjectFormDialog";
@@ -117,6 +118,33 @@ it("submits project dates and blocks a reversed range", async () => {
       endDate: "2026-05-25",
     }),
   );
+});
+
+it("groups project fields and actions into the dialog layout", () => {
+  render(<ProjectFormDialog open onClose={vi.fn()} onSubmit={vi.fn()} />);
+  const dialog = screen.getByRole("dialog", { name: "새 프로젝트" });
+  const name = within(dialog).getByLabelText("프로젝트 이름");
+  const startDate = within(dialog).getByLabelText("시작일");
+  const endDate = within(dialog).getByLabelText("종료일");
+  const close = within(dialog).getByRole("button", { name: "닫기" });
+  const submit = within(dialog).getByRole("button", {
+    name: "프로젝트 만들기",
+  });
+  const form = name.closest("form");
+  const dates = startDate.closest(".er-dialog-form__dates");
+  const actions = close.closest(".er-dialog-actions");
+
+  expect(form).toHaveClass("er-dialog-form");
+  expect(dates).not.toBeNull();
+  expect(dates).toContainElement(startDate);
+  expect(dates).toContainElement(endDate);
+  expect(actions).not.toBeNull();
+  expect(actions).toContainElement(submit);
+  expect(
+    Array.from(actions?.querySelectorAll("button") ?? []).map(
+      (button) => button.textContent,
+    ),
+  ).toEqual(["닫기", "프로젝트 만들기"]);
 });
 
 it("omits empty dates when creating a project", async () => {

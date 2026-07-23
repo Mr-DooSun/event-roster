@@ -347,6 +347,44 @@ it("keeps the newest organization search when responses arrive out of order", as
   expect(screen.getByText("두번째 결과")).toBeVisible();
 });
 
+it("groups organization creation actions with close first", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/auth/login")) {
+        return Promise.resolve(Response.json(auth()));
+      }
+      if (url.includes("/organizations?")) {
+        return Promise.resolve(Response.json([]));
+      }
+      throw new Error(`unexpected request: ${url}`);
+    }),
+  );
+  render(
+    <AuthProvider restoreOnMount={false}>
+      <Gate>
+        <OrganizationsPage />
+      </Gate>
+    </AuthProvider>,
+  );
+  await login();
+  fireEvent.click(await screen.findByRole("button", { name: "새 조직" }));
+  const dialog = screen.getByRole("dialog", { name: "새 조직" });
+  const name = within(dialog).getByLabelText("조직 이름");
+  const close = within(dialog).getByRole("button", { name: "닫기" });
+  const create = within(dialog).getByRole("button", { name: "조직 만들기" });
+  const actions = close.closest(".er-dialog-actions");
+
+  expect(name.closest("form")).toHaveClass("er-dialog-form");
+  expect(actions).toContainElement(create);
+  expect(
+    Array.from(actions?.querySelectorAll("button") ?? []).map(
+      (button) => button.textContent,
+    ),
+  ).toEqual(["닫기", "조직 만들기"]);
+});
+
 function Gate({ children }: { children: React.ReactNode }) {
   return useAuth().auth ? children : <LoginPage />;
 }

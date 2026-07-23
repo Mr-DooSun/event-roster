@@ -1,5 +1,6 @@
 import { type FormEvent, useEffect, useState } from "react";
 import { Button } from "../../components/ui/Button";
+import { DateInput } from "../../components/ui/DateInput";
 import { Dialog } from "../../components/ui/Dialog";
 import { TextInput } from "../../components/ui/TextInput";
 
@@ -50,38 +51,46 @@ export function ProjectFormDialog({
   }
 
   return (
-    <Dialog title="새 프로젝트" onClose={onClose}>
-      <form className="er-form-grid" onSubmit={submit}>
+    <Dialog title="새 프로젝트" onClose={onClose} hideDefaultCloseAction>
+      <form className="er-dialog-form" onSubmit={submit}>
         <TextInput
           label="프로젝트 이름"
           required
           value={name}
           onChange={(event) => setName(event.currentTarget.value)}
         />
-        <TextInput
-          label="시작일"
-          type="date"
-          value={startDate}
-          onChange={(event) => setStartDate(event.currentTarget.value)}
-        />
-        <TextInput
-          label="종료일"
-          type="date"
-          value={endDate}
-          onChange={(event) => setEndDate(event.currentTarget.value)}
-        />
+        <div className="er-dialog-form__dates">
+          <DateInput
+            label="시작일"
+            value={startDate}
+            onChange={(event) => setStartDate(event.currentTarget.value)}
+          />
+          <DateInput
+            label="종료일"
+            value={endDate}
+            onChange={(event) => setEndDate(event.currentTarget.value)}
+          />
+        </div>
         {reversed ? (
-          <p className="er-status er-status--error" role="alert">
+          <p
+            className="er-status er-status--error er-dialog-form__error"
+            role="alert"
+          >
             종료일은 시작일보다 빠를 수 없습니다.
           </p>
         ) : null}
-        <Button
-          type="submit"
-          variant="primary"
-          disabled={!name.trim() || reversed || busy}
-        >
-          프로젝트 만들기
-        </Button>
+        <div className="er-dialog-actions">
+          <Button type="button" onClick={onClose}>
+            닫기
+          </Button>
+          <Button
+            type="submit"
+            variant="primary"
+            disabled={!name.trim() || reversed || busy}
+          >
+            프로젝트 만들기
+          </Button>
+        </div>
       </form>
     </Dialog>
   );

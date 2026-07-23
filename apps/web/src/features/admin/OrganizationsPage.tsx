@@ -193,8 +193,12 @@ export function OrganizationsPage() {
         )}
       </section>
       {showCreate ? (
-        <Dialog title="새 조직" onClose={() => setShowCreate(false)}>
-          <form className="er-form-grid" onSubmit={create}>
+        <Dialog
+          title="새 조직"
+          onClose={() => setShowCreate(false)}
+          hideDefaultCloseAction
+        >
+          <form className="er-dialog-form" onSubmit={create}>
             {createError ? (
               <StatusMessage tone="error">{createError}</StatusMessage>
             ) : null}
@@ -205,9 +209,14 @@ export function OrganizationsPage() {
               value={name}
               onChange={(event) => setName(event.currentTarget.value)}
             />
-            <Button type="submit" variant="primary" disabled={!name.trim()}>
-              조직 만들기
-            </Button>
+            <div className="er-dialog-actions">
+              <Button type="button" onClick={() => setShowCreate(false)}>
+                닫기
+              </Button>
+              <Button type="submit" variant="primary" disabled={!name.trim()}>
+                조직 만들기
+              </Button>
+            </div>
           </form>
         </Dialog>
       ) : null}

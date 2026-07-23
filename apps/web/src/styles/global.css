@@ -307,6 +307,32 @@ a {
   align-items: end;
   gap: var(--er-space-4);
 }
+.er-dialog-form {
+  display: grid;
+  gap: var(--er-space-4);
+  margin-top: var(--er-space-4);
+}
+.er-dialog-form__dates {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--er-space-4);
+}
+.er-dialog-form__error {
+  margin: 0;
+}
+.er-dialog-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--er-space-3);
+  margin-top: var(--er-space-2);
+}
+.er-field input[type="date"]:not(:disabled) {
+  cursor: pointer;
+}
+.er-field input[type="date"]:disabled {
+  cursor: not-allowed;
+}
 .er-inline-form {
   display: flex;
   align-items: end;
@@ -687,6 +713,12 @@ th {
   .er-page-heading {
     align-items: stretch;
     flex-direction: column;
+  }
+  .er-dialog-form__dates {
+    grid-template-columns: 1fr;
+  }
+  .er-dialog-actions {
+    justify-content: flex-start;
   }
   .er-project-actions {
     justify-content: flex-start;
