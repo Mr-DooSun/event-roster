@@ -529,6 +529,124 @@ it("keeps a manager reuse confirmation in the participant master organization", 
   });
 });
 
+it("hides participants from an inactive project membership in a manager add dialog", async () => {
+  const fetchMock = vi.fn((input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.endsWith("/auth/login")) {
+      return Promise.resolve(
+        Response.json(auth("ORGANIZATION_MANAGER", ["org-1", "org-2"])),
+      );
+    }
+    if (url.endsWith("/projects/project-1")) {
+      return Promise.resolve(
+        Response.json({ ...project(), status: "PRE_REGISTRATION" }),
+      );
+    }
+    if (url.endsWith("/summary")) {
+      return Promise.resolve(Response.json(summary(0)));
+    }
+    if (url.endsWith("/roster")) {
+      return Promise.resolve(
+        Response.json([
+          {
+            id: "entry-inactive",
+            projectId: "project-1",
+            participantId: "person-inactive-row",
+            participantNumber: "P-INACTIVE-ROW",
+            organizationId: "org-2",
+            participantName: "비활성 명단 참가자",
+            organizationName: "비활성 연결",
+            source: "PRE_REGISTRATION",
+            status: "ACTIVE",
+            wasExpectedAtStart: false,
+            revision: 0,
+            updatedAt: "2026-07-22T00:00:00.000Z",
+          },
+        ]),
+      );
+    }
+    if (url.endsWith("/participants")) {
+      return Promise.resolve(
+        Response.json([
+          {
+            id: "person-active",
+            participantId: "P-ACTIVE",
+            name: "활성 조직 참가자",
+            organizationId: "org-1",
+            revision: 0,
+          },
+          {
+            id: "person-inactive",
+            participantId: "P-INACTIVE",
+            name: "비활성 연결 참가자",
+            organizationId: "org-2",
+            revision: 0,
+          },
+        ]),
+      );
+    }
+    if (url.endsWith("/projects/project-1/organizations")) {
+      return Promise.resolve(
+        Response.json([
+          {
+            organizationId: "org-1",
+            name: "활성 연결",
+            isActive: true,
+            masterIsActive: true,
+            activeProjectCount: 1,
+            hasHistory: false,
+            primaryLeader: null,
+            managerCount: 1,
+            rosterCount: 0,
+          },
+          {
+            organizationId: "org-2",
+            name: "비활성 연결",
+            isActive: false,
+            masterIsActive: true,
+            activeProjectCount: 0,
+            hasHistory: true,
+            primaryLeader: null,
+            managerCount: 1,
+            rosterCount: 0,
+          },
+        ]),
+      );
+    }
+    if (url.endsWith("/organizations")) {
+      return Promise.resolve(Response.json([]));
+    }
+    if (url.includes("/audit")) {
+      return Promise.resolve(Response.json({ items: [], nextCursor: null }));
+    }
+    throw new Error(`unexpected request: ${url}`);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  render(
+    <AuthProvider restoreOnMount={false}>
+      <Gate>
+        <ProjectDetailPage projectId="project-1" />
+      </Gate>
+    </AuthProvider>,
+  );
+  await login();
+  await openRosterTab();
+  expect(await screen.findByText("읽기 전용")).toBeVisible();
+  expect(
+    screen.queryByRole("button", { name: "비활성 명단 참가자 취소" }),
+  ).not.toBeInTheDocument();
+  fireEvent.click(await screen.findByRole("button", { name: "참가자 추가" }));
+
+  expect(
+    screen.getByRole("option", { name: "활성 조직 참가자 · P-ACTIVE" }),
+  ).toBeVisible();
+  expect(
+    screen.queryByRole("option", {
+      name: "비활성 연결 참가자 · P-INACTIVE",
+    }),
+  ).not.toBeInTheDocument();
+});
+
 it("keeps in-progress roster controls read-only for managers and available to operators", async () => {
   const createFetch = (role: "OPERATOR" | "ORGANIZATION_MANAGER") =>
     vi.fn((input: RequestInfo | URL, init?: RequestInit) => {

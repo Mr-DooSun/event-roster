@@ -49,12 +49,14 @@ export function ProjectRosterPage({
     () =>
       participants.filter(
         (participant) =>
+          (auth?.session.user.role === "OPERATOR" ||
+            activeOrganizationIds.has(participant.organizationId)) &&
           !rows.some(
             (row) =>
               row.participantId === participant.id && row.status === "ACTIVE",
           ),
       ),
-    [participants, rows],
+    [activeOrganizationIds, auth?.session.user.role, participants, rows],
   );
 
   async function handleMutation(
