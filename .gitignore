@@ -7,6 +7,8 @@ node_modules/
 apps/web/e2e/.local-e2e-env.json
 apps/web/test-results/
 apps/web/playwright-report/
+backups/
+event-roster-d1-*/
 dist/
 *.tsbuildinfo
 __pycache__/

@@ -9,7 +9,7 @@ export default defineConfig({
   use: {
     baseURL: "https://127.0.0.1:8787",
     ignoreHTTPSErrors: true,
-    trace: "retain-on-failure",
+    trace: "off",
   },
   webServer: {
     command:

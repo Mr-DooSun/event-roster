@@ -107,6 +107,173 @@ it("routes an organization URL to operator administration detail", async () => {
   expect(screen.getByText("대표 조직장 미지정")).toBeVisible();
 });
 
+it("keeps loading organization B when organization A resolves after navigation", async () => {
+  window.history.replaceState(null, "", "/organizations/org-a");
+  const organizationA = deferred<ReturnType<typeof organizationDetail>>();
+  const organizationB = deferred<ReturnType<typeof organizationDetail>>();
+  mockApi.get.mockImplementation((path: string) => {
+    if (path === "/organizations/org-a") return organizationA.promise;
+    if (path === "/organizations/org-b") return organizationB.promise;
+    if (path.endsWith("/audit?limit=50")) {
+      return Promise.resolve({ items: [], nextCursor: null });
+    }
+    return Promise.resolve([]);
+  });
+
+  render(<App />);
+  await waitFor(() =>
+    expect(mockApi.get).toHaveBeenCalledWith("/organizations/org-a"),
+  );
+  act(() => {
+    window.history.pushState(null, "", "/organizations/org-b");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  });
+  await waitFor(() =>
+    expect(mockApi.get).toHaveBeenCalledWith("/organizations/org-b"),
+  );
+
+  await act(async () => {
+    organizationA.resolve({
+      ...organizationDetail(),
+      id: "org-a",
+      name: "A 조직",
+    });
+    await organizationA.promise;
+  });
+  expect(screen.getByText("조직 불러오는 중…")).toBeVisible();
+  expect(
+    screen.queryByRole("heading", { name: "A 조직" }),
+  ).not.toBeInTheDocument();
+
+  organizationB.resolve({
+    ...organizationDetail(),
+    id: "org-b",
+    name: "B 조직",
+  });
+  expect(await screen.findByRole("heading", { name: "B 조직" })).toBeVisible();
+});
+
+it("ignores an organization A detail error after organization B loaded", async () => {
+  window.history.replaceState(null, "", "/organizations/org-a");
+  const organizationA = deferred<ReturnType<typeof organizationDetail>>();
+  mockApi.get.mockImplementation((path: string) => {
+    if (path === "/organizations/org-a") return organizationA.promise;
+    if (path === "/organizations/org-b") {
+      return Promise.resolve({
+        ...organizationDetail(),
+        id: "org-b",
+        name: "B 조직",
+      });
+    }
+    if (path.endsWith("/audit?limit=50")) {
+      return Promise.resolve({ items: [], nextCursor: null });
+    }
+    return Promise.resolve([]);
+  });
+
+  render(<App />);
+  await waitFor(() =>
+    expect(mockApi.get).toHaveBeenCalledWith("/organizations/org-a"),
+  );
+  act(() => {
+    window.history.pushState(null, "", "/organizations/org-b");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  });
+  expect(await screen.findByRole("heading", { name: "B 조직" })).toBeVisible();
+
+  await act(async () => {
+    organizationA.reject(new Error("stale organization A failure"));
+    await organizationA.promise.catch(() => undefined);
+  });
+  expect(
+    screen.queryByText("조직 정보를 불러오지 못했습니다."),
+  ).not.toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "B 조직" })).toBeVisible();
+});
+
+it("does not reload organization A audit or message after navigating to B", async () => {
+  window.history.replaceState(null, "", "/organizations/org-a");
+  const mutation = deferred<void>();
+  mockApi.get.mockImplementation((path: string) => {
+    if (path === "/organizations/org-a") {
+      return Promise.resolve({
+        ...organizationDetail(),
+        id: "org-a",
+        name: "A 조직",
+      });
+    }
+    if (path === "/organizations/org-b") {
+      return Promise.resolve({
+        ...organizationDetail(),
+        id: "org-b",
+        name: "B 조직",
+      });
+    }
+    if (path === "/organizations/org-a/audit?limit=50") {
+      return Promise.resolve({
+        items: [
+          {
+            id: "audit-a",
+            actorUserId: "operator-1",
+            action: "ORGANIZATION_DEACTIVATED",
+            entityType: "ORGANIZATION",
+            entityId: "org-a",
+            occurredAt: "2026-07-23T00:00:00.000Z",
+          },
+        ],
+        nextCursor: null,
+      });
+    }
+    if (path === "/organizations/org-b/audit?limit=50") {
+      return Promise.resolve({
+        items: [
+          {
+            id: "audit-b",
+            actorUserId: "operator-1",
+            action: "ORGANIZATION_REACTIVATED",
+            entityType: "ORGANIZATION",
+            entityId: "org-b",
+            occurredAt: "2026-07-24T00:00:00.000Z",
+          },
+        ],
+        nextCursor: null,
+      });
+    }
+    return Promise.resolve([]);
+  });
+  mockApi.patch.mockReturnValue(mutation.promise);
+
+  render(<App />);
+  fireEvent.change(await screen.findByLabelText("조직 이름"), {
+    target: { value: "A 조직 변경" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "이름 저장" }));
+  act(() => {
+    window.history.pushState(null, "", "/organizations/org-b");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  });
+  expect(await screen.findByText("조직 다시 사용")).toBeVisible();
+
+  await act(async () => {
+    mutation.resolve();
+    await mutation.promise;
+    await Promise.resolve();
+  });
+
+  expect(
+    mockApi.get.mock.calls.filter(
+      ([path]) => path === "/organizations/org-a/audit?limit=50",
+    ),
+  ).toHaveLength(1);
+  expect(screen.getByText("조직 다시 사용")).toBeVisible();
+  expect(screen.getAllByText("조직 사용 중지")).toHaveLength(1);
+  expect(
+    screen.queryByText(
+      "조직 변경은 반영됐지만 최신 조직 정보를 불러오지 못했습니다.",
+    ),
+  ).not.toBeInTheDocument();
+});
+
 it("assigns existing and newly provisioned organization managers", async () => {
   window.history.replaceState(null, "", "/organizations/org-1");
   let failNextDetailReload = false;
@@ -229,6 +396,267 @@ it("assigns existing and newly provisioned organization managers", async () => {
   });
   fireEvent.click(screen.getByRole("button", { name: "닫기" }));
   await waitFor(() => expect(newManagerTrigger).toHaveFocus());
+});
+
+it("keeps only the newest assignable-user search result and error", async () => {
+  window.history.replaceState(null, "", "/organizations/org-1");
+  const first =
+    deferred<
+      Array<{
+        userId: string;
+        loginId: string;
+        displayName: string;
+        isActive: boolean;
+      }>
+    >();
+  const second = deferred<never>();
+  const third =
+    deferred<
+      Array<{
+        userId: string;
+        loginId: string;
+        displayName: string;
+        isActive: boolean;
+      }>
+    >();
+  mockApi.get.mockImplementation((path: string) => {
+    if (path === "/organizations/org-1") {
+      return Promise.resolve(organizationDetail());
+    }
+    if (path === "/organizations/org-1/audit?limit=50") {
+      return Promise.resolve({ items: [], nextCursor: null });
+    }
+    if (path.endsWith("query=%EC%B2%AB%EB%B2%88%EC%A7%B8")) {
+      return first.promise;
+    }
+    if (path.endsWith("query=%EB%91%90%EB%B2%88%EC%A7%B8")) {
+      return second.promise;
+    }
+    if (path.endsWith("query=%EC%84%B8%EB%B2%88%EC%A7%B8")) {
+      return third.promise;
+    }
+    return Promise.resolve([]);
+  });
+
+  render(<App />);
+  await screen.findByRole("heading", { name: "1팀" });
+  fireEvent.click(screen.getByRole("button", { name: "기존 계정 지정" }));
+  const search = screen.getByLabelText("계정 검색");
+  const searchButton = screen.getByRole("button", { name: "계정 찾기" });
+  for (const query of ["첫번째", "두번째", "세번째"]) {
+    fireEvent.change(search, { target: { value: query } });
+    fireEvent.click(searchButton);
+  }
+  const searchCalls = mockApi.get.mock.calls.filter(([path]) =>
+    String(path).includes("/assignable-users?"),
+  );
+  expect(searchCalls).toHaveLength(3);
+  expect(searchCalls[0]?.[1]?.signal).toBeInstanceOf(AbortSignal);
+  expect(searchCalls[0]?.[1]?.signal.aborted).toBe(true);
+  expect(searchCalls[1]?.[1]?.signal.aborted).toBe(true);
+  expect(searchCalls[2]?.[1]?.signal.aborted).toBe(false);
+
+  third.resolve([
+    {
+      userId: "newest",
+      loginId: "newest-01",
+      displayName: "최신 후보",
+      isActive: true,
+    },
+  ]);
+  expect(
+    await screen.findByRole("option", { name: /최신 후보/ }),
+  ).toBeVisible();
+
+  await act(async () => {
+    first.resolve([
+      {
+        userId: "stale",
+        loginId: "stale-01",
+        displayName: "오래된 후보",
+        isActive: true,
+      },
+    ]);
+    await first.promise;
+    second.reject(new Error("stale search failure"));
+    await second.promise.catch(() => undefined);
+  });
+
+  expect(
+    screen.queryByRole("option", { name: /오래된 후보/ }),
+  ).not.toBeInTheDocument();
+  expect(screen.getByRole("option", { name: /최신 후보/ })).toBeVisible();
+  expect(
+    screen.queryByText("지정 가능한 계정을 찾지 못했습니다."),
+  ).not.toBeInTheDocument();
+});
+
+it("aborts an assignable-user search when leaving organization detail", async () => {
+  window.history.replaceState(null, "", "/organizations/org-1");
+  const searchResult = deferred<never>();
+  mockApi.get.mockImplementation((path: string) => {
+    if (path === "/organizations/org-1") {
+      return Promise.resolve(organizationDetail());
+    }
+    if (path === "/organizations/org-1/audit?limit=50") {
+      return Promise.resolve({ items: [], nextCursor: null });
+    }
+    if (path.includes("/assignable-users?")) return searchResult.promise;
+    return Promise.resolve([]);
+  });
+
+  render(<App />);
+  await screen.findByRole("heading", { name: "1팀" });
+  fireEvent.click(screen.getByRole("button", { name: "기존 계정 지정" }));
+  fireEvent.click(screen.getByRole("button", { name: "계정 찾기" }));
+  const searchCall = mockApi.get.mock.calls.find(([path]) =>
+    String(path).includes("/assignable-users?"),
+  );
+  expect(searchCall?.[1]?.signal.aborted).toBe(false);
+
+  act(() => {
+    window.history.pushState(null, "", "/organizations");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  });
+  expect(
+    await screen.findByRole("heading", { name: "조직 관리" }),
+  ).toBeVisible();
+  expect(searchCall?.[1]?.signal.aborted).toBe(true);
+
+  await act(async () => {
+    searchResult.reject(new Error("aborted request"));
+    await searchResult.promise.catch(() => undefined);
+  });
+  expect(
+    screen.queryByText("지정 가능한 계정을 찾지 못했습니다."),
+  ).not.toBeInTheDocument();
+});
+
+it("prevents duplicate manager assignment POST requests", async () => {
+  window.history.replaceState(null, "", "/organizations/org-1");
+  const assignment = deferred<{ manager: { userId: string } }>();
+  const detailReload = deferred<ReturnType<typeof organizationDetail>>();
+  let detailReads = 0;
+  mockApi.get.mockImplementation((path: string) => {
+    if (path === "/organizations/org-1") {
+      detailReads += 1;
+      return detailReads === 1
+        ? Promise.resolve(organizationDetail())
+        : detailReload.promise;
+    }
+    if (path === "/organizations/org-1/audit?limit=50") {
+      return Promise.resolve({ items: [], nextCursor: null });
+    }
+    if (path.includes("/assignable-users?")) {
+      return Promise.resolve([
+        {
+          userId: "candidate-1",
+          loginId: "candidate-01",
+          displayName: "지정 후보",
+          isActive: true,
+        },
+      ]);
+    }
+    return Promise.resolve([]);
+  });
+  mockApi.post.mockReturnValue(assignment.promise);
+
+  render(<App />);
+  await screen.findByRole("heading", { name: "1팀" });
+  fireEvent.click(screen.getByRole("button", { name: "기존 계정 지정" }));
+  fireEvent.click(screen.getByRole("button", { name: "계정 찾기" }));
+  fireEvent.change(await screen.findByLabelText("지정할 계정"), {
+    target: { value: "candidate-1" },
+  });
+  const assign = screen.getByRole("button", { name: "담당자로 지정" });
+  const assignmentForm = assign.closest("form");
+  expect(assignmentForm).not.toBeNull();
+  fireEvent.submit(assignmentForm as HTMLFormElement);
+  fireEvent.submit(assignmentForm as HTMLFormElement);
+
+  expect(mockApi.post).toHaveBeenCalledTimes(1);
+  expect(assign).toBeDisabled();
+  assignment.resolve({ manager: { userId: "candidate-1" } });
+  await waitFor(() =>
+    expect(
+      screen.queryByRole("dialog", { name: "기존 담당자 지정" }),
+    ).not.toBeInTheDocument(),
+  );
+  expect(screen.getByRole("button", { name: "기존 계정 지정" })).toBeDisabled();
+  detailReload.resolve(organizationDetail());
+  await waitFor(() =>
+    expect(
+      screen.getByRole("button", { name: "기존 계정 지정" }),
+    ).toBeEnabled(),
+  );
+});
+
+it("prevents duplicate primary replacement PATCH requests", async () => {
+  window.history.replaceState(null, "", "/organizations/org-1");
+  const replacement = deferred<ReturnType<typeof organizationDetail>>();
+  mockApi.get.mockImplementation((path: string) => {
+    if (path === "/organizations/org-1") {
+      return Promise.resolve(organizationDetail());
+    }
+    if (path === "/organizations/org-1/audit?limit=50") {
+      return Promise.resolve({ items: [], nextCursor: null });
+    }
+    return Promise.resolve([]);
+  });
+  mockApi.patch.mockReturnValue(replacement.promise);
+
+  render(<App />);
+  await screen.findByRole("heading", { name: "1팀" });
+  fireEvent.click(
+    screen.getByRole("button", { name: "추가 관리자 1 대표로 지정" }),
+  );
+  const replace = screen.getByRole("button", { name: "대표 변경 확인" });
+  fireEvent.click(replace);
+  fireEvent.click(replace);
+
+  expect(mockApi.patch).toHaveBeenCalledTimes(1);
+  expect(replace).toBeDisabled();
+  replacement.resolve(organizationDetail());
+  await waitFor(() =>
+    expect(
+      screen.queryByRole("dialog", { name: "대표 조직장 변경" }),
+    ).not.toBeInTheDocument(),
+  );
+  expect(screen.getByRole("button", { name: "새 담당자 발급" })).toBeEnabled();
+});
+
+it("prevents duplicate manager removal DELETE requests", async () => {
+  window.history.replaceState(null, "", "/organizations/org-1");
+  const removal = deferred<void>();
+  mockApi.get.mockImplementation((path: string) => {
+    if (path === "/organizations/org-1") {
+      return Promise.resolve(organizationDetail());
+    }
+    if (path === "/organizations/org-1/audit?limit=50") {
+      return Promise.resolve({ items: [], nextCursor: null });
+    }
+    return Promise.resolve([]);
+  });
+  mockApi.delete.mockReturnValue(removal.promise);
+
+  render(<App />);
+  await screen.findByRole("heading", { name: "1팀" });
+  fireEvent.click(
+    screen.getByRole("button", { name: "추가 관리자 1 담당 해제" }),
+  );
+  const remove = screen.getByRole("button", { name: "담당 해제 확인" });
+  fireEvent.click(remove);
+  fireEvent.click(remove);
+
+  expect(mockApi.delete).toHaveBeenCalledTimes(1);
+  expect(remove).toBeDisabled();
+  removal.resolve();
+  await waitFor(() =>
+    expect(
+      screen.queryByRole("dialog", { name: "담당자 해제" }),
+    ).not.toBeInTheDocument(),
+  );
+  expect(screen.getByRole("button", { name: "기존 계정 지정" })).toBeEnabled();
 });
 
 it("replaces and removes organization leadership assignments explicitly", async () => {
@@ -655,8 +1083,10 @@ function organizationDetail() {
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((next) => {
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((next, fail) => {
     resolve = next;
+    reject = fail;
   });
-  return { promise, resolve };
+  return { promise, resolve, reject };
 }

@@ -40,7 +40,7 @@ corepack pnpm@10.28.1 --filter @event-roster/web exec playwright install chromiu
 corepack pnpm@10.28.1 --filter @event-roster/web run e2e
 ```
 
-E2E는 Git에서 제외된 `apps/worker/.dev.vars`, `apps/worker/.wrangler/e2e-state`, `apps/web/e2e/.local-e2e-env.json`, `apps/web/dist`, `apps/web/test-results`만 생성한다. 실행할 때마다 로컬 D1과 fixture 상태를 재생성하고 원격 Cloudflare 자원을 사용하지 않는다. 생성된 강한 비밀번호는 `.local-e2e-env.json`에만 mode 0600으로 저장하며 출력하지 않는다.
+E2E는 Git에서 제외된 `apps/worker/.dev.vars`, `apps/worker/.wrangler/e2e-state`, `apps/web/e2e/.local-e2e-env.json`, `apps/web/dist`, `apps/web/test-results`만 생성한다. 실행할 때마다 로컬 D1과 fixture 상태를 재생성하고 원격 Cloudflare 자원을 사용하지 않는다. 생성된 강한 비밀번호는 `.local-e2e-env.json`에만 mode 0600으로 저장하며 출력하지 않는다. 비밀번호 입력과 요청 payload가 실패 산출물에 남지 않도록 Playwright trace를 전역 비활성화하고 retry 없이 실행한다.
 프로젝트 E2E는 `/projects`의 로그인·상세 4개 탭·참가 명단, 운영자의 조직장 발급과 조직 담당자의 사전 등록 명단 입력·진행 중 읽기 전용 전환, 130행 Excel 가져오기와 2-sheet 내보내기, 로컬 scheduled 자동 종료를 검증한다.
 
 ## 운영

@@ -26,14 +26,65 @@ corepack pnpm@10.28.1 --filter @event-roster/worker exec wrangler d1 create even
 
 출력된 실제 `database_id`를 `apps/worker/wrangler.jsonc`의 `DB` binding에 반영한다. 추측한 ID나 테스트용 0 UUID를 운영 설정에 사용하지 않는다.
 
-기존 D1을 `0003_organization_leadership.sql`로 올리는 경우 먼저 원격 전체 export를 만든다. 아래 출력 파일은 Git 밖의 접근 제한 저장소로 즉시 옮기고, 생성 시각·database ID·체크섬을 배포 기록에 남긴다.
+기존 D1을 `0003_organization_leadership.sql`로 올리는 경우 먼저 원격 전체 export를 만든다. 백업은 main checkout과 linked worktree를 포함한 어떤 저장소 안에도 잠시라도 만들지 않는다. 아래 절차를 저장소 루트에서 실행해 이미 존재하는 저장소 밖 상위 디렉터리의 절대 경로를 직접 입력한다. 절차는 모든 worktree의 실제 경로와 비교한 뒤 mode 0700 실행별 전용 디렉터리를 원자적으로 만들고 export·체크섬의 기존 파일·symbolic link와 권한을 검사한다. `backups/`와 `event-roster-d1-*/`는 방어적으로 Git에서 제외하지만 운영 백업 위치로 사용하지 않는다.
 
 ```bash
-corepack pnpm@10.28.1 --filter @event-roster/worker exec wrangler d1 export event-roster --remote --output backups/event-roster-pre-0003.sql
-shasum -a 256 backups/event-roster-pre-0003.sql
+set -eu
+umask 077
+printf '%s' '저장소 밖의 기존 백업 상위 디렉터리 절대 경로: '
+IFS= read -r EVENT_ROSTER_BACKUP_PARENT
+case "$EVENT_ROSTER_BACKUP_PARENT" in
+  /*) ;;
+  *) echo "절대 경로가 필요합니다." >&2; exit 1 ;;
+esac
+test -d "$EVENT_ROSTER_BACKUP_PARENT"
+EVENT_ROSTER_BACKUP_PARENT="$(cd "$EVENT_ROSTER_BACKUP_PARENT" && pwd -P)"
+EVENT_ROSTER_WORKTREE_LIST="$(git -c core.quotePath=false worktree list --porcelain)"
+while IFS= read -r EVENT_ROSTER_WORKTREE_LINE; do
+  case "$EVENT_ROSTER_WORKTREE_LINE" in
+    "worktree "*)
+      EVENT_ROSTER_WORKTREE="${EVENT_ROSTER_WORKTREE_LINE#worktree }"
+      EVENT_ROSTER_WORKTREE="$(cd "$EVENT_ROSTER_WORKTREE" && pwd -P)"
+      case "${EVENT_ROSTER_BACKUP_PARENT}/" in
+        "${EVENT_ROSTER_WORKTREE}/"*) echo "백업 경로는 모든 Git worktree 밖이어야 합니다." >&2; exit 1 ;;
+      esac
+      ;;
+  esac
+done <<EOF
+$EVENT_ROSTER_WORKTREE_LIST
+EOF
+EVENT_ROSTER_BACKUP_TIMESTAMP="$(date -u +%Y%m%dT%H%M%SZ)"
+EVENT_ROSTER_BACKUP_DIR="${EVENT_ROSTER_BACKUP_PARENT}/event-roster-d1-${EVENT_ROSTER_BACKUP_TIMESTAMP}-$$"
+test ! -e "$EVENT_ROSTER_BACKUP_DIR"
+test ! -L "$EVENT_ROSTER_BACKUP_DIR"
+mkdir -- "$EVENT_ROSTER_BACKUP_DIR"
+chmod 700 -- "$EVENT_ROSTER_BACKUP_DIR"
+EVENT_ROSTER_BACKUP_DIR="$(cd "$EVENT_ROSTER_BACKUP_DIR" && pwd -P)"
+EVENT_ROSTER_BACKUP_DIR_MODE="$(stat -c '%a' "$EVENT_ROSTER_BACKUP_DIR" 2>/dev/null || stat -f '%Lp' "$EVENT_ROSTER_BACKUP_DIR")"
+test "$EVENT_ROSTER_BACKUP_DIR_MODE" = "700"
+EVENT_ROSTER_BACKUP_FILE="${EVENT_ROSTER_BACKUP_DIR}/event-roster-pre-0003.sql"
+test ! -e "$EVENT_ROSTER_BACKUP_FILE"
+test ! -L "$EVENT_ROSTER_BACKUP_FILE"
+corepack pnpm@10.28.1 --filter @event-roster/worker exec wrangler d1 export event-roster --remote --output "$EVENT_ROSTER_BACKUP_FILE"
+test -s "$EVENT_ROSTER_BACKUP_FILE"
+test -f "$EVENT_ROSTER_BACKUP_FILE"
+test ! -L "$EVENT_ROSTER_BACKUP_FILE"
+chmod 600 -- "$EVENT_ROSTER_BACKUP_FILE"
+EVENT_ROSTER_CHECKSUM_FILE="${EVENT_ROSTER_BACKUP_FILE}.sha256"
+test ! -e "$EVENT_ROSTER_CHECKSUM_FILE"
+test ! -L "$EVENT_ROSTER_CHECKSUM_FILE"
+(set -C; shasum -a 256 "$EVENT_ROSTER_BACKUP_FILE" > "$EVENT_ROSTER_CHECKSUM_FILE")
+test -f "$EVENT_ROSTER_CHECKSUM_FILE"
+test ! -L "$EVENT_ROSTER_CHECKSUM_FILE"
+chmod 600 -- "$EVENT_ROSTER_CHECKSUM_FILE"
+EVENT_ROSTER_BACKUP_FILE_MODE="$(stat -c '%a' "$EVENT_ROSTER_BACKUP_FILE" 2>/dev/null || stat -f '%Lp' "$EVENT_ROSTER_BACKUP_FILE")"
+EVENT_ROSTER_CHECKSUM_FILE_MODE="$(stat -c '%a' "$EVENT_ROSTER_CHECKSUM_FILE" 2>/dev/null || stat -f '%Lp' "$EVENT_ROSTER_CHECKSUM_FILE")"
+test "$EVENT_ROSTER_BACKUP_FILE_MODE" = "600"
+test "$EVENT_ROSTER_CHECKSUM_FILE_MODE" = "600"
+shasum -a 256 -c "$EVENT_ROSTER_CHECKSUM_FILE"
 ```
 
-export가 비어 있지 않고 `users`, `organizations`, `user_organizations`, `projects`, `project_organizations`, `participants`, `project_roster_entries`, `audit_logs`의 schema/data를 포함하는지 확인한 뒤에만 migration을 적용한다. 신규 빈 D1은 생성 사실과 pending migration 목록을 기록하고 같은 검증 순서를 따른다.
+절대 백업 파일 경로, 생성 시각, database ID, 체크섬을 접근 제한된 배포 기록에 남긴다. export가 비어 있지 않고 `users`, `organizations`, `user_organizations`, `projects`, `project_organizations`, `participants`, `project_roster_entries`, `audit_logs`의 schema/data를 포함하는지 확인한 뒤에만 migration을 적용한다. 신규 빈 D1은 생성 사실과 pending migration 목록을 기록하고 같은 검증 순서를 따른다.
 
 ```bash
 corepack pnpm@10.28.1 --filter @event-roster/worker exec wrangler d1 migrations apply event-roster --remote

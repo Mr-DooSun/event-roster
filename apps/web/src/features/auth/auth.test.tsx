@@ -362,6 +362,23 @@ it("shares one refresh across concurrent 401 retries", async () => {
   expect(fetchMock).toHaveBeenCalledTimes(5);
 });
 
+it("forwards a GET abort signal to fetch", async () => {
+  const fetchMock = vi.fn().mockResolvedValue(Response.json({ ok: true }));
+  vi.stubGlobal("fetch", fetchMock);
+  const client = createApiClient({
+    getAuth: () => authSuccess("FULL"),
+    refresh: async () => authSuccess("FULL", "new-access"),
+  });
+  const controller = new AbortController();
+
+  await client.get("/signal", { signal: controller.signal });
+
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/v1/signal",
+    expect.objectContaining({ signal: controller.signal }),
+  );
+});
+
 it("does not retry a failed mutation on a 5xx response", async () => {
   const fetchMock = vi
     .fn()

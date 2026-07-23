@@ -3,7 +3,7 @@ import type {
   OrganizationDetail,
   OrganizationManager,
 } from "@event-roster/contracts";
-import { type FormEvent, useRef, useState } from "react";
+import { type FormEvent, useEffect, useRef, useState } from "react";
 import { Button } from "../../components/ui/Button";
 import { Card } from "../../components/ui/Card";
 import { Dialog } from "../../components/ui/Dialog";
@@ -48,21 +48,55 @@ export function OrganizationManagersPanel({
     useState<OrganizationManager | null>(null);
   const [removePrimary, setRemovePrimary] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [isMutating, setIsMutating] = useState(false);
   const newManagerTrigger = useRef<HTMLButtonElement | null>(null);
+  const candidateSearchGeneration = useRef(0);
+  const candidateSearchController = useRef<AbortController | null>(null);
+  const mutationInFlight = useRef(false);
+
+  useEffect(() => {
+    return () => {
+      candidateSearchGeneration.current += 1;
+      candidateSearchController.current?.abort();
+      candidateSearchController.current = null;
+    };
+  }, []);
 
   async function searchCandidates(event: FormEvent) {
     event.preventDefault();
+    const generation = ++candidateSearchGeneration.current;
+    candidateSearchController.current?.abort();
+    const controller = new AbortController();
+    candidateSearchController.current = controller;
     setMessage(null);
     try {
       const next = await api.get<AssignableManager[]>(
         `/organizations/${encodeURIComponent(
           organization.id,
         )}/assignable-users?query=${encodeURIComponent(query.trim())}`,
+        { signal: controller.signal },
       );
+      if (
+        generation !== candidateSearchGeneration.current ||
+        controller.signal.aborted
+      ) {
+        return;
+      }
       setCandidates(next);
       setSelectedUserId(next[0]?.userId ?? "");
     } catch {
-      setMessage("지정 가능한 계정을 찾지 못했습니다.");
+      if (
+        generation === candidateSearchGeneration.current &&
+        !controller.signal.aborted
+      ) {
+        setMessage("지정 가능한 계정을 찾지 못했습니다.");
+      }
+    } finally {
+      if (generation === candidateSearchGeneration.current) {
+        if (candidateSearchController.current === controller) {
+          candidateSearchController.current = null;
+        }
+      }
     }
   }
 
@@ -139,26 +173,34 @@ export function OrganizationManagersPanel({
   }
 
   async function mutate(operation: () => Promise<void>) {
+    if (mutationInFlight.current) return;
+    mutationInFlight.current = true;
+    setIsMutating(true);
     setMessage(null);
     try {
-      await operation();
-    } catch (error) {
-      if (error instanceof ApiError && error.status === 409) {
-        const reloaded = await onChanged();
-        setMessage(
-          reloaded
-            ? "다른 관리 변경이 먼저 반영되어 최신 조직 정보를 불러왔습니다."
-            : "다른 관리 변경이 먼저 반영되었지만 최신 조직 정보를 불러오지 못했습니다.",
-        );
-      } else {
-        setMessage("담당자 변경을 반영하지 못했습니다.");
+      try {
+        await operation();
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 409) {
+          const reloaded = await onChanged();
+          setMessage(
+            reloaded
+              ? "다른 관리 변경이 먼저 반영되어 최신 조직 정보를 불러왔습니다."
+              : "다른 관리 변경이 먼저 반영되었지만 최신 조직 정보를 불러오지 못했습니다.",
+          );
+        } else {
+          setMessage("담당자 변경을 반영하지 못했습니다.");
+        }
+        return;
       }
-      return;
-    }
-    if (!(await onChanged())) {
-      setMessage(
-        "담당자 변경은 반영됐지만 최신 조직 정보를 불러오지 못했습니다.",
-      );
+      if (!(await onChanged())) {
+        setMessage(
+          "담당자 변경은 반영됐지만 최신 조직 정보를 불러오지 못했습니다.",
+        );
+      }
+    } finally {
+      mutationInFlight.current = false;
+      setIsMutating(false);
     }
   }
 
@@ -180,12 +222,17 @@ export function OrganizationManagersPanel({
           </p>
         </div>
         <div className="er-action-row er-action-row--wrap">
-          <Button type="button" onClick={() => openAssignment("EXISTING")}>
+          <Button
+            type="button"
+            disabled={isMutating}
+            onClick={() => openAssignment("EXISTING")}
+          >
             기존 계정 지정
           </Button>
           <Button
             type="button"
             variant="primary"
+            disabled={isMutating}
             onClick={(event) => {
               newManagerTrigger.current = event.currentTarget;
               openAssignment("NEW");
@@ -220,13 +267,18 @@ export function OrganizationManagersPanel({
               </div>
               <div className="er-action-row er-action-row--wrap">
                 {manager.assignmentRole === "PRIMARY_LEADER" ? (
-                  <Button type="button" onClick={() => setRemovePrimary(true)}>
+                  <Button
+                    type="button"
+                    disabled={isMutating}
+                    onClick={() => setRemovePrimary(true)}
+                  >
                     대표 지정 해제
                   </Button>
                 ) : (
                   <>
                     <Button
                       type="button"
+                      disabled={isMutating}
                       onClick={() => setPrimaryTarget(manager)}
                       aria-label={`${manager.displayName} 대표로 지정`}
                     >
@@ -235,6 +287,7 @@ export function OrganizationManagersPanel({
                     <Button
                       type="button"
                       variant="danger"
+                      disabled={isMutating}
                       onClick={() => setRemoveManager(manager)}
                       aria-label={`${manager.displayName} 담당 해제`}
                     >
@@ -255,7 +308,9 @@ export function OrganizationManagersPanel({
               value={query}
               onChange={(event) => setQuery(event.currentTarget.value)}
             />
-            <Button type="submit">계정 찾기</Button>
+            <Button type="submit" disabled={isMutating}>
+              계정 찾기
+            </Button>
           </form>
           <form className="er-form-grid" onSubmit={assignExisting}>
             <label className="er-field">
@@ -279,7 +334,11 @@ export function OrganizationManagersPanel({
               value={assignmentRole}
               onChange={setAssignmentRole}
             />
-            <Button type="submit" variant="primary" disabled={!selectedUserId}>
+            <Button
+              type="submit"
+              variant="primary"
+              disabled={isMutating || !selectedUserId}
+            >
               담당자로 지정
             </Button>
           </form>
@@ -307,7 +366,7 @@ export function OrganizationManagersPanel({
             <Button
               type="submit"
               variant="primary"
-              disabled={!loginId.trim() || !displayName.trim()}
+              disabled={isMutating || !loginId.trim() || !displayName.trim()}
             >
               계정 발급 및 지정
             </Button>
@@ -332,7 +391,12 @@ export function OrganizationManagersPanel({
               <option value="REMOVE">조직 담당에서 해제</option>
             </select>
           </label>
-          <Button type="button" variant="primary" onClick={replacePrimary}>
+          <Button
+            type="button"
+            variant="primary"
+            disabled={isMutating}
+            onClick={replacePrimary}
+          >
             대표 변경 확인
           </Button>
         </Dialog>
@@ -343,6 +407,7 @@ export function OrganizationManagersPanel({
           <Button
             type="button"
             variant="danger"
+            disabled={isMutating}
             onClick={removeManagerAssignment}
           >
             담당 해제 확인
@@ -355,6 +420,7 @@ export function OrganizationManagersPanel({
           <Button
             type="button"
             variant="danger"
+            disabled={isMutating}
             onClick={removePrimaryAssignment}
           >
             대표 해제 확인

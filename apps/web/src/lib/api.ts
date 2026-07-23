@@ -84,7 +84,8 @@ export function createApiClient(options: ApiClientOptions) {
         await Promise.allSettled([...refreshes.values()]);
       }
     },
-    get: <T>(path: string) => request<T>(path, { method: "GET" }),
+    get: <T>(path: string, init: Omit<ApiRequestOptions, "method"> = {}) =>
+      request<T>(path, { ...init, method: "GET" }),
     post: <T>(path: string, body?: unknown) =>
       request<T>(path, {
         method: "POST",

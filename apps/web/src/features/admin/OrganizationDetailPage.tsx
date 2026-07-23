@@ -55,40 +55,69 @@ export function OrganizationDetailPage({
     value: string;
     returnFocus?: HTMLElement;
   } | null>(null);
+  const activeOrganizationId = useRef(organizationId);
+  activeOrganizationId.current = organizationId;
+  const detailGeneration = useRef(0);
   const auditGeneration = useRef(0);
   const auditPaginationRequest = useRef<AuditPaginationRequest | null>(null);
 
   const loadDetail = useCallback(async () => {
+    const requestedOrganizationId = organizationId;
+    if (activeOrganizationId.current !== requestedOrganizationId) return false;
+    const generation = ++detailGeneration.current;
     try {
       const next = await api.get<OrganizationDetail>(
-        `/organizations/${encodeURIComponent(organizationId)}`,
+        `/organizations/${encodeURIComponent(requestedOrganizationId)}`,
       );
+      if (
+        generation !== detailGeneration.current ||
+        activeOrganizationId.current !== requestedOrganizationId
+      ) {
+        return false;
+      }
       setOrganization(next);
       setName(next.name);
       setDetailError(null);
       return true;
     } catch {
-      setDetailError("조직 정보를 불러오지 못했습니다.");
+      if (
+        generation === detailGeneration.current &&
+        activeOrganizationId.current === requestedOrganizationId
+      ) {
+        setDetailError("조직 정보를 불러오지 못했습니다.");
+      }
       return false;
     }
   }, [api, organizationId]);
 
   const loadInitialAudit = useCallback(async () => {
+    const requestedOrganizationId = organizationId;
+    if (activeOrganizationId.current !== requestedOrganizationId) return false;
     const generation = ++auditGeneration.current;
     auditPaginationRequest.current = null;
     try {
       const page = await api.get<{
         items: AuditView[];
         nextCursor: string | null;
-      }>(`/organizations/${encodeURIComponent(organizationId)}/audit?limit=50`);
-      if (generation === auditGeneration.current) {
+      }>(
+        `/organizations/${encodeURIComponent(
+          requestedOrganizationId,
+        )}/audit?limit=50`,
+      );
+      if (
+        generation === auditGeneration.current &&
+        activeOrganizationId.current === requestedOrganizationId
+      ) {
         setAudit(page.items);
         setAuditNextCursor(page.nextCursor);
         setAuditError(null);
       }
       return true;
     } catch {
-      if (generation === auditGeneration.current) {
+      if (
+        generation === auditGeneration.current &&
+        activeOrganizationId.current === requestedOrganizationId
+      ) {
         setAuditError("변경 이력을 불러오지 못했습니다.");
       }
       return false;
@@ -122,21 +151,26 @@ export function OrganizationDetailPage({
     name?: string;
     isActive?: boolean;
   }) {
+    const requestedOrganizationId = organizationId;
     setMessage(null);
     try {
-      await api.patch(`/organizations/${organizationId}`, input);
+      await api.patch(`/organizations/${requestedOrganizationId}`, input);
+      if (activeOrganizationId.current !== requestedOrganizationId) return;
       const [detailReloaded] = await Promise.all([
         loadDetail(),
         loadInitialAudit(),
       ]);
+      if (activeOrganizationId.current !== requestedOrganizationId) return;
       if (!detailReloaded) {
         setMessage(
           "조직 변경은 반영됐지만 최신 조직 정보를 불러오지 못했습니다.",
         );
       }
     } catch (error) {
+      if (activeOrganizationId.current !== requestedOrganizationId) return;
       if (error instanceof ApiError && error.status === 409) {
         const reloaded = await loadDetail();
+        if (activeOrganizationId.current !== requestedOrganizationId) return;
         setMessage(
           reloaded
             ? "다른 관리 변경이 먼저 반영되어 최신 조직 정보를 불러왔습니다."
@@ -149,7 +183,14 @@ export function OrganizationDetailPage({
   }
 
   async function loadMoreAudit() {
-    if (!auditNextCursor || auditPaginationRequest.current) return;
+    const requestedOrganizationId = organizationId;
+    if (
+      activeOrganizationId.current !== requestedOrganizationId ||
+      !auditNextCursor ||
+      auditPaginationRequest.current
+    ) {
+      return;
+    }
     const cursor = auditNextCursor;
     const generation = auditGeneration.current;
     const request = { cursor, generation };
@@ -160,11 +201,12 @@ export function OrganizationDetailPage({
         nextCursor: string | null;
       }>(
         `/organizations/${encodeURIComponent(
-          organizationId,
+          requestedOrganizationId,
         )}/audit?limit=50&cursor=${encodeURIComponent(cursor)}`,
       );
       if (
         generation !== auditGeneration.current ||
+        activeOrganizationId.current !== requestedOrganizationId ||
         auditPaginationRequest.current !== request
       ) {
         return;
@@ -175,6 +217,7 @@ export function OrganizationDetailPage({
     } catch {
       if (
         generation === auditGeneration.current &&
+        activeOrganizationId.current === requestedOrganizationId &&
         auditPaginationRequest.current === request
       ) {
         setAuditError("변경 이력을 더 불러오지 못했습니다.");
@@ -187,11 +230,15 @@ export function OrganizationDetailPage({
   }
 
   async function reloadAfterManagerMutation() {
+    const requestedOrganizationId = organizationId;
+    if (activeOrganizationId.current !== requestedOrganizationId) return false;
     const [detailReloaded] = await Promise.all([
       loadDetail(),
       loadInitialAudit(),
     ]);
-    return detailReloaded;
+    return (
+      activeOrganizationId.current === requestedOrganizationId && detailReloaded
+    );
   }
 
   if (!organization && !detailError) {
