@@ -394,6 +394,55 @@ it("assigns one primary and many managers while allowing one user across organiz
   ).toEqual(expect.arrayContaining(["ORGANIZATION_PRIMARY_ASSIGNED"]));
 });
 
+it("never creates participant or roster rows when creating and assigning a manager account", async () => {
+  const operator = await seedOperatorWithTwoOrganizations();
+  const before = await env.DB.batch([
+    env.DB.prepare("SELECT COUNT(*) AS count FROM participants"),
+    env.DB.prepare("SELECT COUNT(*) AS count FROM project_roster_entries"),
+  ]);
+
+  const created = await authedRequest(
+    operator,
+    "/api/v1/organizations/org-1/managers",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        kind: "NEW",
+        loginId: "account-not-participant",
+        displayName: "명단과 분리된 담당자",
+        assignmentRole: "MANAGER",
+      }),
+    },
+  );
+  expect(created.status).toBe(201);
+
+  const after = await env.DB.batch([
+    env.DB.prepare("SELECT COUNT(*) AS count FROM participants"),
+    env.DB.prepare("SELECT COUNT(*) AS count FROM project_roster_entries"),
+  ]);
+  expect(after[0]?.results).toEqual(before[0]?.results);
+  expect(after[1]?.results).toEqual(before[1]?.results);
+});
+
+it("denies managers all organization, account, and project administration mutations", async () => {
+  const { manager } = await seedLeadershipFixture();
+  const requests = [
+    authedRequest(manager, "/api/v1/organizations", {
+      method: "POST",
+      body: JSON.stringify({ name: "권한 밖 조직" }),
+    }),
+    authedRequest(manager, "/api/v1/users"),
+    authedRequest(manager, "/api/v1/projects", {
+      method: "POST",
+      body: JSON.stringify({ name: "권한 밖 프로젝트" }),
+    }),
+  ];
+
+  for (const response of await Promise.all(requests)) {
+    expect(response.status).toBe(403);
+  }
+});
+
 it("revokes an existing account session when assigning it", async () => {
   const operator = await seedOperatorWithTwoOrganizations();
   await seedUser({

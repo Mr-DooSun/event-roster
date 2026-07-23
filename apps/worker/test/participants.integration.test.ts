@@ -126,132 +126,153 @@ it("updates the participant master organization without rewriting past snapshots
   );
 });
 
-it("prevents a snapshot organization manager from editing a moved participant master", async () => {
-  const fixture = await setupPreRegistration();
-  await seedOrganization("org-2", "2팀");
-  const linked = await authedRequest(
-    fixture.operator,
-    `/api/v1/projects/${fixture.project.id}/organizations`,
-    {
-      method: "POST",
-      body: JSON.stringify({
-        organizationId: "org-2",
-        expectedProjectRevision: fixture.project.revision,
-      }),
-    },
-  );
-  const linkedBody = await linked.json<{ projectRevision: number }>();
-  const added = await addRoster(
-    fixture,
-    fixture.firstParticipant.id,
-    linkedBody.projectRevision,
-  );
-  const entry = await added.json<{ projectRevision: number }>();
-  const moved = await authedRequest(
-    fixture.operator,
-    `/api/v1/projects/${fixture.project.id}/participants/${fixture.firstParticipant.id}`,
-    {
-      method: "PATCH",
-      body: JSON.stringify({
-        organizationId: "org-2",
-        expectedRevision: fixture.firstParticipant.revision,
-        expectedProjectRevision: entry.projectRevision,
-      }),
-    },
-  );
-  const movedParticipant = await moved.json<{
-    revision: number;
-    projectRevision: number;
-  }>();
-  const manager = await seedManager("org-1");
-  const response = await authedRequest(
-    manager,
-    `/api/v1/projects/${fixture.project.id}/participants/${fixture.firstParticipant.id}`,
-    {
-      method: "PATCH",
-      body: JSON.stringify({
-        name: "권한 밖 변경",
-        expectedRevision: movedParticipant.revision,
-        expectedProjectRevision: movedParticipant.projectRevision,
-      }),
-    },
-  );
-  expect(response.status).toBe(403);
-  expect(
-    (
-      await env.DB.prepare("SELECT name FROM participants WHERE id=?")
-        .bind(fixture.firstParticipant.id)
-        .first<{ name: string }>()
-    )?.name,
-  ).toBe("첫 참가자");
-});
+it.each(["PRIMARY_LEADER", "MANAGER"] as const)(
+  "prevents a %s from editing a moved participant master outside its scope",
+  async (assignmentRole) => {
+    const fixture = await setupPreRegistration();
+    await seedOrganization("org-2", "2팀");
+    const linked = await authedRequest(
+      fixture.operator,
+      `/api/v1/projects/${fixture.project.id}/organizations`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          organizationId: "org-2",
+          expectedProjectRevision: fixture.project.revision,
+        }),
+      },
+    );
+    const linkedBody = await linked.json<{ projectRevision: number }>();
+    const added = await addRoster(
+      fixture,
+      fixture.firstParticipant.id,
+      linkedBody.projectRevision,
+    );
+    const entry = await added.json<{ projectRevision: number }>();
+    const moved = await authedRequest(
+      fixture.operator,
+      `/api/v1/projects/${fixture.project.id}/participants/${fixture.firstParticipant.id}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({
+          organizationId: "org-2",
+          expectedRevision: fixture.firstParticipant.revision,
+          expectedProjectRevision: entry.projectRevision,
+        }),
+      },
+    );
+    const movedParticipant = await moved.json<{
+      revision: number;
+      projectRevision: number;
+    }>();
+    const manager = await seedManager("org-1");
+    await env.DB.prepare(
+      `UPDATE user_organizations
+       SET assignment_role = ?
+       WHERE user_id = ? AND organization_id = 'org-1'`,
+    )
+      .bind(assignmentRole, manager.userId)
+      .run();
+    const response = await authedRequest(
+      manager,
+      `/api/v1/projects/${fixture.project.id}/participants/${fixture.firstParticipant.id}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({
+          name: "권한 밖 변경",
+          expectedRevision: movedParticipant.revision,
+          expectedProjectRevision: movedParticipant.projectRevision,
+        }),
+      },
+    );
+    expect(response.status).toBe(403);
+    expect(
+      (
+        await env.DB.prepare("SELECT name FROM participants WHERE id=?")
+          .bind(fixture.firstParticipant.id)
+          .first<{ name: string }>()
+      )?.name,
+    ).toBe("첫 참가자");
+  },
+);
 
-it("allows a manager scoped to both snapshot and master organizations to edit a moved participant", async () => {
-  const fixture = await setupPreRegistration();
-  await seedOrganization("org-2", "2팀");
-  const linked = await authedRequest(
-    fixture.operator,
-    `/api/v1/projects/${fixture.project.id}/organizations`,
-    {
-      method: "POST",
-      body: JSON.stringify({
-        organizationId: "org-2",
-        expectedProjectRevision: fixture.project.revision,
-      }),
-    },
-  );
-  const linkedBody = await linked.json<{ projectRevision: number }>();
-  const added = await addRoster(
-    fixture,
-    fixture.firstParticipant.id,
-    linkedBody.projectRevision,
-  );
-  const entry = await added.json<{ projectRevision: number }>();
-  const moved = await authedRequest(
-    fixture.operator,
-    `/api/v1/projects/${fixture.project.id}/participants/${fixture.firstParticipant.id}`,
-    {
-      method: "PATCH",
-      body: JSON.stringify({
-        organizationId: "org-2",
-        expectedRevision: fixture.firstParticipant.revision,
-        expectedProjectRevision: entry.projectRevision,
-      }),
-    },
-  );
-  const movedParticipant = await moved.json<{
-    revision: number;
-    projectRevision: number;
-  }>();
-  const manager = await seedManager("org-1");
-  await env.DB.prepare(
-    `INSERT INTO user_organizations
-     (user_id, organization_id, assignment_role, assigned_by, assigned_at)
-     VALUES ('manager-user', 'org-2', 'MANAGER', NULL, '2026-07-23T00:00:00.000Z')`,
-  ).run();
+it.each(["PRIMARY_LEADER", "MANAGER"] as const)(
+  "allows a %s scoped to both snapshot and master organizations to edit a moved participant",
+  async (assignmentRole) => {
+    const fixture = await setupPreRegistration();
+    await seedOrganization("org-2", "2팀");
+    const linked = await authedRequest(
+      fixture.operator,
+      `/api/v1/projects/${fixture.project.id}/organizations`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          organizationId: "org-2",
+          expectedProjectRevision: fixture.project.revision,
+        }),
+      },
+    );
+    const linkedBody = await linked.json<{ projectRevision: number }>();
+    const added = await addRoster(
+      fixture,
+      fixture.firstParticipant.id,
+      linkedBody.projectRevision,
+    );
+    const entry = await added.json<{ projectRevision: number }>();
+    const moved = await authedRequest(
+      fixture.operator,
+      `/api/v1/projects/${fixture.project.id}/participants/${fixture.firstParticipant.id}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({
+          organizationId: "org-2",
+          expectedRevision: fixture.firstParticipant.revision,
+          expectedProjectRevision: entry.projectRevision,
+        }),
+      },
+    );
+    const movedParticipant = await moved.json<{
+      revision: number;
+      projectRevision: number;
+    }>();
+    const manager = await seedManager("org-1");
+    await env.DB.prepare(
+      `UPDATE user_organizations SET assignment_role = ?
+       WHERE user_id = ? AND organization_id = 'org-1'`,
+    )
+      .bind(assignmentRole, manager.userId)
+      .run();
+    await env.DB.prepare(
+      `INSERT INTO user_organizations
+       (user_id, organization_id, assignment_role, assigned_by, assigned_at)
+       VALUES ('manager-user', 'org-2', ?, NULL, '2026-07-23T00:00:00.000Z')`,
+    )
+      .bind(assignmentRole)
+      .run();
 
-  const response = await authedRequest(
-    manager,
-    `/api/v1/projects/${fixture.project.id}/participants/${fixture.firstParticipant.id}`,
-    {
-      method: "PATCH",
-      body: JSON.stringify({
-        name: "양쪽 범위 변경",
-        expectedRevision: movedParticipant.revision,
-        expectedProjectRevision: movedParticipant.projectRevision,
-      }),
-    },
-  );
+    const response = await authedRequest(
+      manager,
+      `/api/v1/projects/${fixture.project.id}/participants/${fixture.firstParticipant.id}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({
+          name: "양쪽 범위 변경",
+          expectedRevision: movedParticipant.revision,
+          expectedProjectRevision: movedParticipant.projectRevision,
+        }),
+      },
+    );
 
-  expect(response.status).toBe(200);
-  expect(
-    (
-      await env.DB.prepare("SELECT name FROM participants WHERE id=?")
-        .bind(fixture.firstParticipant.id)
-        .first<{ name: string }>()
-    )?.name,
-  ).toBe("양쪽 범위 변경");
-});
+    expect(response.status).toBe(200);
+    expect(
+      (
+        await env.DB.prepare("SELECT name FROM participants WHERE id=?")
+          .bind(fixture.firstParticipant.id)
+          .first<{ name: string }>()
+      )?.name,
+    ).toBe("양쪽 범위 변경");
+  },
+);
 
 it("makes participant history read-only for a manager after membership deactivation while the operator can edit", async () => {
   const fixture = await setupPreRegistration();

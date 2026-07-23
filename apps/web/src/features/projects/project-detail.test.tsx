@@ -523,10 +523,14 @@ it("chains project revisions for deactivation and reactivation", async () => {
   );
 });
 
-it("keeps inactive membership roster rows read-only for managers", async () => {
+it("allows manager roster changes only for an active pre-registration membership", async () => {
   let membershipActive = false;
+  let projectStatus: Project["status"] = "PRE_REGISTRATION";
   mockRole.current = "ORGANIZATION_MANAGER";
   mockApi.get.mockImplementation(async (path: string) => {
+    if (path === "/projects/project-1") {
+      return { ...project, status: projectStatus };
+    }
     if (path === "/projects/project-1/organizations") {
       return [
         {
@@ -606,6 +610,31 @@ it("keeps inactive membership roster rows read-only for managers", async () => {
   expect(
     await screen.findByRole("button", { name: "참가자 추가" }),
   ).toBeVisible();
+
+  cleanup();
+  projectStatus = "IN_PROGRESS";
+  render(<ProjectDetailPage projectId="project-1" />);
+  fireEvent.click(await screen.findByRole("tab", { name: "참가 명단" }));
+  expect(await screen.findByText("읽기 전용")).toBeVisible();
+  expect(
+    screen.queryByRole("button", { name: "정보 수정" }),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("button", { name: "박민수 취소" }),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("button", { name: "참가자 추가" }),
+  ).not.toBeInTheDocument();
+
+  cleanup();
+  mockRole.current = "OPERATOR";
+  render(<ProjectDetailPage projectId="project-1" />);
+  fireEvent.click(await screen.findByRole("tab", { name: "참가 명단" }));
+  expect(
+    await screen.findByRole("button", { name: "박민수 취소" }),
+  ).toBeVisible();
+  expect(screen.getByRole("button", { name: "정보 수정" })).toBeVisible();
+  expect(screen.getByRole("button", { name: "참가자 추가" })).toBeVisible();
 });
 
 it("confirms the exhaustive next transition action", async () => {

@@ -90,25 +90,38 @@ it("rolls back roster and audit when the project revision is stale", async () =>
   ).toBe(before?.count);
 });
 
-it("rejects a manager writing another organization roster", async () => {
-  const fixture = await setupPreRegistration();
-  await seedOrganization("org-2", "2팀");
-  const manager = await seedManager("org-2");
-  const forbidden = await authedRequest(
-    manager,
-    `/api/v1/projects/${fixture.project.id}/roster`,
-    {
-      method: "POST",
-      body: JSON.stringify({
-        participantId: fixture.firstParticipant.id,
-        confirmedParticipant: { name: "첫 참가자", organizationId: "org-1" },
-        expectedParticipantRevision: 0,
-        expectedRevision: fixture.project.revision,
-      }),
-    },
-  );
-  expect(forbidden.status).toBe(403);
-});
+it.each(["PRIMARY_LEADER", "MANAGER"] as const)(
+  "rejects a %s writing another organization roster",
+  async (assignmentRole) => {
+    const fixture = await setupPreRegistration();
+    await seedOrganization("org-2", "2팀");
+    const manager = await seedManager("org-2");
+    await env.DB.prepare(
+      `UPDATE user_organizations
+       SET assignment_role = ?
+       WHERE user_id = ? AND organization_id = 'org-2'`,
+    )
+      .bind(assignmentRole, manager.userId)
+      .run();
+    const forbidden = await authedRequest(
+      manager,
+      `/api/v1/projects/${fixture.project.id}/roster`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          participantId: fixture.firstParticipant.id,
+          confirmedParticipant: {
+            name: "첫 참가자",
+            organizationId: "org-1",
+          },
+          expectedParticipantRevision: 0,
+          expectedRevision: fixture.project.revision,
+        }),
+      },
+    );
+    expect(forbidden.status).toBe(403);
+  },
+);
 
 it("rejects CLOSED mutations and allows audited IN_PROGRESS additions after reopen", async () => {
   const fixture = await setupPreRegistration();
@@ -201,6 +214,171 @@ it("forbids organization managers from IN_PROGRESS roster mutations", async () =
     },
   );
   expect(forbidden.status).toBe(403);
+});
+
+it.each(["PRIMARY_LEADER", "MANAGER"] as const)(
+  "%s can mutate its active organization only during pre-registration",
+  async (assignmentRole) => {
+    const fixture = await setupPreRegistration();
+    const manager = await seedManager("org-1");
+    await env.DB.prepare(
+      `UPDATE user_organizations
+       SET assignment_role = ?
+       WHERE user_id = ? AND organization_id = 'org-1'`,
+    )
+      .bind(assignmentRole, manager.userId)
+      .run();
+
+    const preRegistrationAdd = await addRoster(
+      { ...fixture, operator: manager },
+      fixture.firstParticipant.id,
+    );
+    expect(preRegistrationAdd.status).toBe(201);
+    const added = await preRegistrationAdd.json<{
+      projectRevision: number;
+    }>();
+
+    const transitioned = await authedRequest(
+      fixture.operator,
+      `/api/v1/projects/${fixture.project.id}/transition`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          targetStatus: "IN_PROGRESS",
+          expectedRevision: added.projectRevision,
+        }),
+      },
+    );
+    expect(transitioned.status).toBe(200);
+    const inProgress = await transitioned.json<{ revision: number }>();
+
+    const dayOfAdd = await addRoster(
+      {
+        ...fixture,
+        operator: manager,
+        project: { ...fixture.project, revision: inProgress.revision },
+      },
+      fixture.secondParticipant.id,
+      inProgress.revision,
+    );
+    expect(dayOfAdd.status).toBe(403);
+  },
+);
+
+it("stops exposing projects and participants on the next request after organization deactivation", async () => {
+  const fixture = await setupPreRegistration();
+  const manager = await seedManager("org-1");
+
+  expect(
+    await (await authedRequest(manager, "/api/v1/projects")).json<
+      Array<{ id: string }>
+    >(),
+  ).toEqual([expect.objectContaining({ id: fixture.project.id })]);
+  expect(
+    await (await authedRequest(manager, "/api/v1/participants")).json<
+      Array<{ id: string }>
+    >(),
+  ).toHaveLength(2);
+
+  const deactivated = await authedRequest(
+    fixture.operator,
+    "/api/v1/organizations/org-1",
+    {
+      method: "PATCH",
+      body: JSON.stringify({ isActive: false }),
+    },
+  );
+  expect(deactivated.status).toBe(200);
+
+  expect(
+    await (await authedRequest(manager, "/api/v1/projects")).json<
+      Array<{ id: string }>
+    >(),
+  ).toEqual([]);
+  expect(
+    await (await authedRequest(manager, "/api/v1/participants")).json<
+      Array<{ id: string }>
+    >(),
+  ).toEqual([]);
+  expect(
+    (await authedRequest(manager, `/api/v1/projects/${fixture.project.id}`))
+      .status,
+  ).toBe(403);
+});
+
+it("stops assignment-derived access on the next request after assignment removal", async () => {
+  const fixture = await setupPreRegistration();
+  const manager = await seedManager("org-1");
+  expect(
+    (await authedRequest(manager, `/api/v1/projects/${fixture.project.id}`))
+      .status,
+  ).toBe(200);
+
+  await env.DB.prepare(
+    "DELETE FROM user_organizations WHERE user_id = ? AND organization_id = 'org-1'",
+  )
+    .bind(manager.userId)
+    .run();
+
+  expect(
+    await (await authedRequest(manager, "/api/v1/projects")).json<
+      Array<{ id: string }>
+    >(),
+  ).toEqual([]);
+  expect(
+    (await authedRequest(manager, `/api/v1/projects/${fixture.project.id}`))
+      .status,
+  ).toBe(403);
+});
+
+it("shows projects linked to each active organization of a multi-organization manager", async () => {
+  const fixture = await setupPreRegistration();
+  await seedOrganization("org-2", "2팀");
+  const secondProject = await seedProject(fixture.operator, {
+    name: "두 번째 프로젝트",
+  });
+  const linked = await authedRequest(
+    fixture.operator,
+    `/api/v1/projects/${secondProject.id}/organizations`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        organizationId: "org-2",
+        expectedProjectRevision: secondProject.revision,
+      }),
+    },
+  );
+  expect(linked.status).toBe(201);
+  const manager = await seedManager("org-1");
+  await env.DB.prepare(
+    `INSERT INTO user_organizations
+     (user_id, organization_id, assignment_role, assigned_by, assigned_at)
+     VALUES (?, 'org-2', 'PRIMARY_LEADER', NULL, ?)`,
+  )
+    .bind(manager.userId, "2026-07-23T00:00:00.000Z")
+    .run();
+
+  const projects = await (
+    await authedRequest(manager, "/api/v1/projects")
+  ).json<Array<{ id: string }>>();
+  expect(projects.map((project) => project.id).sort()).toEqual(
+    [fixture.project.id, secondProject.id].sort(),
+  );
+});
+
+it("keeps a leaderless organization fully roster-editable by an operator", async () => {
+  const fixture = await setupPreRegistration();
+  expect(
+    (
+      await env.DB.prepare(
+        "SELECT COUNT(*) AS count FROM user_organizations WHERE organization_id = 'org-1'",
+      ).first<{ count: number }>()
+    )?.count,
+  ).toBe(0);
+
+  expect((await addRoster(fixture, fixture.firstParticipant.id)).status).toBe(
+    201,
+  );
 });
 
 it("serializes a PRE_REGISTRATION add against the IN_PROGRESS snapshot transition", async () => {
@@ -813,6 +991,63 @@ it("rechecks a manager participant organization inside the atomic reuse guard", 
         .first<{ revision: number }>()
     )?.revision,
   ).toBe(targetProject.revision);
+  expect(
+    (
+      await env.DB.prepare("SELECT COUNT(*) AS count FROM audit_logs").first<{
+        count: number;
+      }>()
+    )?.count,
+  ).toBe(beforeAudit?.count);
+});
+
+it("rechecks the manager assignment inside the atomic roster guard", async () => {
+  const fixture = await setupPreRegistration();
+  const manager = await seedManager("org-1");
+  const actor = await requireActor(
+    new Request("https://event-roster.test", {
+      headers: authenticatedHeaders(manager),
+    }),
+    env as Env,
+  );
+  const beforeAudit = await env.DB.prepare(
+    "SELECT COUNT(*) AS count FROM audit_logs",
+  ).first<{ count: number }>();
+  let pending = true;
+  const raceDb = {
+    prepare: (query: string) => env.DB.prepare(query),
+    batch: async (statements: D1PreparedStatement[]) => {
+      if (pending) {
+        pending = false;
+        await env.DB.prepare(
+          "DELETE FROM user_organizations WHERE user_id = ? AND organization_id = 'org-1'",
+        )
+          .bind(manager.userId)
+          .run();
+      }
+      return env.DB.batch(statements);
+    },
+  } as D1Database;
+
+  await expect(
+    addRosterEntry(
+      { ...(env as Env), DB: raceDb },
+      actor,
+      fixture.project.id,
+      fixture.firstParticipant.id,
+      fixture.project.revision,
+      { name: "경쟁 조건 이름", organizationId: "org-1" },
+      fixture.firstParticipant.revision,
+    ),
+  ).rejects.toMatchObject({ code: "STALE_REVISION" });
+  expect(
+    (
+      await env.DB.prepare(
+        "SELECT COUNT(*) AS count FROM project_roster_entries WHERE project_id = ?",
+      )
+        .bind(fixture.project.id)
+        .first<{ count: number }>()
+    )?.count,
+  ).toBe(0);
   expect(
     (
       await env.DB.prepare("SELECT COUNT(*) AS count FROM audit_logs").first<{

@@ -18,16 +18,19 @@ export interface ParticipantRecord {
 
 export async function getParticipants(env: Env, actor: Actor) {
   const manager = actor.session.user.role === "ORGANIZATION_MANAGER";
-  if (manager && actor.session.user.organizationIds.length === 0) return [];
   const sql = manager
-    ? `SELECT id, participant_id, name, organization_id, revision FROM participants
-       WHERE organization_id IN (${actor.session.user.organizationIds.map(() => "?").join(",")})
-       ORDER BY name, participant_id`
+    ? `SELECT p.id, p.participant_id, p.name, p.organization_id, p.revision
+       FROM participants p
+       JOIN user_organizations actor_scope
+         ON actor_scope.organization_id = p.organization_id
+       JOIN organizations o ON o.id = p.organization_id
+       WHERE actor_scope.user_id = ? AND o.is_active = 1
+       ORDER BY p.name, p.participant_id`
     : `SELECT id, participant_id, name, organization_id, revision
        FROM participants ORDER BY name, participant_id`;
   const rows = (
     await env.DB.prepare(sql)
-      .bind(...(manager ? actor.session.user.organizationIds : []))
+      .bind(...(manager ? [actor.session.user.id] : []))
       .all<ParticipantRow>()
   ).results;
   return rows.map(mapParticipant);

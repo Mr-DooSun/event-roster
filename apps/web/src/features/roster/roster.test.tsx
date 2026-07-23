@@ -529,6 +529,102 @@ it("keeps a manager reuse confirmation in the participant master organization", 
   });
 });
 
+it("keeps in-progress roster controls read-only for managers and available to operators", async () => {
+  const createFetch = (role: "OPERATOR" | "ORGANIZATION_MANAGER") =>
+    vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/auth/login")) {
+        return Promise.resolve(Response.json(auth(role, ["org-1"])));
+      }
+      if (url.endsWith("/projects/project-1")) {
+        return Promise.resolve(Response.json(project()));
+      }
+      if (url.endsWith("/summary")) {
+        return Promise.resolve(Response.json(summary(1)));
+      }
+      if (url.endsWith("/projects/project-1/organizations")) {
+        return Promise.resolve(
+          Response.json([
+            {
+              organizationId: "org-1",
+              name: "1팀",
+              isActive: true,
+              masterIsActive: true,
+              activeProjectCount: 1,
+              hasHistory: true,
+              primaryLeader: null,
+              managerCount: 1,
+              rosterCount: 1,
+            },
+          ]),
+        );
+      }
+      if (url.endsWith("/roster") && (!init?.method || init.method === "GET")) {
+        return Promise.resolve(Response.json([entry("ACTIVE")]));
+      }
+      if (url.endsWith("/participants")) {
+        return Promise.resolve(
+          Response.json([
+            {
+              id: "person-1",
+              participantId: "P-001",
+              name: "박민수",
+              organizationId: "org-1",
+              revision: 0,
+            },
+          ]),
+        );
+      }
+      if (url.endsWith("/organizations")) {
+        return Promise.resolve(
+          Response.json([{ id: "org-1", name: "1팀", isActive: true }]),
+        );
+      }
+      if (url.includes("/audit")) {
+        return Promise.resolve(Response.json({ items: [], nextCursor: null }));
+      }
+      throw new Error(`unexpected request: ${url}`);
+    });
+
+  vi.stubGlobal("fetch", createFetch("ORGANIZATION_MANAGER"));
+  render(
+    <AuthProvider restoreOnMount={false}>
+      <Gate>
+        <ProjectDetailPage projectId="project-1" />
+      </Gate>
+    </AuthProvider>,
+  );
+  await login();
+  await openRosterTab();
+  expect(await screen.findByText("읽기 전용")).toBeVisible();
+  expect(
+    screen.queryByRole("button", { name: "박민수 취소" }),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("button", { name: "정보 수정" }),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("button", { name: "참가자 추가" }),
+  ).not.toBeInTheDocument();
+
+  cleanup();
+  vi.stubGlobal("fetch", createFetch("OPERATOR"));
+  render(
+    <AuthProvider restoreOnMount={false}>
+      <Gate>
+        <ProjectDetailPage projectId="project-1" />
+      </Gate>
+    </AuthProvider>,
+  );
+  await login();
+  await openRosterTab();
+  expect(
+    await screen.findByRole("button", { name: "박민수 취소" }),
+  ).toBeVisible();
+  expect(screen.getByRole("button", { name: "정보 수정" })).toBeVisible();
+  expect(screen.getByRole("button", { name: "참가자 추가" })).toBeVisible();
+});
+
 it("closes participant editing after a stale revision reload", async () => {
   const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);

@@ -102,7 +102,8 @@ export async function listActorProjectOrganizationIds(
            ON actor_org.organization_id = po.organization_id
          JOIN organizations o ON o.id = po.organization_id
          WHERE actor_org.user_id = ? AND po.project_id = ?
-           AND (? = 0 OR (po.is_active = 1 AND o.is_active = 1))
+           AND o.is_active = 1
+           AND (? = 0 OR po.is_active = 1)
          ORDER BY po.organization_id`,
       )
       .bind(actorUserId, projectId, activeOnly ? 1 : 0)

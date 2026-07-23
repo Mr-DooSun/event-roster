@@ -40,7 +40,10 @@ export async function listProjects(
           SELECT 1 FROM project_organizations po
           JOIN user_organizations uo
             ON uo.organization_id = po.organization_id
-          WHERE po.project_id = projects.id AND uo.user_id = ?
+          JOIN organizations o ON o.id = po.organization_id
+          WHERE po.project_id = projects.id
+            AND uo.user_id = ?
+            AND o.is_active = 1
         )`
     : "";
   const rows = (
