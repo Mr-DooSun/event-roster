@@ -26,7 +26,6 @@ export async function createUser(
     loginId: string;
     displayName: string;
     role: Role;
-    organizationIds: string[];
   },
 ) {
   const temporaryPassword = createTemporaryPassword();
@@ -58,18 +57,15 @@ export async function createUser(
        (user_id, password_hash, must_change_password, changed_at)
        VALUES (?, ?, 1, ?)`,
     ).bind(id, passwordHash, now),
-    ...input.organizationIds.map((organizationId) =>
-      env.DB.prepare(
-        `INSERT INTO user_organizations
-         (user_id, organization_id, assignment_role, assigned_by, assigned_at)
-         VALUES (?, ?, 'MANAGER', ?, ?)`,
-      ).bind(id, organizationId, actor.session.user.id, now),
-    ),
-    env.DB.prepare(
-      `INSERT INTO audit_logs
-       (id, actor_user_id, action, entity_type, entity_id, occurred_at, details_json)
-       VALUES (?, ?, 'USER_CREATED', 'USER', ?, ?, '{}')`,
-    ).bind(crypto.randomUUID(), actor.session.user.id, id, now),
+    userAuditStatement(env.DB, actor.session.user.id, "USER_CREATED", id, now, {
+      userId: id,
+      before: { displayName: null, role: null, isActive: null },
+      after: {
+        displayName: input.displayName,
+        role: input.role,
+        isActive: true,
+      },
+    }),
   ];
   const guardId = crypto.randomUUID();
   try {
@@ -79,9 +75,8 @@ export async function createUser(
         env.DB,
         guardId,
         actor,
-        `NOT EXISTS (SELECT 1 FROM users WHERE login_id_canonical = ?)
-         AND ${activeOrganizationsPredicate(input.organizationIds)}`,
-        [input.loginId, ...input.organizationIds, input.organizationIds.length],
+        "NOT EXISTS (SELECT 1 FROM users WHERE login_id_canonical = ?)",
+        [input.loginId],
       ),
       statements,
       failureCode: "CONFLICT",
@@ -100,33 +95,34 @@ export async function updateUser(
     displayName?: string | undefined;
     role?: Role | undefined;
     isActive?: boolean | undefined;
-    organizationIds?: string[] | undefined;
   },
 ) {
   const current = await findAdminUserState(env.DB, id);
   if (!current) throw new DomainError("NOT_FOUND");
-  const nextOrganizationIds = input.organizationIds ?? current.organizationIds;
-  const organizationIdsToValidate = input.organizationIds ?? [];
-  const securityChange =
-    (input.role !== undefined && input.role !== current.role) ||
-    (input.isActive !== undefined && input.isActive !== current.isActive) ||
-    (input.organizationIds !== undefined &&
-      !sameIds(input.organizationIds, current.organizationIds));
+  const displayName = input.displayName ?? current.displayName;
+  const role = input.role ?? current.role;
+  const isActive = input.isActive ?? current.isActive;
+  const profileChanged =
+    displayName !== current.displayName || role !== current.role;
+  const activeChanged = isActive !== current.isActive;
+  const securityChange = role !== current.role || activeChanged;
   const now = new Date().toISOString();
-  const statements: D1PreparedStatement[] = [
-    env.DB.prepare(
-      `UPDATE users SET display_name = COALESCE(?, display_name),
-       role = COALESCE(?, role), is_active = COALESCE(?, is_active),
-       session_version = session_version + ?, updated_at = ? WHERE id = ?`,
-    ).bind(
-      input.displayName ?? null,
-      input.role ?? null,
-      input.isActive === undefined ? null : input.isActive ? 1 : 0,
-      securityChange ? 1 : 0,
-      now,
-      id,
-    ),
-  ];
+  const statements: D1PreparedStatement[] = [];
+  if (profileChanged || activeChanged) {
+    statements.push(
+      env.DB.prepare(
+        `UPDATE users SET display_name = ?, role = ?, is_active = ?,
+         session_version = session_version + ?, updated_at = ? WHERE id = ?`,
+      ).bind(
+        displayName,
+        role,
+        isActive ? 1 : 0,
+        securityChange ? 1 : 0,
+        now,
+        id,
+      ),
+    );
+  }
   if (securityChange) {
     statements.push(
       env.DB.prepare(
@@ -138,27 +134,39 @@ export async function updateUser(
       ).bind(now, id),
     );
   }
-  if (input.organizationIds) {
+  const auditDetails = {
+    userId: id,
+    before: {
+      displayName: current.displayName,
+      role: current.role,
+      isActive: current.isActive,
+    },
+    after: { displayName, role, isActive },
+  };
+  if (profileChanged) {
     statements.push(
-      env.DB.prepare("DELETE FROM user_organizations WHERE user_id = ?").bind(
+      userAuditStatement(
+        env.DB,
+        actor.session.user.id,
+        "USER_UPDATED",
         id,
-      ),
-      ...input.organizationIds.map((organizationId) =>
-        env.DB.prepare(
-          `INSERT INTO user_organizations
-           (user_id, organization_id, assignment_role, assigned_by, assigned_at)
-           VALUES (?, ?, 'MANAGER', ?, ?)`,
-        ).bind(id, organizationId, actor.session.user.id, now),
+        now,
+        auditDetails,
       ),
     );
   }
-  statements.push(
-    env.DB.prepare(
-      `INSERT INTO audit_logs
-       (id, actor_user_id, action, entity_type, entity_id, occurred_at, details_json)
-       VALUES (?, ?, 'USER_UPDATED', 'USER', ?, ?, '{}')`,
-    ).bind(crypto.randomUUID(), actor.session.user.id, id, now),
-  );
+  if (activeChanged) {
+    statements.push(
+      userAuditStatement(
+        env.DB,
+        actor.session.user.id,
+        isActive ? "USER_REACTIVATED" : "USER_DEACTIVATED",
+        id,
+        now,
+        auditDetails,
+      ),
+    );
+  }
   const guardId = crypto.randomUUID();
   await runGuardedAtomic(env.DB, {
     guardId,
@@ -168,13 +176,10 @@ export async function updateUser(
       actor,
       `EXISTS (
          SELECT 1 FROM users WHERE id = ? AND is_bootstrap = 0 AND session_version = ?
-      ) AND ${activeOrganizationsPredicate(organizationIdsToValidate)}`,
-      [
-        id,
-        current.sessionVersion,
-        ...organizationIdsToValidate,
-        organizationIdsToValidate.length,
-      ],
+      ) AND (? <> 'OPERATOR' OR NOT EXISTS (
+        SELECT 1 FROM user_organizations WHERE user_id = ?
+      ))`,
+      [id, current.sessionVersion, role, id],
     ),
     statements,
     failureCode: "CONFLICT",
@@ -182,10 +187,10 @@ export async function updateUser(
   return {
     id: current.id,
     loginId: current.loginId,
-    displayName: input.displayName ?? current.displayName,
-    role: input.role ?? current.role,
-    isActive: input.isActive ?? current.isActive,
-    organizationIds: nextOrganizationIds,
+    displayName,
+    role,
+    isActive,
+    organizationIds: current.organizationIds,
   };
 }
 
@@ -215,11 +220,14 @@ export async function resetUserPassword(env: Env, actor: Actor, id: string) {
       `UPDATE refresh_tokens SET revoked_at = COALESCE(revoked_at, ?)
        WHERE session_id IN (SELECT id FROM auth_sessions WHERE user_id = ?)`,
     ).bind(now, id),
-    env.DB.prepare(
-      `INSERT INTO audit_logs
-       (id, actor_user_id, action, entity_type, entity_id, occurred_at, details_json)
-       VALUES (?, ?, 'PASSWORD_RESET', 'USER', ?, ?, '{}')`,
-    ).bind(crypto.randomUUID(), actor.session.user.id, id, now),
+    userAuditStatement(
+      env.DB,
+      actor.session.user.id,
+      "PASSWORD_RESET",
+      id,
+      now,
+      { userId: id },
+    ),
   ];
   const guardId = crypto.randomUUID();
   await runGuardedAtomic(env.DB, {
@@ -270,21 +278,6 @@ export function createOperatorGuard(
     );
 }
 
-function activeOrganizationsPredicate(ids: string[]): string {
-  if (ids.length === 0) return "? = 0";
-  return `(SELECT COUNT(*) FROM organizations
-           WHERE is_active = 1 AND id IN (${ids.map(() => "?").join(",")})) = ?`;
-}
-
-function sameIds(left: string[], right: string[]): boolean {
-  const sortedLeft = [...left].sort();
-  const sortedRight = [...right].sort();
-  return (
-    sortedLeft.length === sortedRight.length &&
-    sortedLeft.every((value, index) => value === sortedRight[index])
-  );
-}
-
 function createTemporaryPassword(): string {
   const random = crypto.getRandomValues(new Uint8Array(20));
   return Array.from(
@@ -294,12 +287,32 @@ function createTemporaryPassword(): string {
   ).join("");
 }
 
+function userAuditStatement(
+  db: D1Database,
+  actorUserId: string,
+  action: string,
+  userId: string,
+  occurredAt: string,
+  details: Record<string, unknown>,
+): D1PreparedStatement {
+  return db
+    .prepare(
+      `INSERT INTO audit_logs
+       (id, actor_user_id, action, entity_type, entity_id, occurred_at, details_json)
+       VALUES (?, ?, ?, 'USER', ?, ?, ?)`,
+    )
+    .bind(
+      crypto.randomUUID(),
+      actorUserId,
+      action,
+      userId,
+      occurredAt,
+      JSON.stringify(details),
+    );
+}
+
 function throwConstraintConflict(error: unknown): never {
-  if (
-    error instanceof Error &&
-    (error.message.includes("SQLITE_CONSTRAINT") ||
-      error.message.includes("UNIQUE constraint"))
-  ) {
+  if (error instanceof Error && error.message.includes("UNIQUE constraint")) {
     throw new DomainError("CONFLICT");
   }
   throw error;

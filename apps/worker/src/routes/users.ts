@@ -13,27 +13,20 @@ import {
   updateUser,
 } from "../services/admin";
 
-const UserCreateSchema = z.object({
-  loginId: LoginIdSchema,
-  displayName: z.string().trim().min(1).max(100),
-  role: RoleSchema,
-  organizationIds: z
-    .array(z.string().min(1))
-    .max(100)
-    .refine((ids) => new Set(ids).size === ids.length)
-    .default([]),
-});
+const UserCreateSchema = z
+  .object({
+    loginId: LoginIdSchema,
+    displayName: z.string().trim().min(1).max(100),
+    role: RoleSchema,
+  })
+  .strict();
 const UserPatchSchema = z
   .object({
     displayName: z.string().trim().min(1).max(100).optional(),
     role: RoleSchema.optional(),
     isActive: z.boolean().optional(),
-    organizationIds: z
-      .array(z.string().min(1))
-      .max(100)
-      .refine((ids) => new Set(ids).size === ids.length)
-      .optional(),
   })
+  .strict()
   .refine((value) => Object.keys(value).length > 0);
 
 export const userRoutes = new Hono<{ Bindings: Env }>();

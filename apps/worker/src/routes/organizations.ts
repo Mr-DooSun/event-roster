@@ -1,4 +1,8 @@
-import { OrganizationPatchRequestSchema } from "@event-roster/contracts";
+import {
+  OrganizationManagerCreateRequestSchema,
+  OrganizationPatchRequestSchema,
+  OrganizationPrimaryPatchRequestSchema,
+} from "@event-roster/contracts";
 import { Hono } from "hono";
 import { z } from "zod";
 import type { Env } from "../env";
@@ -8,11 +12,14 @@ import { requireFullSession } from "../middleware/authorization";
 import { requireCsrf } from "../middleware/csrf";
 import { requireAdministrativeOperator } from "../services/admin";
 import {
+  assignOrganizationManager,
   createOrganization,
   getAssignableManagerAccounts,
   getOrganizationAuditPage,
   getOrganizationDetail,
   getOrganizationSummaries,
+  removeOrganizationManager,
+  replaceOrganizationPrimary,
   updateOrganization,
 } from "../services/organizations";
 
@@ -81,6 +88,53 @@ organizationRoutes.get("/organizations/:id", async (c) => {
   const actor = await requireActor(c.req.raw, c.env);
   requireFullSession(actor);
   return c.json(await getOrganizationDetail(c.env, actor, c.req.param("id")));
+});
+
+organizationRoutes.post("/organizations/:id/managers", async (c) => {
+  assertExactOrigin(c.req.raw, c.env.APP_ORIGIN);
+  const actor = await requireActor(c.req.raw, c.env);
+  requireFullSession(actor);
+  await requireCsrf(c.req.raw, actor);
+  requireAdministrativeOperator(actor);
+  const input = OrganizationManagerCreateRequestSchema.parse(
+    await c.req.json(),
+  );
+  const result = await assignOrganizationManager(
+    c.env,
+    actor,
+    c.req.param("id"),
+    input,
+  );
+  return result.temporaryPassword
+    ? c.json(result, 201, { "Cache-Control": "no-store" })
+    : c.json(result, 201);
+});
+
+organizationRoutes.patch("/organizations/:id/primary", async (c) => {
+  assertExactOrigin(c.req.raw, c.env.APP_ORIGIN);
+  const actor = await requireActor(c.req.raw, c.env);
+  requireFullSession(actor);
+  await requireCsrf(c.req.raw, actor);
+  requireAdministrativeOperator(actor);
+  const input = OrganizationPrimaryPatchRequestSchema.parse(await c.req.json());
+  return c.json(
+    await replaceOrganizationPrimary(c.env, actor, c.req.param("id"), input),
+  );
+});
+
+organizationRoutes.delete("/organizations/:id/managers/:userId", async (c) => {
+  assertExactOrigin(c.req.raw, c.env.APP_ORIGIN);
+  const actor = await requireActor(c.req.raw, c.env);
+  requireFullSession(actor);
+  await requireCsrf(c.req.raw, actor);
+  requireAdministrativeOperator(actor);
+  await removeOrganizationManager(
+    c.env,
+    actor,
+    c.req.param("id"),
+    c.req.param("userId"),
+  );
+  return c.body(null, 204);
 });
 
 organizationRoutes.post("/organizations", async (c) => {

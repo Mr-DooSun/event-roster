@@ -10,6 +10,17 @@ export interface LeadershipFixture {
   projectIds: ["project-active", "project-closed"];
 }
 
+export async function seedOperatorWithTwoOrganizations(): Promise<SeededLogin> {
+  const operator = await seedOperator();
+  await seedOrganization("org-1", "1팀");
+  await seedOrganization("org-2", "2팀");
+  return operator;
+}
+
+export async function seedTwoManagersAndPrimary(): Promise<LeadershipFixture> {
+  return seedLeadershipFixture();
+}
+
 export async function seedLeadershipFixture(): Promise<LeadershipFixture> {
   const operator = await seedOperator();
   await seedOrganization("org-1", "1팀");
