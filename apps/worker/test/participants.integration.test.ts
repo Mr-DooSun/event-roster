@@ -39,19 +39,24 @@ it("updates the participant master organization without rewriting past snapshots
   const otherProject = await seedProject(fixture.operator, {
     name: "다른 프로젝트",
   });
-  for (const [projectId, organizationId] of [
-    [fixture.project.id, secondOrganization.id],
-    [otherProject.id, "org-1"],
+  let fixtureProjectRevision = fixture.project.revision;
+  for (const [projectId, organizationId, expectedProjectRevision] of [
+    [fixture.project.id, secondOrganization.id, fixture.project.revision],
+    [otherProject.id, "org-1", otherProject.revision],
   ]) {
     const linked = await authedRequest(
       fixture.operator,
       `/api/v1/projects/${projectId}/organizations`,
       {
         method: "POST",
-        body: JSON.stringify({ organizationId }),
+        body: JSON.stringify({ organizationId, expectedProjectRevision }),
       },
     );
     expect(linked.status).toBe(201);
+    const linkedBody = await linked.json<{ projectRevision: number }>();
+    if (projectId === fixture.project.id) {
+      fixtureProjectRevision = linkedBody.projectRevision;
+    }
   }
   const now = "2026-07-21T00:00:00.000Z";
   await env.DB.batch(
@@ -82,7 +87,7 @@ it("updates the participant master organization without rewriting past snapshots
         name: "첫 참가자",
         organizationId: secondOrganization.id,
         expectedRevision: fixture.firstParticipant.revision,
-        expectedProjectRevision: fixture.project.revision,
+        expectedProjectRevision: fixtureProjectRevision,
       }),
     },
   );
@@ -124,15 +129,23 @@ it("updates the participant master organization without rewriting past snapshots
 it("prevents a snapshot organization manager from editing a moved participant master", async () => {
   const fixture = await setupPreRegistration();
   await seedOrganization("org-2", "2팀");
-  await authedRequest(
+  const linked = await authedRequest(
     fixture.operator,
     `/api/v1/projects/${fixture.project.id}/organizations`,
     {
       method: "POST",
-      body: JSON.stringify({ organizationId: "org-2" }),
+      body: JSON.stringify({
+        organizationId: "org-2",
+        expectedProjectRevision: fixture.project.revision,
+      }),
     },
   );
-  const added = await addRoster(fixture, fixture.firstParticipant.id);
+  const linkedBody = await linked.json<{ projectRevision: number }>();
+  const added = await addRoster(
+    fixture,
+    fixture.firstParticipant.id,
+    linkedBody.projectRevision,
+  );
   const entry = await added.json<{ projectRevision: number }>();
   const moved = await authedRequest(
     fixture.operator,
@@ -176,15 +189,23 @@ it("prevents a snapshot organization manager from editing a moved participant ma
 it("allows a manager scoped to both snapshot and master organizations to edit a moved participant", async () => {
   const fixture = await setupPreRegistration();
   await seedOrganization("org-2", "2팀");
-  await authedRequest(
+  const linked = await authedRequest(
     fixture.operator,
     `/api/v1/projects/${fixture.project.id}/organizations`,
     {
       method: "POST",
-      body: JSON.stringify({ organizationId: "org-2" }),
+      body: JSON.stringify({
+        organizationId: "org-2",
+        expectedProjectRevision: fixture.project.revision,
+      }),
     },
   );
-  const added = await addRoster(fixture, fixture.firstParticipant.id);
+  const linkedBody = await linked.json<{ projectRevision: number }>();
+  const added = await addRoster(
+    fixture,
+    fixture.firstParticipant.id,
+    linkedBody.projectRevision,
+  );
   const entry = await added.json<{ projectRevision: number }>();
   const moved = await authedRequest(
     fixture.operator,
@@ -236,11 +257,18 @@ it("makes participant history read-only for a manager after membership deactivat
   const fixture = await setupPreRegistration();
   const added = await addRoster(fixture, fixture.firstParticipant.id);
   const entry = await added.json<{ projectRevision: number }>();
-  await authedRequest(
+  const deactivated = await authedRequest(
     fixture.operator,
     `/api/v1/projects/${fixture.project.id}/organizations/org-1`,
-    { method: "PATCH", body: JSON.stringify({ isActive: false }) },
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        isActive: false,
+        expectedProjectRevision: entry.projectRevision,
+      }),
+    },
   );
+  const deactivatedBody = await deactivated.json<{ projectRevision: number }>();
   const manager = await seedManager("org-1");
   const managerPatch = await authedRequest(
     manager,
@@ -250,7 +278,7 @@ it("makes participant history read-only for a manager after membership deactivat
       body: JSON.stringify({
         name: "관리자 변경 금지",
         expectedRevision: 0,
-        expectedProjectRevision: entry.projectRevision,
+        expectedProjectRevision: deactivatedBody.projectRevision,
       }),
     },
   );
@@ -263,7 +291,7 @@ it("makes participant history read-only for a manager after membership deactivat
       body: JSON.stringify({
         name: "운영자 변경 허용",
         expectedRevision: 0,
-        expectedProjectRevision: entry.projectRevision,
+        expectedProjectRevision: deactivatedBody.projectRevision,
       }),
     },
   );

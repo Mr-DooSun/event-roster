@@ -22,10 +22,26 @@ it("links an existing organization, deactivates it, and reuses the row", async (
     `/api/v1/projects/${project.id}/organizations`,
     {
       method: "POST",
-      body: JSON.stringify({ organizationId: organization.id }),
+      body: JSON.stringify({
+        organizationId: organization.id,
+        expectedProjectRevision: project.revision,
+      }),
     },
   );
   expect(link.status).toBe(201);
+  const linked = await link.json<{
+    organization: { organizationId: string };
+    projectRevision: number;
+  }>();
+  expect(linked).toMatchObject({
+    organization: {
+      organizationId: organization.id,
+      primaryLeader: null,
+      managerCount: 0,
+      rosterCount: 0,
+    },
+    projectRevision: project.revision + 1,
+  });
   expect(
     await (
       await authedRequest(
@@ -41,6 +57,9 @@ it("links an existing organization, deactivates it, and reuses the row", async (
       masterIsActive: true,
       activeProjectCount: 1,
       hasHistory: true,
+      primaryLeader: null,
+      managerCount: 0,
+      rosterCount: 0,
     },
   ]);
   const disabled = await authedRequest(
@@ -48,10 +67,14 @@ it("links an existing organization, deactivates it, and reuses the row", async (
     `/api/v1/projects/${project.id}/organizations/${organization.id}`,
     {
       method: "PATCH",
-      body: JSON.stringify({ isActive: false }),
+      body: JSON.stringify({
+        isActive: false,
+        expectedProjectRevision: linked.projectRevision,
+      }),
     },
   );
   expect(disabled.status).toBe(200);
+  const disabledBody = await disabled.json<{ projectRevision: number }>();
   expect(
     (
       await authedRequest(
@@ -59,7 +82,10 @@ it("links an existing organization, deactivates it, and reuses the row", async (
         `/api/v1/projects/${project.id}/organizations`,
         {
           method: "POST",
-          body: JSON.stringify({ organizationId: organization.id }),
+          body: JSON.stringify({
+            organizationId: organization.id,
+            expectedProjectRevision: disabledBody.projectRevision,
+          }),
         },
       )
     ).status,
@@ -73,6 +99,11 @@ it("links an existing organization, deactivates it, and reuses the row", async (
         .first<{ count: number }>()
     )?.count,
   ).toBe(1);
+  expect(
+    await env.DB.prepare("SELECT revision FROM projects WHERE id = ?")
+      .bind(project.id)
+      .first<{ revision: number }>(),
+  ).toEqual({ revision: project.revision + 3 });
   const auditActions = (
     await env.DB.prepare(
       `SELECT action FROM audit_logs
@@ -87,6 +118,158 @@ it("links an existing organization, deactivates it, and reuses the row", async (
   ]);
 });
 
+it("aggregates primary leadership, managers, and active roster counts", async () => {
+  const operator = await seedOperator();
+  const organization = await seedOrganization();
+  const project = await seedProject(operator);
+  const linked = await linkProjectOrganization(
+    operator,
+    project.id,
+    organization.id,
+    project.revision,
+  );
+  await env.DB.prepare(
+    `INSERT INTO user_organizations
+     (user_id, organization_id, assignment_role, assigned_by, assigned_at)
+     VALUES (?, ?, 'PRIMARY_LEADER', ?, ?)`,
+  )
+    .bind(
+      operator.userId,
+      organization.id,
+      operator.userId,
+      "2026-07-23T00:00:00.000Z",
+    )
+    .run();
+  await seedManager(organization.id);
+  await seedRosterSnapshot(
+    project.id,
+    organization.id,
+    organization.name,
+    operator.userId,
+  );
+  const primary = await env.DB.prepare(
+    "SELECT display_name FROM users WHERE id = ?",
+  )
+    .bind(operator.userId)
+    .first<{ display_name: string }>();
+
+  const listed = await (
+    await authedRequest(
+      operator,
+      `/api/v1/projects/${project.id}/organizations`,
+    )
+  ).json();
+  expect(listed).toEqual([
+    expect.objectContaining({
+      organizationId: organization.id,
+      primaryLeader: {
+        userId: operator.userId,
+        displayName: primary?.display_name,
+      },
+      managerCount: 1,
+      rosterCount: 1,
+    }),
+  ]);
+  expect(linked.projectRevision).toBe(project.revision + 1);
+});
+
+it("allows only one concurrent add at an observed project revision", async () => {
+  const operator = await seedOperator();
+  const organization = await seedOrganization();
+  const project = await seedProject(operator);
+  const request = () =>
+    authedRequest(operator, `/api/v1/projects/${project.id}/organizations`, {
+      method: "POST",
+      body: JSON.stringify({
+        organizationId: organization.id,
+        expectedProjectRevision: project.revision,
+      }),
+    });
+
+  const responses = await Promise.all([request(), request()]);
+  expect(responses.map((response) => response.status).sort()).toEqual([
+    201, 409,
+  ]);
+  const conflict = responses.find((response) => response.status === 409);
+  expect(await conflict?.json()).toMatchObject({ code: "STALE_REVISION" });
+  expect(
+    (
+      await env.DB.prepare(
+        "SELECT COUNT(*) AS count FROM project_organizations WHERE project_id = ?",
+      )
+        .bind(project.id)
+        .first<{ count: number }>()
+    )?.count,
+  ).toBe(1);
+  expect(
+    (
+      await env.DB.prepare(
+        `SELECT COUNT(*) AS count FROM audit_logs
+         WHERE action = 'PROJECT_ORGANIZATION_ADDED' AND entity_id = ?`,
+      )
+        .bind(`${project.id}:${organization.id}`)
+        .first<{ count: number }>()
+    )?.count,
+  ).toBe(1);
+  expect(
+    await env.DB.prepare("SELECT revision FROM projects WHERE id = ?")
+      .bind(project.id)
+      .first<{ revision: number }>(),
+  ).toEqual({ revision: project.revision + 1 });
+});
+
+it("returns the existing organization after a canonical-name create race", async () => {
+  const operator = await seedOperator();
+  const project = await seedProject(operator);
+  const request = (newOrganizationName: string) =>
+    authedRequest(operator, `/api/v1/projects/${project.id}/organizations`, {
+      method: "POST",
+      body: JSON.stringify({
+        newOrganizationName,
+        expectedProjectRevision: project.revision,
+      }),
+    });
+
+  const responses = await Promise.all([
+    request("경합 조직"),
+    request("  경합 조직  "),
+  ]);
+  expect(responses.map((response) => response.status).sort()).toEqual([
+    201, 409,
+  ]);
+  const success = responses.find((response) => response.status === 201);
+  const created = await success?.json<{
+    organization: { organizationId: string };
+  }>();
+  const conflict = responses.find((response) => response.status === 409);
+  expect(await conflict?.json()).toMatchObject({
+    code: "CONFLICT",
+    details: {
+      organizationId: created?.organization.organizationId,
+      organizationName: "경합 조직",
+      reason: "ORGANIZATION_NAME_EXISTS",
+    },
+  });
+  expect(
+    (
+      await env.DB.prepare(
+        "SELECT COUNT(*) AS count FROM organizations WHERE canonical_name = ?",
+      )
+        .bind("경합 조직")
+        .first<{ count: number }>()
+    )?.count,
+  ).toBe(1);
+  expect(
+    (
+      await env.DB.prepare(
+        "SELECT COUNT(*) AS count FROM project_organizations WHERE project_id = ?",
+      )
+        .bind(project.id)
+        .first<{ count: number }>()
+    )?.count,
+  ).toBe(1);
+});
+
 it("creates and links a new organization atomically, then deletes a no-history link", async () => {
   const operator = await seedOperator();
   const project = await seedProject(operator);
@@ -95,29 +278,77 @@ it("creates and links a new organization atomically, then deletes a no-history l
     `/api/v1/projects/${project.id}/organizations`,
     {
       method: "POST",
-      body: JSON.stringify({ newOrganizationName: "신규 조직" }),
+      body: JSON.stringify({
+        newOrganizationName: "신규 조직",
+        expectedProjectRevision: project.revision,
+      }),
     },
   );
   expect(created.status).toBe(201);
-  const membership = await created.json<{ organizationId: string }>();
+  const membership = await created.json<{
+    organization: { organizationId: string };
+    projectRevision: number;
+  }>();
   const disabled = await authedRequest(
     operator,
-    `/api/v1/projects/${project.id}/organizations/${membership.organizationId}`,
-    { method: "PATCH", body: JSON.stringify({ isActive: false }) },
+    `/api/v1/projects/${project.id}/organizations/${membership.organization.organizationId}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        isActive: false,
+        expectedProjectRevision: membership.projectRevision,
+      }),
+    },
   );
   expect(await disabled.json()).toMatchObject({
-    isActive: false,
-    removed: false,
+    organization: { isActive: false },
+    projectRevision: membership.projectRevision + 1,
   });
   expect(
     (
       await env.DB.prepare(
         "SELECT COUNT(*) AS count FROM project_organizations WHERE project_id=? AND organization_id=?",
       )
-        .bind(project.id, membership.organizationId)
+        .bind(project.id, membership.organization.organizationId)
         .first<{ count: number }>()
     )?.count,
   ).toBe(1);
+  const audits = (
+    await env.DB.prepare(
+      `SELECT action, entity_type, entity_id, details_json FROM audit_logs
+       WHERE action IN ('ORGANIZATION_CREATED', 'PROJECT_ORGANIZATION_ADDED')
+       ORDER BY rowid`,
+    ).all<{
+      action: string;
+      entity_type: string;
+      entity_id: string;
+      details_json: string;
+    }>()
+  ).results.map((audit) => ({
+    action: audit.action,
+    entityType: audit.entity_type,
+    entityId: audit.entity_id,
+    details: JSON.parse(audit.details_json),
+  }));
+  expect(audits).toEqual([
+    {
+      action: "ORGANIZATION_CREATED",
+      entityType: "ORGANIZATION",
+      entityId: membership.organization.organizationId,
+      details: {
+        organizationId: membership.organization.organizationId,
+      },
+    },
+    {
+      action: "PROJECT_ORGANIZATION_ADDED",
+      entityType: "PROJECT_ORGANIZATION",
+      entityId: `${project.id}:${membership.organization.organizationId}`,
+      details: {
+        projectId: project.id,
+        organizationId: membership.organization.organizationId,
+      },
+    },
+  ]);
 });
 
 it("treats membership audit rows as history and deletes only a truly audit-free fixture", async () => {
@@ -125,7 +356,12 @@ it("treats membership audit rows as history and deletes only a truly audit-free 
   const audited = await seedOrganization("org-audited", "감사 조직");
   const legacy = await seedOrganization("org-legacy", "수동 조직");
   const project = await seedProject(operator);
-  await linkProjectOrganization(operator, project.id, audited.id);
+  const linked = await linkProjectOrganization(
+    operator,
+    project.id,
+    audited.id,
+    project.revision,
+  );
   await env.DB.prepare(`INSERT INTO project_organizations
     (project_id, organization_id, is_active, added_at, added_by, updated_by)
     VALUES (?, ?, 1, ?, ?, ?)`)
@@ -154,15 +390,34 @@ it("treats membership audit rows as history and deletes only a truly audit-free 
   const auditedDisabled = await authedRequest(
     operator,
     `/api/v1/projects/${project.id}/organizations/${audited.id}`,
-    { method: "PATCH", body: JSON.stringify({ isActive: false }) },
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        isActive: false,
+        expectedProjectRevision: linked.projectRevision,
+      }),
+    },
   );
-  expect(await auditedDisabled.json()).toMatchObject({ removed: false });
+  const auditedDisabledBody = await auditedDisabled.json<{
+    projectRevision: number;
+  }>();
+  expect(auditedDisabledBody).toMatchObject({
+    organization: { isActive: false },
+  });
   const legacyDisabled = await authedRequest(
     operator,
     `/api/v1/projects/${project.id}/organizations/${legacy.id}`,
-    { method: "PATCH", body: JSON.stringify({ isActive: false }) },
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        isActive: false,
+        expectedProjectRevision: auditedDisabledBody.projectRevision,
+      }),
+    },
   );
-  expect(await legacyDisabled.json()).toMatchObject({ removed: true });
+  expect(await legacyDisabled.json()).toMatchObject({
+    organization: { isActive: false },
+  });
   expect(
     (
       await env.DB.prepare(
@@ -223,9 +478,17 @@ it("does not treat LIKE-wildcard lookalike audit actions as membership history",
   const disabled = await authedRequest(
     operator,
     `/api/v1/projects/${project.id}/organizations/${organization.id}`,
-    { method: "PATCH", body: JSON.stringify({ isActive: false }) },
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        isActive: false,
+        expectedProjectRevision: project.revision,
+      }),
+    },
   );
-  expect(await disabled.json()).toMatchObject({ removed: true });
+  expect(await disabled.json()).toMatchObject({
+    organization: { isActive: false },
+  });
   expect(
     (
       await env.DB.prepare(
@@ -310,7 +573,13 @@ it("globally deactivates an organization with audit and blocks only new usage", 
   const blockedLink = await authedRequest(
     fixture.operator,
     `/api/v1/projects/${newProject.id}/organizations`,
-    { method: "POST", body: JSON.stringify({ organizationId: "org-1" }) },
+    {
+      method: "POST",
+      body: JSON.stringify({
+        organizationId: "org-1",
+        expectedProjectRevision: newProject.revision,
+      }),
+    },
   );
   expect(blockedLink.status).toBe(409);
 
@@ -354,6 +623,7 @@ it("rejects an ambiguous organization link request", async () => {
       body: JSON.stringify({
         organizationId: organization.id,
         newOrganizationName: "모호한 조직",
+        expectedProjectRevision: project.revision,
       }),
     },
   );
@@ -374,7 +644,10 @@ it("rolls back a new organization and membership when audit insertion fails", as
       `/api/v1/projects/${project.id}/organizations`,
       {
         method: "POST",
-        body: JSON.stringify({ newOrganizationName: "롤백 조직" }),
+        body: JSON.stringify({
+          newOrganizationName: "롤백 조직",
+          expectedProjectRevision: project.revision,
+        }),
       },
     );
   } finally {
@@ -388,6 +661,18 @@ it("rolls back a new organization and membership when audit insertion fails", as
       await env.DB.prepare(
         `SELECT COUNT(*) AS count FROM organizations
          WHERE canonical_name = '롤백 조직'`,
+      ).first<{ count: number }>()
+    )?.count,
+  ).toBe(0);
+  expect(
+    await env.DB.prepare("SELECT revision FROM projects WHERE id = ?")
+      .bind(project.id)
+      .first<{ revision: number }>(),
+  ).toEqual({ revision: project.revision });
+  expect(
+    (
+      await env.DB.prepare(
+        "SELECT COUNT(*) AS count FROM audit_logs WHERE action IN ('ORGANIZATION_CREATED', 'PROJECT_ORGANIZATION_ADDED')",
       ).first<{ count: number }>()
     )?.count,
   ).toBe(0);
@@ -425,11 +710,16 @@ it("preserves a historical link and scopes an organization manager to linked pro
   const disabled = await authedRequest(
     operator,
     `/api/v1/projects/${linked.id}/organizations/${organization.id}`,
-    { method: "PATCH", body: JSON.stringify({ isActive: false }) },
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        isActive: false,
+        expectedProjectRevision: linked.revision,
+      }),
+    },
   );
   expect(await disabled.json()).toMatchObject({
-    isActive: false,
-    removed: false,
+    organization: { isActive: false },
   });
   expect(
     await (
@@ -473,7 +763,10 @@ it("preserves a historical link and scopes an organization manager to linked pro
         `/api/v1/projects/${linked.id}/organizations`,
         {
           method: "POST",
-          body: JSON.stringify({ organizationId: organization.id }),
+          body: JSON.stringify({
+            organizationId: organization.id,
+            expectedProjectRevision: linked.revision + 1,
+          }),
         },
       )
     ).status,
@@ -484,7 +777,12 @@ it("reports global rename impact without rewriting a roster snapshot", async () 
   const operator = await seedOperator();
   const organization = await seedOrganization();
   const project = await seedProject(operator);
-  await linkProjectOrganization(operator, project.id, organization.id);
+  await linkProjectOrganization(
+    operator,
+    project.id,
+    organization.id,
+    project.revision,
+  );
   await seedRosterSnapshot(
     project.id,
     organization.id,
@@ -522,8 +820,18 @@ it("rejects organization membership mutations for closed and expired projects", 
   const second = await seedOrganization("org-expired", "만료 조직");
   const closed = await seedProject(operator);
   const expired = await seedProject(operator);
-  await linkProjectOrganization(operator, closed.id, first.id);
-  await linkProjectOrganization(operator, expired.id, second.id);
+  const closedLink = await linkProjectOrganization(
+    operator,
+    closed.id,
+    first.id,
+    closed.revision,
+  );
+  const expiredLink = await linkProjectOrganization(
+    operator,
+    expired.id,
+    second.id,
+    expired.revision,
+  );
   await env.DB.prepare(
     "UPDATE projects SET status='CLOSED', closed_at=?, close_reason='MANUAL' WHERE id=?",
   )
@@ -533,16 +841,16 @@ it("rejects organization membership mutations for closed and expired projects", 
     .bind(expired.id)
     .run();
 
-  for (const [projectId, organizationId] of [
-    [closed.id, first.id],
-    [expired.id, second.id],
+  for (const [projectId, organizationId, expectedProjectRevision] of [
+    [closed.id, first.id, closedLink.projectRevision],
+    [expired.id, second.id, expiredLink.projectRevision],
   ]) {
     const add = await authedRequest(
       operator,
       `/api/v1/projects/${projectId}/organizations`,
       {
         method: "POST",
-        body: JSON.stringify({ organizationId }),
+        body: JSON.stringify({ organizationId, expectedProjectRevision }),
       },
     );
     expect(add.status).toBe(409);
@@ -550,7 +858,13 @@ it("rejects organization membership mutations for closed and expired projects", 
     const disable = await authedRequest(
       operator,
       `/api/v1/projects/${projectId}/organizations/${organizationId}`,
-      { method: "PATCH", body: JSON.stringify({ isActive: false }) },
+      {
+        method: "PATCH",
+        body: JSON.stringify({
+          isActive: false,
+          expectedProjectRevision,
+        }),
+      },
     );
     expect(disable.status).toBe(409);
     expect(await disable.json()).toMatchObject({ code: "PROJECT_CLOSED" });
@@ -561,16 +875,18 @@ async function linkProjectOrganization(
   operator: Awaited<ReturnType<typeof seedOperator>>,
   projectId: string,
   organizationId: string,
+  expectedProjectRevision: number,
 ) {
   const response = await authedRequest(
     operator,
     `/api/v1/projects/${projectId}/organizations`,
     {
       method: "POST",
-      body: JSON.stringify({ organizationId }),
+      body: JSON.stringify({ organizationId, expectedProjectRevision }),
     },
   );
   expect(response.status).toBe(201);
+  return response.json<{ projectRevision: number }>();
 }
 
 async function seedRosterSnapshot(

@@ -42,7 +42,8 @@ projectOrganizationRoutes.post(
       c.req.param("projectId"),
       input,
     );
-    return c.json(result.organization, result.created ? 201 : 200);
+    const { created, ...mutation } = result;
+    return c.json(mutation, created ? 201 : 200);
   },
 );
 
@@ -60,7 +61,7 @@ projectOrganizationRoutes.patch(
         actor,
         c.req.param("projectId"),
         c.req.param("organizationId"),
-        input.isActive,
+        input,
       ),
     );
   },

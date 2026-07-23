@@ -324,9 +324,18 @@ it("preserves historical roster operations when a project membership becomes ina
   const deactivated = await authedRequest(
     fixture.operator,
     `/api/v1/projects/${fixture.project.id}/organizations/org-1`,
-    { method: "PATCH", body: JSON.stringify({ isActive: false }) },
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        isActive: false,
+        expectedProjectRevision: entry.projectRevision,
+      }),
+    },
   );
   expect(deactivated.status).toBe(200);
+  const deactivatedBody = await deactivated.json<{
+    projectRevision: number;
+  }>();
 
   const cancelled = await authedRequest(
     fixture.operator,
@@ -335,7 +344,7 @@ it("preserves historical roster operations when a project membership becomes ina
       method: "PATCH",
       body: JSON.stringify({
         status: "CANCELLED",
-        expectedRevision: entry.projectRevision,
+        expectedRevision: deactivatedBody.projectRevision,
         expectedEntryRevision: entry.revision,
       }),
     },
@@ -412,11 +421,20 @@ it("makes an inactive membership read-only for managers while operators can canc
     revision: number;
     projectRevision: number;
   }>();
-  await authedRequest(
+  const deactivated = await authedRequest(
     fixture.operator,
     `/api/v1/projects/${fixture.project.id}/organizations/org-1`,
-    { method: "PATCH", body: JSON.stringify({ isActive: false }) },
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        isActive: false,
+        expectedProjectRevision: entry.projectRevision,
+      }),
+    },
   );
+  const deactivatedBody = await deactivated.json<{
+    projectRevision: number;
+  }>();
   const manager = await seedManager("org-1");
   const managerCancel = await authedRequest(
     manager,
@@ -425,7 +443,7 @@ it("makes an inactive membership read-only for managers while operators can canc
       method: "PATCH",
       body: JSON.stringify({
         status: "CANCELLED",
-        expectedRevision: entry.projectRevision,
+        expectedRevision: deactivatedBody.projectRevision,
         expectedEntryRevision: entry.revision,
       }),
     },
@@ -439,7 +457,7 @@ it("makes an inactive membership read-only for managers while operators can canc
       method: "PATCH",
       body: JSON.stringify({
         status: "CANCELLED",
-        expectedRevision: entry.projectRevision,
+        expectedRevision: deactivatedBody.projectRevision,
         expectedEntryRevision: entry.revision,
       }),
     },
@@ -504,14 +522,18 @@ it("atomically refreshes a reused participant only for a new project and preserv
   const targetProject = await seedProject(fixture.operator, {
     name: "새 프로젝트",
   });
-  await authedRequest(
+  const linkedResponse = await authedRequest(
     fixture.operator,
     `/api/v1/projects/${targetProject.id}/organizations`,
     {
       method: "POST",
-      body: JSON.stringify({ organizationId: targetOrganization.id }),
+      body: JSON.stringify({
+        organizationId: targetOrganization.id,
+        expectedProjectRevision: targetProject.revision,
+      }),
     },
   );
+  const linked = await linkedResponse.json<{ projectRevision: number }>();
   const pre = await authedRequest(
     fixture.operator,
     `/api/v1/projects/${targetProject.id}/transition`,
@@ -519,7 +541,7 @@ it("atomically refreshes a reused participant only for a new project and preserv
       method: "POST",
       body: JSON.stringify({
         targetStatus: "PRE_REGISTRATION",
-        expectedRevision: targetProject.revision,
+        expectedRevision: linked.projectRevision,
       }),
     },
   );
@@ -575,14 +597,20 @@ it("atomically refreshes a reused participant only for a new project and preserv
   const staleProject = await seedProject(fixture.operator, {
     name: "stale 프로젝트",
   });
-  await authedRequest(
+  const staleLinkedResponse = await authedRequest(
     fixture.operator,
     `/api/v1/projects/${staleProject.id}/organizations`,
     {
       method: "POST",
-      body: JSON.stringify({ organizationId: targetOrganization.id }),
+      body: JSON.stringify({
+        organizationId: targetOrganization.id,
+        expectedProjectRevision: staleProject.revision,
+      }),
     },
   );
+  const staleLinked = await staleLinkedResponse.json<{
+    projectRevision: number;
+  }>();
   const stalePre = await authedRequest(
     fixture.operator,
     `/api/v1/projects/${staleProject.id}/transition`,
@@ -590,7 +618,7 @@ it("atomically refreshes a reused participant only for a new project and preserv
       method: "POST",
       body: JSON.stringify({
         targetStatus: "PRE_REGISTRATION",
-        expectedRevision: 0,
+        expectedRevision: staleLinked.projectRevision,
       }),
     },
   );
@@ -897,16 +925,22 @@ async function setupManagerReuseProject() {
   const target = await seedProject(fixture.operator, {
     name: "manager reuse 프로젝트",
   });
+  let projectRevision = target.revision;
   for (const organizationId of ["org-1", "org-2"]) {
     const linked = await authedRequest(
       fixture.operator,
       `/api/v1/projects/${target.id}/organizations`,
       {
         method: "POST",
-        body: JSON.stringify({ organizationId }),
+        body: JSON.stringify({
+          organizationId,
+          expectedProjectRevision: projectRevision,
+        }),
       },
     );
     expect(linked.status).toBe(201);
+    projectRevision = (await linked.json<{ projectRevision: number }>())
+      .projectRevision;
   }
   const transitioned = await authedRequest(
     fixture.operator,
@@ -915,7 +949,7 @@ async function setupManagerReuseProject() {
       method: "POST",
       body: JSON.stringify({
         targetStatus: "PRE_REGISTRATION",
-        expectedRevision: target.revision,
+        expectedRevision: projectRevision,
       }),
     },
   );

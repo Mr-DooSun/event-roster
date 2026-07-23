@@ -599,11 +599,20 @@ it("rejects imports for an inactive project organization membership", async () =
     },
   );
   const entry = await added.json<{ projectRevision: number }>();
-  await authedRequest(
+  const deactivated = await authedRequest(
     fixture.operator,
     `/api/v1/projects/${fixture.project.id}/organizations/org-1`,
-    { method: "PATCH", body: JSON.stringify({ isActive: false }) },
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        isActive: false,
+        expectedProjectRevision: entry.projectRevision,
+      }),
+    },
   );
+  const deactivatedBody = await deactivated.json<{
+    projectRevision: number;
+  }>();
   const response = await authedRequest(
     fixture.operator,
     `/api/v1/projects/${fixture.project.id}/imports/commit`,
@@ -611,7 +620,7 @@ it("rejects imports for an inactive project organization membership", async () =
       method: "POST",
       body: JSON.stringify({
         rows: [{ rowNumber: 2, name: "차단 참가자", organizationName: "1팀" }],
-        expectedProjectRevision: entry.projectRevision,
+        expectedProjectRevision: deactivatedBody.projectRevision,
       }),
     },
   );

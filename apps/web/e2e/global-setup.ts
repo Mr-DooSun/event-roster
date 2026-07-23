@@ -80,18 +80,24 @@ export default async function globalSetup() {
     id: string;
     revision: number;
   };
-  await ok(
-    await api.post(`/api/v1/projects/${project.id}/organizations`, {
+  const linkResponse = await api.post(
+    `/api/v1/projects/${project.id}/organizations`,
+    {
       headers: authHeaders(operatorAuth),
-      data: { organizationId: fixture.organizationId },
-    }),
+      data: {
+        organizationId: fixture.organizationId,
+        expectedProjectRevision: project.revision,
+      },
+    },
   );
+  await ok(linkResponse);
+  const linked = (await linkResponse.json()) as { projectRevision: number };
   await ok(
     await api.post(`/api/v1/projects/${project.id}/transition`, {
       headers: authHeaders(operatorAuth),
       data: {
         targetStatus: "PRE_REGISTRATION",
-        expectedRevision: project.revision,
+        expectedRevision: linked.projectRevision,
       },
     }),
   );
@@ -102,7 +108,6 @@ export default async function globalSetup() {
       loginId: fixture.temporaryUser.loginId,
       displayName: fixture.temporaryUser.displayName,
       role: "OPERATOR",
-      organizationIds: [],
     },
   });
   await ok(temporaryUser);

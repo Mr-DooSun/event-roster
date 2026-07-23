@@ -1,6 +1,8 @@
 import type {
   AddProjectOrganization,
   ProjectOrganization,
+  ProjectOrganizationMutationResult,
+  ProjectOrganizationPatch,
 } from "@event-roster/contracts";
 import { DomainError, toKstDate } from "@event-roster/domain";
 import { runGuardedAtomic } from "../db/atomic";
@@ -42,10 +44,24 @@ export async function addProjectOrganization(
   projectId: string,
   input: AddProjectOrganization,
   now = new Date(),
-): Promise<{ organization: ProjectOrganization; created: boolean }> {
-  await requireMutableProject(env, projectId, now);
+): Promise<ProjectOrganizationMutationResult & { created: boolean }> {
+  const project = await requireMutableProject(env, projectId, now);
   const timestamp = now.toISOString();
   const today = toKstDate(now);
+  const newOrganization = "newOrganizationName" in input;
+  const canonicalName = newOrganization
+    ? canonicalizeOrganizationName(input.newOrganizationName)
+    : null;
+  if (canonicalName !== null) {
+    const existing = await findOrganizationByCanonicalName(
+      env.DB,
+      canonicalName,
+    );
+    if (existing) throwOrganizationNameConflict(existing);
+  }
+  if (project.revision !== input.expectedProjectRevision) {
+    throw new DomainError("STALE_REVISION");
+  }
   const organizationId =
     "organizationId" in input ? input.organizationId : crypto.randomUUID();
   const current = await findProjectOrganization(
@@ -63,10 +79,10 @@ export async function addProjectOrganization(
     ? "PROJECT_ORGANIZATION_ADDED"
     : "PROJECT_ORGANIZATION_REACTIVATED";
   const guardId = crypto.randomUUID();
-  const newOrganization = "newOrganizationName" in input;
   const operationPredicate = newOrganization
     ? `EXISTS (
-         SELECT 1 FROM projects WHERE id = ? AND status <> 'CLOSED'
+         SELECT 1 FROM projects WHERE id = ? AND revision = ?
+           AND status <> 'CLOSED'
            AND (end_date IS NULL OR end_date >= ?)
        ) AND NOT EXISTS (
          SELECT 1 FROM organizations WHERE canonical_name = ?
@@ -75,7 +91,8 @@ export async function addProjectOrganization(
          WHERE project_id = ? AND organization_id = ?
        )`
     : `EXISTS (
-         SELECT 1 FROM projects WHERE id = ? AND status <> 'CLOSED'
+         SELECT 1 FROM projects WHERE id = ? AND revision = ?
+           AND status <> 'CLOSED'
            AND (end_date IS NULL OR end_date >= ?)
        ) AND EXISTS (
          SELECT 1 FROM organizations WHERE id = ? AND is_active = 1
@@ -83,17 +100,26 @@ export async function addProjectOrganization(
          SELECT 1 FROM project_organizations
          WHERE project_id = ? AND organization_id = ? AND is_active = 1
        )`;
-  const operationBindings = newOrganization
-    ? [
-        projectId,
-        today,
-        canonicalizeOrganizationName(input.newOrganizationName),
-        projectId,
-        organizationId,
-      ]
-    : [projectId, today, organizationId, projectId, organizationId];
+  const operationBindings =
+    "newOrganizationName" in input
+      ? [
+          projectId,
+          input.expectedProjectRevision,
+          today,
+          canonicalizeOrganizationName(input.newOrganizationName),
+          projectId,
+          organizationId,
+        ]
+      : [
+          projectId,
+          input.expectedProjectRevision,
+          today,
+          organizationId,
+          projectId,
+          organizationId,
+        ];
   const statements: D1PreparedStatement[] = [];
-  if (newOrganization) {
+  if ("newOrganizationName" in input) {
     statements.push(
       env.DB.prepare(
         `INSERT INTO organizations
@@ -123,6 +149,23 @@ export async function addProjectOrganization(
       actor.session.user.id,
       actor.session.user.id,
     ),
+    env.DB.prepare(
+      `UPDATE projects
+       SET revision = revision + 1, updated_at = ?
+       WHERE id = ? AND revision = ?`,
+    ).bind(timestamp, projectId, input.expectedProjectRevision),
+  );
+  if (newOrganization) {
+    statements.push(
+      organizationCreatedAuditStatement(
+        env.DB,
+        actor.session.user.id,
+        organizationId,
+        timestamp,
+      ),
+    );
+  }
+  statements.push(
     membershipAuditStatement(
       env.DB,
       actor.session.user.id,
@@ -147,8 +190,14 @@ export async function addProjectOrganization(
       failureCode: "CONFLICT",
     });
   } catch (error) {
-    await translateExpiredMutationFailure(env, projectId, now, error);
-    throwConstraintConflict(error);
+    await translateMutationFailure(
+      env,
+      projectId,
+      input.expectedProjectRevision,
+      now,
+      error,
+      canonicalName,
+    );
   }
   const organization = await findProjectOrganization(
     env.DB,
@@ -156,7 +205,11 @@ export async function addProjectOrganization(
     organizationId,
   );
   if (!organization) throw new DomainError("NOT_FOUND");
-  return { organization, created };
+  return {
+    organization,
+    projectRevision: input.expectedProjectRevision + 1,
+    created,
+  };
 }
 
 export async function setProjectOrganizationActive(
@@ -164,29 +217,30 @@ export async function setProjectOrganizationActive(
   actor: Actor,
   projectId: string,
   organizationId: string,
-  isActive: boolean,
+  input: ProjectOrganizationPatch,
   now = new Date(),
-): Promise<{
-  organizationId: string;
-  isActive: boolean;
-  removed: boolean;
-}> {
-  if (isActive) {
+): Promise<ProjectOrganizationMutationResult> {
+  if (input.isActive) {
     const result = await addProjectOrganization(
       env,
       actor,
       projectId,
-      { organizationId },
+      {
+        organizationId,
+        expectedProjectRevision: input.expectedProjectRevision,
+      },
       now,
     );
     return {
-      organizationId,
-      isActive: result.organization.isActive,
-      removed: false,
+      organization: result.organization,
+      projectRevision: result.projectRevision,
     };
   }
 
-  await requireMutableProject(env, projectId, now);
+  const project = await requireMutableProject(env, projectId, now);
+  if (project.revision !== input.expectedProjectRevision) {
+    throw new DomainError("STALE_REVISION");
+  }
   const current = await findProjectOrganization(
     env.DB,
     projectId,
@@ -234,15 +288,27 @@ export async function setProjectOrganizationActive(
         guardId,
         actor,
         `EXISTS (
-           SELECT 1 FROM projects WHERE id = ? AND status <> 'CLOSED'
+           SELECT 1 FROM projects WHERE id = ? AND revision = ?
+             AND status <> 'CLOSED'
              AND (end_date IS NULL OR end_date >= ?)
          ) AND EXISTS (
            SELECT 1 FROM project_organizations WHERE ${membershipPredicate}
          )`,
-        [projectId, today, projectId, organizationId],
+        [
+          projectId,
+          input.expectedProjectRevision,
+          today,
+          projectId,
+          organizationId,
+        ],
       ),
       statements: [
         mutation,
+        env.DB.prepare(
+          `UPDATE projects
+           SET revision = revision + 1, updated_at = ?
+           WHERE id = ? AND revision = ?`,
+        ).bind(timestamp, projectId, input.expectedProjectRevision),
         membershipAuditStatement(
           env.DB,
           actor.session.user.id,
@@ -255,13 +321,26 @@ export async function setProjectOrganizationActive(
       failureCode: "CONFLICT",
     });
   } catch (error) {
-    await translateExpiredMutationFailure(env, projectId, now, error);
-    throw error;
+    await translateMutationFailure(
+      env,
+      projectId,
+      input.expectedProjectRevision,
+      now,
+      error,
+    );
   }
-  return {
+  const organization = (await findProjectOrganization(
+    env.DB,
+    projectId,
     organizationId,
+  )) ?? {
+    ...current,
     isActive: false,
-    removed: !current.hasHistory,
+    activeProjectCount: Math.max(0, current.activeProjectCount - 1),
+  };
+  return {
+    organization,
+    projectRevision: input.expectedProjectRevision + 1,
   };
 }
 
@@ -286,23 +365,57 @@ async function requireMutableProject(
   env: Env,
   projectId: string,
   now: Date,
-): Promise<void> {
+): Promise<NonNullable<Awaited<ReturnType<typeof findProject>>>> {
   await closeExpiredProject(env, projectId, now);
   const project = await findProject(env.DB, projectId);
   if (!project) throw new DomainError("NOT_FOUND");
   if (project.status === "CLOSED") throw new DomainError("PROJECT_CLOSED");
+  return project;
 }
 
-async function translateExpiredMutationFailure(
+async function translateMutationFailure(
   env: Env,
   projectId: string,
+  expectedProjectRevision: number,
   now: Date,
   error: unknown,
-): Promise<void> {
-  if (!(error instanceof DomainError)) return;
+  canonicalName?: string | null,
+): Promise<never> {
   await closeExpiredProject(env, projectId, now);
   const project = await findProject(env.DB, projectId);
   if (project?.status === "CLOSED") throw new DomainError("PROJECT_CLOSED");
+  if (canonicalName) {
+    const existing = await findOrganizationByCanonicalName(
+      env.DB,
+      canonicalName,
+    );
+    if (existing) throwOrganizationNameConflict(existing);
+  }
+  if (project && project.revision !== expectedProjectRevision) {
+    throw new DomainError("STALE_REVISION");
+  }
+  throwConstraintConflict(error);
+}
+
+async function findOrganizationByCanonicalName(
+  db: D1Database,
+  canonicalName: string,
+): Promise<{ id: string; name: string } | null> {
+  return db
+    .prepare("SELECT id, name FROM organizations WHERE canonical_name = ?")
+    .bind(canonicalName)
+    .first<{ id: string; name: string }>();
+}
+
+function throwOrganizationNameConflict(organization: {
+  id: string;
+  name: string;
+}): never {
+  throw new DomainError("CONFLICT", {
+    organizationId: organization.id,
+    organizationName: organization.name,
+    reason: "ORGANIZATION_NAME_EXISTS",
+  });
 }
 
 async function hasPriorMembershipAudit(
@@ -343,6 +456,27 @@ function membershipAuditStatement(
       membershipEntityId(projectId, organizationId),
       timestamp,
       JSON.stringify({ projectId, organizationId }),
+    );
+}
+
+function organizationCreatedAuditStatement(
+  db: D1Database,
+  actorId: string,
+  organizationId: string,
+  timestamp: string,
+): D1PreparedStatement {
+  return db
+    .prepare(
+      `INSERT INTO audit_logs
+       (id, actor_user_id, action, entity_type, entity_id, occurred_at, details_json)
+       VALUES (?, ?, 'ORGANIZATION_CREATED', 'ORGANIZATION', ?, ?, ?)`,
+    )
+    .bind(
+      crypto.randomUUID(),
+      actorId,
+      organizationId,
+      timestamp,
+      JSON.stringify({ organizationId }),
     );
 }
 

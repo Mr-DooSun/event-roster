@@ -7,6 +7,10 @@ interface ProjectOrganizationRow {
   master_is_active: number;
   active_project_count: number;
   has_history: number;
+  primary_user_id: string | null;
+  primary_display_name: string | null;
+  manager_count: number;
+  roster_count: number;
 }
 
 const SELECT_PROJECT_ORGANIZATION = `SELECT
@@ -14,6 +18,23 @@ const SELECT_PROJECT_ORGANIZATION = `SELECT
   o.name,
   po.is_active,
   o.is_active AS master_is_active,
+  (SELECT u.id FROM user_organizations uo
+   JOIN users u ON u.id = uo.user_id
+   WHERE uo.organization_id = po.organization_id
+     AND uo.assignment_role = 'PRIMARY_LEADER'
+   LIMIT 1) AS primary_user_id,
+  (SELECT u.display_name FROM user_organizations uo
+   JOIN users u ON u.id = uo.user_id
+   WHERE uo.organization_id = po.organization_id
+     AND uo.assignment_role = 'PRIMARY_LEADER'
+   LIMIT 1) AS primary_display_name,
+  (SELECT COUNT(*) FROM user_organizations uo
+   WHERE uo.organization_id = po.organization_id
+     AND uo.assignment_role = 'MANAGER') AS manager_count,
+  (SELECT COUNT(*) FROM project_roster_entries roster
+   WHERE roster.project_id = po.project_id
+     AND roster.organization_id = po.organization_id
+     AND roster.status = 'ACTIVE') AS roster_count,
   (SELECT COUNT(*) FROM project_organizations active
    WHERE active.organization_id = po.organization_id
      AND active.is_active = 1) AS active_project_count,
@@ -100,5 +121,14 @@ function mapProjectOrganization(
     masterIsActive: row.master_is_active === 1,
     activeProjectCount: row.active_project_count,
     hasHistory: row.has_history === 1,
+    primaryLeader:
+      row.primary_user_id === null || row.primary_display_name === null
+        ? null
+        : {
+            userId: row.primary_user_id,
+            displayName: row.primary_display_name,
+          },
+    managerCount: row.manager_count,
+    rosterCount: row.roster_count,
   };
 }

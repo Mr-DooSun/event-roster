@@ -18,14 +18,21 @@ export async function setupPreRegistration(): Promise<RosterFixture> {
   const operator = await seedOperator();
   const organization = await seedOrganization("org-1", "1팀");
   const project = await seedProject(operator, { name: "테스트 프로젝트" });
-  await authedRequest(
+  const linkResponse = await authedRequest(
     operator,
     `/api/v1/projects/${project.id}/organizations`,
     {
       method: "POST",
-      body: JSON.stringify({ organizationId: organization.id }),
+      body: JSON.stringify({
+        organizationId: organization.id,
+        expectedProjectRevision: project.revision,
+      }),
     },
   );
+  if (!linkResponse.ok) {
+    throw new Error(`link organization failed: ${linkResponse.status}`);
+  }
+  const linked = await linkResponse.json<{ projectRevision: number }>();
   const now = "2026-07-21T00:00:00.000Z";
   await env.DB.batch([
     env.DB.prepare(
@@ -46,7 +53,7 @@ export async function setupPreRegistration(): Promise<RosterFixture> {
       method: "POST",
       body: JSON.stringify({
         targetStatus: "PRE_REGISTRATION",
-        expectedRevision: project.revision,
+        expectedRevision: linked.projectRevision,
       }),
     },
   );

@@ -31,21 +31,25 @@ test("imports 130 rows and downloads two-sheet Excel", async ({ page }) => {
   });
   expect(created.ok()).toBe(true);
   const project = (await created.json()) as { id: string; revision: number };
-  expect(
-    (
-      await api.post(`/api/v1/projects/${project.id}/organizations`, {
-        headers,
-        data: { organizationId: data.organizationId },
-      })
-    ).ok(),
-  ).toBe(true);
+  const linkedResponse = await api.post(
+    `/api/v1/projects/${project.id}/organizations`,
+    {
+      headers,
+      data: {
+        organizationId: data.organizationId,
+        expectedProjectRevision: project.revision,
+      },
+    },
+  );
+  expect(linkedResponse.ok()).toBe(true);
+  const linked = (await linkedResponse.json()) as { projectRevision: number };
   expect(
     (
       await api.post(`/api/v1/projects/${project.id}/transition`, {
         headers,
         data: {
           targetStatus: "PRE_REGISTRATION",
-          expectedRevision: project.revision,
+          expectedRevision: linked.projectRevision,
         },
       })
     ).ok(),
