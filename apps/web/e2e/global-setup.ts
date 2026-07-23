@@ -8,8 +8,10 @@ interface Fixture {
   bootstrap: { loginId: string; displayName: string; password: string };
   operator: { loginId: string; displayName: string; password: string };
   temporaryUser: { loginId: string; displayName: string; password?: string };
+  organizationManager: { password: string };
   organizationId?: string;
   projectId?: string;
+  rosterProjectId?: string;
 }
 
 export default async function globalSetup() {
@@ -102,6 +104,45 @@ export default async function globalSetup() {
     }),
   );
   fixture.projectId = project.id;
+  await ok(
+    await api.post("/api/v1/projects", {
+      headers: authHeaders(operatorAuth),
+      data: { name: "E2E 비공개 프로젝트" },
+    }),
+  );
+  const rosterProjectResponse = await api.post("/api/v1/projects", {
+    headers: authHeaders(operatorAuth),
+    data: { name: "E2E 명단 프로젝트" },
+  });
+  await ok(rosterProjectResponse);
+  const rosterProject = (await rosterProjectResponse.json()) as {
+    id: string;
+    revision: number;
+  };
+  const rosterLinkResponse = await api.post(
+    `/api/v1/projects/${rosterProject.id}/organizations`,
+    {
+      headers: authHeaders(operatorAuth),
+      data: {
+        organizationId: fixture.organizationId,
+        expectedProjectRevision: rosterProject.revision,
+      },
+    },
+  );
+  await ok(rosterLinkResponse);
+  const rosterLink = (await rosterLinkResponse.json()) as {
+    projectRevision: number;
+  };
+  await ok(
+    await api.post(`/api/v1/projects/${rosterProject.id}/transition`, {
+      headers: authHeaders(operatorAuth),
+      data: {
+        targetStatus: "PRE_REGISTRATION",
+        expectedRevision: rosterLink.projectRevision,
+      },
+    }),
+  );
+  fixture.rosterProjectId = rosterProject.id;
   const temporaryUser = await api.post("/api/v1/users", {
     headers: authHeaders(operatorAuth),
     data: {

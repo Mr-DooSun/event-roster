@@ -69,7 +69,10 @@ it("preserves legacy project, roster, snapshot, import, audit, and organization 
     imports: await countMigrationRows("import_runs"),
   };
 
-  await applyD1Migrations(env.MIGRATION_DB, [projectModel, organizationLeadership]);
+  await applyD1Migrations(env.MIGRATION_DB, [
+    projectModel,
+    organizationLeadership,
+  ]);
 
   expect(
     await env.MIGRATION_DB.prepare(`SELECT assignment_role, assigned_by,

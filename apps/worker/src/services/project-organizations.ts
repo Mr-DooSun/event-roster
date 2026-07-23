@@ -7,6 +7,7 @@ import type {
 import { DomainError, toKstDate } from "@event-roster/domain";
 import { runGuardedAtomic } from "../db/atomic";
 import {
+  countActiveProjectOrganizations,
   findProjectOrganization,
   listActorProjectOrganizationIds,
   listProjectOrganizations,
@@ -337,7 +338,10 @@ export async function setProjectOrganizationActive(
   )) ?? {
     ...current,
     isActive: false,
-    activeProjectCount: Math.max(0, current.activeProjectCount - 1),
+    activeProjectCount: await countActiveProjectOrganizations(
+      env.DB,
+      organizationId,
+    ),
   };
   return {
     organization,

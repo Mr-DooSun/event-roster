@@ -286,21 +286,28 @@ it("writes exact sanitized audit rows for organization create, rename, and statu
   const body = await audit.json<{
     items: Array<{ action: string; details: Record<string, string> }>;
   }>();
-  expect(body.items.map((item) => item.action).sort()).toEqual([
-    "ORGANIZATION_CREATED",
-    "ORGANIZATION_DEACTIVATED",
-    "ORGANIZATION_REACTIVATED",
-    "ORGANIZATION_RENAMED",
-  ]);
-  for (const item of body.items) {
-    expect(Object.keys(item.details).sort()).toEqual(["after", "before"]);
-    expect(item.details).toEqual(
-      expect.objectContaining({
-        before: expect.any(String),
-        after: expect.any(String),
-      }),
-    );
-  }
+  expect(
+    Object.fromEntries(
+      body.items.map((item) => [item.action, item.details] as const),
+    ),
+  ).toEqual({
+    ORGANIZATION_CREATED: {
+      before: JSON.stringify({ name: null, isActive: null }),
+      after: JSON.stringify({ name: "감사 조직", isActive: true }),
+    },
+    ORGANIZATION_RENAMED: {
+      before: JSON.stringify({ name: "감사 조직", isActive: true }),
+      after: JSON.stringify({ name: "변경 조직", isActive: false }),
+    },
+    ORGANIZATION_DEACTIVATED: {
+      before: JSON.stringify({ name: "감사 조직", isActive: true }),
+      after: JSON.stringify({ name: "변경 조직", isActive: false }),
+    },
+    ORGANIZATION_REACTIVATED: {
+      before: JSON.stringify({ name: "변경 조직", isActive: false }),
+      after: JSON.stringify({ name: "변경 조직", isActive: true }),
+    },
+  });
   expect(JSON.stringify(body)).not.toMatch(
     /password|hash|token|csrf|recovery|ip/i,
   );

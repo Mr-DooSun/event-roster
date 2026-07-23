@@ -30,6 +30,11 @@ const PROJECT_STATUS_LABEL: Record<
   CLOSED: "종료",
 };
 
+interface AuditPaginationRequest {
+  cursor: string;
+  generation: number;
+}
+
 export function OrganizationDetailPage({
   organizationId,
 }: {
@@ -51,7 +56,7 @@ export function OrganizationDetailPage({
     returnFocus?: HTMLElement;
   } | null>(null);
   const auditGeneration = useRef(0);
-  const auditPaginationRequest = useRef<string | null>(null);
+  const auditPaginationRequest = useRef<AuditPaginationRequest | null>(null);
 
   const loadDetail = useCallback(async () => {
     try {
@@ -147,7 +152,8 @@ export function OrganizationDetailPage({
     if (!auditNextCursor || auditPaginationRequest.current) return;
     const cursor = auditNextCursor;
     const generation = auditGeneration.current;
-    auditPaginationRequest.current = cursor;
+    const request = { cursor, generation };
+    auditPaginationRequest.current = request;
     try {
       const page = await api.get<{
         items: AuditView[];
@@ -159,7 +165,7 @@ export function OrganizationDetailPage({
       );
       if (
         generation !== auditGeneration.current ||
-        auditPaginationRequest.current !== cursor
+        auditPaginationRequest.current !== request
       ) {
         return;
       }
@@ -167,11 +173,14 @@ export function OrganizationDetailPage({
       setAuditNextCursor(page.nextCursor);
       setAuditError(null);
     } catch {
-      if (generation === auditGeneration.current) {
+      if (
+        generation === auditGeneration.current &&
+        auditPaginationRequest.current === request
+      ) {
         setAuditError("변경 이력을 더 불러오지 못했습니다.");
       }
     } finally {
-      if (auditPaginationRequest.current === cursor) {
+      if (auditPaginationRequest.current === request) {
         auditPaginationRequest.current = null;
       }
     }

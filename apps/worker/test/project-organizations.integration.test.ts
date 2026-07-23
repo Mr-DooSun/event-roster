@@ -1,5 +1,8 @@
 import { env } from "cloudflare:workers";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import type { Env } from "../src/env";
+import { requireActor } from "../src/middleware/authentication";
+import { setProjectOrganizationActive } from "../src/services/project-organizations";
 import {
   authedRequest,
   seedManager,
@@ -433,6 +436,75 @@ it("treats membership audit rows as history and deletes only a truly audit-free 
     await authedRequest(manager, "/api/v1/projects")
   ).json<Array<{ id: string }>>();
   expect(projects.map((item) => item.id)).toContain(project.id);
+});
+
+it("requeries the active project count after deleting an audit-free membership", async () => {
+  const operator = await seedOperator();
+  const organization = await seedOrganization();
+  const targetProject = await seedProject(operator, { name: "삭제 대상" });
+  const concurrentProject = await seedProject(operator, { name: "동시 변경" });
+  const timestamp = "2026-07-21T00:00:00.000Z";
+  await env.DB.batch([
+    env.DB.prepare(`INSERT INTO project_organizations
+      (project_id, organization_id, is_active, added_at, added_by, updated_by)
+      VALUES (?, ?, 1, ?, ?, ?)`).bind(
+      targetProject.id,
+      organization.id,
+      timestamp,
+      operator.userId,
+      operator.userId,
+    ),
+    env.DB.prepare(`INSERT INTO project_organizations
+      (project_id, organization_id, is_active, added_at, added_by, updated_by)
+      VALUES (?, ?, 1, ?, ?, ?)`).bind(
+      concurrentProject.id,
+      organization.id,
+      timestamp,
+      operator.userId,
+      operator.userId,
+    ),
+  ]);
+  const actor = await requireActor(
+    new Request("https://event-roster.test", {
+      headers: {
+        Authorization: `Bearer ${operator.body.accessToken}`,
+      },
+    }),
+    env as Env,
+  );
+  let intercepted = false;
+  const raceDb = {
+    prepare: (query: string) => env.DB.prepare(query),
+    batch: async (statements: D1PreparedStatement[]) => {
+      const results = await env.DB.batch(statements);
+      if (!intercepted) {
+        intercepted = true;
+        await env.DB.prepare(`UPDATE project_organizations
+          SET is_active = 0
+          WHERE project_id = ? AND organization_id = ?`)
+          .bind(concurrentProject.id, organization.id)
+          .run();
+      }
+      return results;
+    },
+  } as D1Database;
+
+  const result = await setProjectOrganizationActive(
+    { ...(env as Env), DB: raceDb },
+    actor,
+    targetProject.id,
+    organization.id,
+    {
+      isActive: false,
+      expectedProjectRevision: targetProject.revision,
+    },
+  );
+
+  expect(result.organization).toMatchObject({
+    organizationId: organization.id,
+    isActive: false,
+    activeProjectCount: 0,
+  });
 });
 
 it("does not treat LIKE-wildcard lookalike audit actions as membership history", async () => {

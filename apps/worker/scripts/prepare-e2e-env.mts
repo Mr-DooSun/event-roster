@@ -46,6 +46,9 @@ writeFileSync(
         displayName: "E2E 운영자",
         password: `E2e-Full-${randomBytes(16).toString("base64url")}`,
       },
+      organizationManager: {
+        password: `E2e-Manager-${randomBytes(16).toString("base64url")}`,
+      },
       temporaryUser: {
         loginId: "e2e-temporary",
         displayName: "E2E 임시 사용자",

@@ -87,6 +87,21 @@ export async function findProjectOrganization(
   return row ? mapProjectOrganization(row) : null;
 }
 
+export async function countActiveProjectOrganizations(
+  db: D1Database,
+  organizationId: string,
+): Promise<number> {
+  const row = await db
+    .prepare(
+      `SELECT COUNT(*) AS count
+       FROM project_organizations
+       WHERE organization_id = ? AND is_active = 1`,
+    )
+    .bind(organizationId)
+    .first<{ count: number }>();
+  return row?.count ?? 0;
+}
+
 export async function listActorProjectOrganizationIds(
   db: D1Database,
   actorUserId: string,

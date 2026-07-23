@@ -1,5 +1,6 @@
 import "@testing-library/jest-dom/vitest";
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -508,6 +509,59 @@ it("prevents duplicate in-flight requests for the same audit cursor", async () =
   });
   expect(await screen.findByText("조직 담당자 지정")).toBeVisible();
   expect(screen.getAllByText("조직 담당자 지정")).toHaveLength(1);
+});
+
+it("does not let an old audit request clear a newer lock for the same cursor", async () => {
+  window.history.replaceState(null, "", "/organizations/org-1");
+  const oldPage = deferred<{
+    items: [];
+    nextCursor: string | null;
+  }>();
+  const newPage = deferred<{
+    items: [];
+    nextCursor: string | null;
+  }>();
+  let initialAuditReads = 0;
+  let paginationReads = 0;
+  mockApi.get.mockImplementation((path: string) => {
+    if (path === "/organizations/org-1") {
+      return Promise.resolve(organizationDetail());
+    }
+    if (path === "/organizations/org-1/audit?limit=50") {
+      initialAuditReads += 1;
+      return Promise.resolve({
+        items: [],
+        nextCursor: "shared-cursor",
+      });
+    }
+    if (path === "/organizations/org-1/audit?limit=50&cursor=shared-cursor") {
+      paginationReads += 1;
+      return paginationReads === 1 ? oldPage.promise : newPage.promise;
+    }
+    return Promise.resolve([]);
+  });
+  mockApi.patch.mockResolvedValue(organizationDetail());
+
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: "이력 더 보기" }));
+  await waitFor(() => expect(paginationReads).toBe(1));
+
+  fireEvent.change(screen.getByLabelText("조직 이름"), {
+    target: { value: "운영팀" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "이름 저장" }));
+  await waitFor(() => expect(initialAuditReads).toBe(2));
+  fireEvent.click(screen.getByRole("button", { name: "이력 더 보기" }));
+  await waitFor(() => expect(paginationReads).toBe(2));
+
+  await act(async () => {
+    oldPage.resolve({ items: [], nextCursor: null });
+    await oldPage.promise;
+  });
+  fireEvent.click(screen.getByRole("button", { name: "이력 더 보기" }));
+
+  expect(paginationReads).toBe(2);
+  newPage.resolve({ items: [], nextCursor: null });
 });
 
 it("keeps organization administration hidden from managers", async () => {

@@ -128,11 +128,7 @@ describe("initial D1 schema", () => {
          (user_id, organization_id, assignment_role, assigned_by, assigned_at)
          VALUES (?, ?, 'PRIMARY_LEADER', NULL, ?)`,
       )
-        .bind(
-          "manager-leader",
-          organizationId,
-          "2026-07-23T00:00:00.000Z",
-        )
+        .bind("manager-leader", organizationId, "2026-07-23T00:00:00.000Z")
         .run(),
     ).rejects.toThrow();
 

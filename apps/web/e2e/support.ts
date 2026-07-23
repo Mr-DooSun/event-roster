@@ -8,8 +8,10 @@ export interface E2eFixture {
   bootstrap: { loginId: string; displayName: string; password: string };
   operator: { loginId: string; displayName: string; password: string };
   temporaryUser: { loginId: string; displayName: string; password: string };
+  organizationManager: { password: string };
   organizationId: string;
   projectId: string;
+  rosterProjectId: string;
 }
 
 export function fixture() {

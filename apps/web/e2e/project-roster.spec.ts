@@ -6,21 +6,21 @@ test("operator moves a pre-registration project in progress and updates its rost
 }) => {
   const data = fixture();
   await login(page, data.operator.loginId, data.operator.password);
-  const summaryUrl = `${data.baseUrl}/api/v1/projects/${data.projectId}/summary`;
+  const summaryUrl = `${data.baseUrl}/api/v1/projects/${data.rosterProjectId}/summary`;
   const summaryResponsePromise = page.waitForResponse(
     (response) =>
       response.url() === summaryUrl && response.request().method() === "GET",
   );
-  await page.goto(`/projects/${data.projectId}`);
+  await page.goto(`/projects/${data.rosterProjectId}`);
   const summaryResponse = await summaryResponsePromise;
   expect(summaryResponse.url()).toBe(summaryUrl);
   expect(summaryResponse.ok()).toBe(true);
   expect(await summaryResponse.json()).toMatchObject({
-    projectId: data.projectId,
+    projectId: data.rosterProjectId,
     expectedTotal: 0,
   });
   await expect(
-    page.getByRole("heading", { name: "E2E 상반기 프로젝트" }),
+    page.getByRole("heading", { name: "E2E 명단 프로젝트" }),
   ).toBeVisible();
   await expect(page.getByRole("tab", { name: "개요" })).toBeVisible();
   await expect(page.getByRole("tab", { name: "조직" })).toBeVisible();
