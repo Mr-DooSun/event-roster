@@ -1,10 +1,14 @@
 import { describe, expect, it } from "vitest";
 import type { Project } from "../src";
 import {
+  AddProjectOrganizationSchema,
   CreateProjectRequestSchema,
   LoginIdSchema,
+  OrganizationManagerCreateRequestSchema,
   OrganizationPatchRequestSchema,
+  OrganizationPrimaryPatchRequestSchema,
   PasswordSchema,
+  ProjectOrganizationPatchSchema,
   RosterCreateRequestSchema,
   RosterSourceSchema,
   UpdateProjectRequestSchema,
@@ -40,6 +44,69 @@ describe("organization contracts", () => {
       isActive: false,
     });
     expect(OrganizationPatchRequestSchema.safeParse({}).success).toBe(false);
+  });
+
+  it("requires a project revision and exactly one organization source", () => {
+    expect(
+      AddProjectOrganizationSchema.parse({
+        organizationId: "org-1",
+        expectedProjectRevision: 4,
+      }),
+    ).toEqual({ organizationId: "org-1", expectedProjectRevision: 4 });
+    expect(
+      AddProjectOrganizationSchema.safeParse({
+        organizationId: "org-1",
+        newOrganizationName: "새 조직",
+        expectedProjectRevision: 4,
+      }).success,
+    ).toBe(false);
+    expect(
+      ProjectOrganizationPatchSchema.safeParse({ isActive: false }).success,
+    ).toBe(false);
+  });
+
+  it("distinguishes existing and newly provisioned organization managers", () => {
+    expect(
+      OrganizationManagerCreateRequestSchema.parse({
+        kind: "EXISTING",
+        userId: "user-1",
+        assignmentRole: "MANAGER",
+      }),
+    ).toEqual({
+      kind: "EXISTING",
+      userId: "user-1",
+      assignmentRole: "MANAGER",
+    });
+    expect(
+      OrganizationManagerCreateRequestSchema.safeParse({
+        kind: "NEW",
+        userId: "user-1",
+        loginId: "manager-01",
+        displayName: "담당자",
+        assignmentRole: "MANAGER",
+      }).success,
+    ).toBe(false);
+  });
+
+  it("requires the observed primary when replacing or removing a leader", () => {
+    expect(
+      OrganizationPrimaryPatchRequestSchema.parse({
+        userId: "user-2",
+        expectedPrimaryUserId: "user-1",
+        previousPrimaryDisposition: "MANAGER",
+      }),
+    ).toEqual({
+      userId: "user-2",
+      expectedPrimaryUserId: "user-1",
+      previousPrimaryDisposition: "MANAGER",
+    });
+    expect(
+      OrganizationPrimaryPatchRequestSchema.parse({
+        userId: null,
+        expectedPrimaryUserId: "user-1",
+        previousPrimaryDisposition: "REMOVE",
+      }).userId,
+    ).toBeNull();
   });
 });
 
