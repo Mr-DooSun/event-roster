@@ -37,8 +37,6 @@ jobs:
     timeout-minutes: 15
     environment: production
     env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       TARGET_DATABASE: ${{ inputs.target_database }}
       CONFIRMED_MAIN_SHA: ${{ inputs.main_sha }}
       DATA_STATE: ${{ inputs.data_state }}
@@ -78,6 +76,9 @@ jobs:
 
       - name: Verify an initial database is empty
         if: inputs.data_state == 'initial-empty'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         shell: bash
         run: |
           set -euo pipefail
@@ -108,12 +109,21 @@ jobs:
           ' "$RUNNER_TEMP/d1-empty-check.json"
 
       - name: List pending migrations
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: corepack pnpm@10.28.1 --filter @event-roster/worker exec wrangler d1 migrations list event-roster --remote
 
       - name: Apply migrations
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: corepack pnpm@10.28.1 --filter @event-roster/worker exec wrangler d1 migrations apply event-roster --remote
 
       - name: Check foreign keys
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         shell: bash
         run: |
           set -euo pipefail
@@ -135,11 +145,45 @@ jobs:
           ' "$RUNNER_TEMP/d1-foreign-key-check.json"
 
       - name: Check organization assignments
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         shell: bash
         run: |
           set -euo pipefail
-          corepack pnpm@10.28.1 --filter @event-roster/worker exec wrangler d1 execute event-roster --remote --command \
-            "SELECT assignment_role, COUNT(*) AS assignment_count FROM user_organizations GROUP BY assignment_role"
+          corepack pnpm@10.28.1 --filter @event-roster/worker exec wrangler d1 execute event-roster --remote --json --command \
+            "SELECT assignment_role, COUNT(*) AS assignment_count FROM user_organizations GROUP BY assignment_role" \
+            > "$RUNNER_TEMP/d1-assignment-role-check.json"
+          node --input-type=module -e '
+            import { readFileSync } from "node:fs";
+            const payload = JSON.parse(readFileSync(process.argv[1], "utf8"));
+            if (!Array.isArray(payload) || payload.length !== 1) {
+              throw new Error("Expected exactly one D1 result set");
+            }
+            const [entry] = payload;
+            if (entry === null || typeof entry !== "object" || entry.success !== true || !Array.isArray(entry.results)) {
+              throw new Error("Unexpected D1 assignment-role-check response");
+            }
+            const allowedRoles = new Set(["PRIMARY_LEADER", "MANAGER"]);
+            const seenRoles = new Set();
+            for (const [index, row] of entry.results.entries()) {
+              if (row === null || typeof row !== "object" || Array.isArray(row)) {
+                throw new Error(`Invalid assignment-role row at index ${index}`);
+              }
+              const role = row.assignment_role;
+              if (!allowedRoles.has(role)) {
+                throw new Error(`Unexpected assignment role at index ${index}`);
+              }
+              if (seenRoles.has(role)) {
+                throw new Error(`Duplicate assignment-role row at index ${index}`);
+              }
+              seenRoles.add(role);
+              const count = row.assignment_count;
+              if (!Number.isSafeInteger(count) || count < 0) {
+                throw new Error(`Invalid assignment count at index ${index}`);
+              }
+            }
+          ' "$RUNNER_TEMP/d1-assignment-role-check.json"
           corepack pnpm@10.28.1 --filter @event-roster/worker exec wrangler d1 execute event-roster --remote --json --command \
             "SELECT organization_id, COUNT(*) AS primary_count FROM user_organizations WHERE assignment_role = 'PRIMARY_LEADER' GROUP BY organization_id HAVING COUNT(*) > 1" \
             > "$RUNNER_TEMP/d1-primary-leader-check.json"
