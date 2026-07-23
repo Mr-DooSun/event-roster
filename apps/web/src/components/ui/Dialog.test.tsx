@@ -50,9 +50,7 @@ it("lets a form provide its own close action without rendering a duplicate", () 
     screen.queryByRole("button", { name: "닫기" }),
   ).not.toBeInTheDocument();
   expect(screen.getByRole("button", { name: "폼 닫기" })).toBeVisible();
-  expect(
-    screen.getByRole("button", { name: "프로젝트 만들기" }),
-  ).toBeVisible();
+  expect(screen.getByRole("button", { name: "프로젝트 만들기" })).toBeVisible();
 });
 
 it("moves focus inside and traps Tab in both directions", () => {

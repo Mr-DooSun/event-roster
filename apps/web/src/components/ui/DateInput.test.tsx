@@ -97,12 +97,7 @@ it("keeps the native input usable when showPicker throws", () => {
 it("does not open a picker for a disabled date input", () => {
   const showPicker = vi.fn();
   render(
-    <DateInput
-      label="시작일"
-      value=""
-      disabled
-      onChange={() => undefined}
-    />,
+    <DateInput label="시작일" value="" disabled onChange={() => undefined} />,
   );
   const input = screen.getByLabelText("시작일");
   Object.defineProperty(input, "showPicker", {
