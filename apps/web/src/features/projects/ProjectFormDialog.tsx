@@ -86,7 +86,9 @@ export function ProjectFormDialog({
           <Button
             type="submit"
             variant="primary"
-            disabled={!name.trim() || reversed || busy}
+            disabled={!name.trim() || reversed}
+            loading={busy}
+            loadingText="만드는 중…"
           >
             프로젝트 만들기
           </Button>

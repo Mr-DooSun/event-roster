@@ -470,6 +470,25 @@ a {
   opacity: 0.72;
   border-color: color-mix(in srgb, var(--er-color-border) 72%, transparent);
 }
+.er-project-card--skeleton {
+  align-content: start;
+  pointer-events: none;
+}
+.er-skeleton--badge {
+  width: 4.75rem;
+  min-height: 1.5rem;
+}
+.er-skeleton--title {
+  width: min(100%, 16rem);
+  min-height: 1.5rem;
+}
+.er-skeleton--short {
+  width: min(100%, 8rem);
+}
+.er-skeleton--button {
+  width: 7rem;
+  min-height: 2.5rem;
+}
 .er-project-card__dates {
   display: grid;
   gap: 0.25rem;

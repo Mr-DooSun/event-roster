@@ -27,7 +27,7 @@ vi.mock("../auth/AuthProvider", () => ({
 }));
 
 beforeEach(() => {
-  vi.clearAllMocks();
+  vi.resetAllMocks();
   mockRole.current = "OPERATOR";
 });
 
@@ -47,6 +47,114 @@ const projectFixture = {
   closedBy: null,
   closeReason: null,
 };
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((nextResolve, nextReject) => {
+    resolve = nextResolve;
+    reject = nextReject;
+  });
+  return { promise, resolve, reject };
+}
+
+it("shows project skeletons before deciding the list is empty", async () => {
+  const request = deferred<(typeof projectFixture)[]>();
+  mockApi.get.mockReturnValueOnce(request.promise);
+  render(<ProjectsPage />);
+
+  expect(screen.getByRole("status")).toHaveTextContent(
+    "프로젝트 불러오는 중…",
+  );
+  expect(screen.getByTestId("project-grid-skeleton")).toHaveAttribute(
+    "aria-busy",
+    "true",
+  );
+  expect(
+    screen.queryByText("등록된 프로젝트가 없습니다."),
+  ).not.toBeInTheDocument();
+
+  await act(async () => {
+    request.resolve([]);
+    await request.promise;
+  });
+  expect(screen.getByText("등록된 프로젝트가 없습니다.")).toBeVisible();
+});
+
+it("retries a failed project list request", async () => {
+  mockApi.get
+    .mockRejectedValueOnce(new Error("offline"))
+    .mockResolvedValueOnce([projectFixture]);
+  render(<ProjectsPage />);
+
+  fireEvent.click(await screen.findByRole("button", { name: "다시 시도" }));
+  expect(await screen.findByText(projectFixture.name)).toBeVisible();
+  expect(mockApi.get).toHaveBeenCalledTimes(2);
+});
+
+it("keeps existing projects visible when a project refresh fails", async () => {
+  mockApi.get
+    .mockResolvedValueOnce([projectFixture])
+    .mockRejectedValueOnce(new Error("offline"));
+  mockApi.post.mockResolvedValueOnce(projectFixture);
+  render(<ProjectsPage />);
+
+  await screen.findByText(projectFixture.name);
+  fireEvent.click(screen.getByRole("button", { name: "새 프로젝트" }));
+  fireEvent.change(screen.getByLabelText("프로젝트 이름"), {
+    target: { value: "새 프로젝트" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "프로젝트 만들기" }));
+
+  expect(await screen.findByText("프로젝트 목록을 불러오지 못했습니다.")).toBeVisible();
+  expect(screen.getByText(projectFixture.name)).toBeVisible();
+  expect(screen.getByRole("button", { name: "다시 시도" })).toBeVisible();
+});
+
+it("keeps existing projects visible while reloading after create", async () => {
+  const reload = deferred<(typeof projectFixture)[]>();
+  mockApi.get
+    .mockResolvedValueOnce([projectFixture])
+    .mockReturnValueOnce(reload.promise);
+  mockApi.post.mockResolvedValueOnce(projectFixture);
+  render(<ProjectsPage />);
+
+  await screen.findByText(projectFixture.name);
+  fireEvent.click(screen.getByRole("button", { name: "새 프로젝트" }));
+  fireEvent.change(screen.getByLabelText("프로젝트 이름"), {
+    target: { value: "새 프로젝트" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "프로젝트 만들기" }));
+
+  expect(await screen.findByText(projectFixture.name)).toBeVisible();
+  expect(screen.getByRole("status")).toHaveTextContent("새로고침 중…");
+  await act(async () => {
+    reload.resolve([projectFixture]);
+    await reload.promise;
+  });
+});
+
+it("shows a progress label while creating a project", async () => {
+  const submission = deferred<void>();
+  render(
+    <ProjectFormDialog
+      open
+      onClose={vi.fn()}
+      onSubmit={() => submission.promise}
+    />,
+  );
+
+  fireEvent.change(screen.getByLabelText("프로젝트 이름"), {
+    target: { value: "새 프로젝트" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "프로젝트 만들기" }));
+
+  expect(screen.getByRole("button", { name: "만드는 중…" })).toBeDisabled();
+  await act(async () => {
+    submission.resolve();
+    await submission.promise;
+  });
+});
 
 it("renders the minimal B-style project card fields", async () => {
   mockApi.get.mockResolvedValueOnce([
