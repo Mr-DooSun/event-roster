@@ -19,12 +19,36 @@ export function UserEditRow({
   onReset,
 }: {
   user: UserView;
-  onSave: (id: string, input: UserUpdate) => Promise<void>;
-  onReset: (id: string) => Promise<void>;
+  onSave: (id: string, input: UserUpdate) => Promise<boolean>;
+  onReset: (id: string) => Promise<boolean>;
 }) {
   const [displayName, setDisplayName] = useState(user.displayName);
   const [role, setRole] = useState<Role>(user.role);
   const [isActive, setIsActive] = useState(user.isActive);
+  const [busyAction, setBusyAction] = useState<"SAVE" | "RESET" | null>(null);
+
+  async function save() {
+    if (busyAction) return;
+    setBusyAction("SAVE");
+    try {
+      await onSave(user.id, { displayName, role, isActive });
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  async function reset() {
+    if (busyAction) return;
+    setBusyAction("RESET");
+    try {
+      await onReset(user.id);
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  const busy = busyAction !== null;
+
   return (
     <tr>
       <td>
@@ -33,6 +57,7 @@ export function UserEditRow({
           aria-label={`${user.loginId} 표시 이름`}
           value={displayName}
           onChange={(event) => setDisplayName(event.currentTarget.value)}
+          disabled={busy}
         />
       </td>
       <td>{user.loginId}</td>
@@ -42,6 +67,7 @@ export function UserEditRow({
           aria-label={`${user.loginId} 역할`}
           value={role}
           onChange={(event) => setRole(event.currentTarget.value as Role)}
+          disabled={busy}
         >
           <option value="OPERATOR">운영자</option>
           <option value="ORGANIZATION_MANAGER">조직 담당자</option>
@@ -55,6 +81,7 @@ export function UserEditRow({
             type="checkbox"
             checked={isActive}
             onChange={(event) => setIsActive(event.currentTarget.checked)}
+            disabled={busy}
           />
           <span className="er-toggle__track" aria-hidden="true">
             <span className="er-toggle__thumb" />
@@ -67,17 +94,20 @@ export function UserEditRow({
           <Button
             type="button"
             variant="primary"
-            onClick={() =>
-              void onSave(user.id, {
-                displayName,
-                role,
-                isActive,
-              })
-            }
+            onClick={() => void save()}
+            disabled={busy}
+            loading={busyAction === "SAVE"}
+            loadingText="저장 중…"
           >
             저장
           </Button>
-          <Button type="button" onClick={() => void onReset(user.id)}>
+          <Button
+            type="button"
+            onClick={() => void reset()}
+            disabled={busy}
+            loading={busyAction === "RESET"}
+            loadingText="비밀번호 재설정 중…"
+          >
             비밀번호 재설정
           </Button>
         </div>

@@ -767,6 +767,15 @@ th {
   color: var(--er-color-muted);
   font-size: 0.85rem;
 }
+.er-user-table-skeleton td {
+  height: 4.25rem;
+}
+.er-user-table-skeleton .er-skeleton {
+  width: 100%;
+}
+.er-user-table-skeleton td:last-child .er-skeleton {
+  width: 7rem;
+}
 .er-audit-list {
   display: grid;
   gap: var(--er-space-3);

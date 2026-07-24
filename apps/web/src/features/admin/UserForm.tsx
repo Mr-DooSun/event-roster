@@ -12,17 +12,26 @@ export interface UserCreateInput {
 export function UserForm({
   onSubmit,
 }: {
-  onSubmit: (input: UserCreateInput) => Promise<void>;
+  onSubmit: (input: UserCreateInput) => Promise<boolean>;
 }) {
   const [loginId, setLoginId] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [role, setRole] = useState<Role>("OPERATOR");
+  const [busy, setBusy] = useState(false);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    await onSubmit({ loginId, displayName, role });
-    setLoginId("");
-    setDisplayName("");
+    if (busy) return;
+    setBusy(true);
+    try {
+      const succeeded = await onSubmit({ loginId, displayName, role });
+      if (succeeded) {
+        setLoginId("");
+        setDisplayName("");
+      }
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -50,7 +59,12 @@ export function UserForm({
           <option value="ORGANIZATION_MANAGER">조직 담당자</option>
         </select>
       </label>
-      <Button type="submit" variant="primary">
+      <Button
+        type="submit"
+        variant="primary"
+        loading={busy}
+        loadingText="계정 만드는 중…"
+      >
         계정 만들기
       </Button>
     </form>

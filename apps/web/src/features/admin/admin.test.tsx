@@ -481,6 +481,157 @@ it("keeps the newest organization search when responses arrive out of order", as
   expect(screen.getByText("두번째 결과")).toBeVisible();
 });
 
+it("keeps the account table header and shows skeleton rows while the first list request is pending", async () => {
+  const users = deferred<Response>();
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/auth/login"))
+        return Promise.resolve(Response.json(auth()));
+      if (url.endsWith("/users")) return users.promise;
+      throw new Error(`unexpected request: ${url}`);
+    }),
+  );
+  render(
+    <AuthProvider restoreOnMount={false}>
+      <Gate>
+        <UsersPage />
+      </Gate>
+    </AuthProvider>,
+  );
+  await login();
+
+  expect(
+    await screen.findByRole("columnheader", { name: "이름" }),
+  ).toBeVisible();
+  expect(screen.getByTestId("user-table-skeleton")).toHaveAttribute(
+    "aria-busy",
+    "true",
+  );
+  expect(screen.queryByText("등록된 계정이 없습니다.")).not.toBeInTheDocument();
+
+  users.resolve(Response.json([]));
+  expect(await screen.findByText("등록된 계정이 없습니다.")).toBeVisible();
+});
+
+it("retries an initial account list failure without showing the empty state", async () => {
+  const retry = deferred<Response>();
+  let reads = 0;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/auth/login"))
+        return Promise.resolve(Response.json(auth()));
+      if (url.endsWith("/users")) {
+        reads += 1;
+        return reads === 1
+          ? Promise.resolve(new Response(null, { status: 503 }))
+          : retry.promise;
+      }
+      throw new Error(`unexpected request: ${url}`);
+    }),
+  );
+  render(
+    <AuthProvider restoreOnMount={false}>
+      <Gate>
+        <UsersPage />
+      </Gate>
+    </AuthProvider>,
+  );
+  await login();
+
+  expect(
+    await screen.findByText("계정 목록을 불러오지 못했습니다."),
+  ).toBeVisible();
+  expect(screen.queryByText("등록된 계정이 없습니다.")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "다시 시도" }));
+  expect(screen.getByRole("button", { name: "다시 시도 중…" })).toBeDisabled();
+
+  retry.resolve(Response.json(usersResponse()));
+  expect(await screen.findByLabelText("staff-01 표시 이름")).toBeEnabled();
+});
+
+it("shows pending feedback only on the saved account row and keeps rows visible while refreshing", async () => {
+  const patch = deferred<Response>();
+  const refresh = deferred<Response>();
+  let reads = 0;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/auth/login"))
+        return Promise.resolve(Response.json(auth()));
+      if (url.endsWith("/users/user-1") && init?.method === "PATCH") {
+        return patch.promise;
+      }
+      if (url.endsWith("/users")) {
+        reads += 1;
+        return reads === 1
+          ? Promise.resolve(Response.json(usersResponse()))
+          : refresh.promise;
+      }
+      throw new Error(`unexpected request: ${url}`);
+    }),
+  );
+  render(
+    <AuthProvider restoreOnMount={false}>
+      <Gate>
+        <UsersPage />
+      </Gate>
+    </AuthProvider>,
+  );
+  await login();
+  await screen.findByLabelText("staff-01 표시 이름");
+
+  const firstRow = screen.getByLabelText("staff-01 표시 이름").closest("tr");
+  fireEvent.click(
+    within(firstRow as HTMLElement).getByRole("button", { name: "저장" }),
+  );
+  expect(screen.getByRole("button", { name: "저장 중…" })).toBeDisabled();
+  expect(screen.getByLabelText("staff-01 표시 이름")).toBeDisabled();
+  expect(screen.getByLabelText("staff-02 표시 이름")).toBeEnabled();
+
+  patch.resolve(Response.json({ id: "user-1" }));
+  expect(await screen.findByRole("status")).toHaveTextContent("새로고침 중…");
+  expect(screen.getByLabelText("staff-01 표시 이름")).toBeVisible();
+  refresh.resolve(Response.json(usersResponse()));
+});
+
+it("keeps account form values when creation fails", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/auth/login"))
+        return Promise.resolve(Response.json(auth()));
+      if (url.endsWith("/users") && init?.method === "POST") {
+        return Promise.resolve(new Response(null, { status: 503 }));
+      }
+      if (url.endsWith("/users")) return Promise.resolve(Response.json([]));
+      throw new Error(`unexpected request: ${url}`);
+    }),
+  );
+  render(
+    <AuthProvider restoreOnMount={false}>
+      <Gate>
+        <UsersPage />
+      </Gate>
+    </AuthProvider>,
+  );
+  await login();
+  const loginId = await screen.findByLabelText("영문 로그인 ID");
+  const displayName = screen.getByLabelText("표시 이름");
+  fireEvent.change(loginId, { target: { value: "staff-03" } });
+  fireEvent.change(displayName, { target: { value: "실패 담당자" } });
+  fireEvent.click(screen.getByRole("button", { name: "계정 만들기" }));
+
+  expect(await screen.findByText("계정을 만들지 못했습니다.")).toBeVisible();
+  expect(loginId).toHaveValue("staff-03");
+  expect(displayName).toHaveValue("실패 담당자");
+});
+
 it("groups organization creation actions with close first", async () => {
   vi.stubGlobal(
     "fetch",
@@ -1250,6 +1401,27 @@ function auth() {
       },
     },
   };
+}
+
+function usersResponse() {
+  return [
+    {
+      id: "user-1",
+      loginId: "staff-01",
+      displayName: "첫 담당자",
+      role: "ORGANIZATION_MANAGER",
+      isActive: true,
+      organizationIds: [],
+    },
+    {
+      id: "user-2",
+      loginId: "staff-02",
+      displayName: "둘째 담당자",
+      role: "ORGANIZATION_MANAGER",
+      isActive: true,
+      organizationIds: [],
+    },
+  ];
 }
 
 function deferred<T>() {

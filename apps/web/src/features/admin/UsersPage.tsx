@@ -1,10 +1,18 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Card } from "../../components/ui/Card";
+import { LoadingStatus } from "../../components/ui/LoadingStatus";
+import { RetryableError } from "../../components/ui/RetryableError";
+import { Skeleton } from "../../components/ui/Skeleton";
 import { StatusMessage } from "../../components/ui/StatusMessage";
 import { useAuth } from "../auth/AuthProvider";
 import { TemporaryPasswordDialog } from "./TemporaryPasswordDialog";
 import { UserEditRow, type UserView } from "./UserEditRow";
 import { type UserCreateInput, UserForm } from "./UserForm";
+
+const userSkeletonKeys = Array.from(
+  { length: 5 },
+  (_, index) => `user-skeleton-${index}`,
+);
 
 export function UsersPage() {
   const { api } = useAuth();
@@ -13,12 +21,26 @@ export function UsersPage() {
     null,
   );
   const [error, setError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [hasLoaded, setHasLoaded] = useState(false);
+  const hasLoadedRef = useRef(false);
 
   const load = useCallback(async () => {
+    const initialLoad = !hasLoadedRef.current;
+    if (initialLoad) setLoading(true);
+    else setRefreshing(true);
     try {
       setUsers(await api.get<UserView[]>("/users"));
+      hasLoadedRef.current = true;
+      setHasLoaded(true);
+      setLoadError(null);
     } catch {
-      setError("계정 목록을 불러오지 못했습니다.");
+      setLoadError("계정 목록을 불러오지 못했습니다.");
+    } finally {
+      if (initialLoad) setLoading(false);
+      else setRefreshing(false);
     }
   }, [api]);
 
@@ -32,8 +54,10 @@ export function UsersPage() {
       );
       setTemporaryPassword(result.temporaryPassword);
       await load();
+      return true;
     } catch {
       setError("계정을 만들지 못했습니다.");
+      return false;
     }
   }
 
@@ -43,8 +67,10 @@ export function UsersPage() {
         `/users/${userId}/password-reset`,
       );
       setTemporaryPassword(result.temporaryPassword);
+      return true;
     } catch {
       setError("비밀번호를 재설정하지 못했습니다.");
+      return false;
     }
   }
 
@@ -55,8 +81,10 @@ export function UsersPage() {
     try {
       await api.patch(`/users/${userId}`, input);
       await load();
+      return true;
     } catch {
       setError("계정 정보를 변경하지 못했습니다.");
+      return false;
     }
   }
 
@@ -75,29 +103,80 @@ export function UsersPage() {
       </Card>
       <Card className="er-panel">
         <h2>계정 목록</h2>
-        <div className="er-table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>이름</th>
-                <th>로그인 ID</th>
-                <th>역할</th>
-                <th>상태</th>
-                <th>작업</th>
-              </tr>
-            </thead>
-            <tbody>
-              {users.map((user) => (
-                <UserEditRow
-                  key={user.id}
-                  user={user}
-                  onSave={saveUser}
-                  onReset={reset}
-                />
-              ))}
-            </tbody>
-          </table>
-        </div>
+        {loadError && !hasLoaded ? (
+          <RetryableError
+            message={loadError}
+            retrying={loading}
+            onRetry={load}
+          />
+        ) : (
+          <>
+            {loadError ? (
+              <RetryableError
+                message={loadError}
+                retrying={refreshing}
+                onRetry={load}
+              />
+            ) : null}
+            {refreshing ? <LoadingStatus>새로고침 중…</LoadingStatus> : null}
+            <div className="er-table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>이름</th>
+                    <th>로그인 ID</th>
+                    <th>역할</th>
+                    <th>상태</th>
+                    <th>작업</th>
+                  </tr>
+                </thead>
+                <tbody
+                  data-testid={
+                    loading && !hasLoaded ? "user-table-skeleton" : undefined
+                  }
+                  aria-busy={(loading && !hasLoaded) || undefined}
+                >
+                  {loading && !hasLoaded ? (
+                    userSkeletonKeys.map((key) => (
+                      <tr key={key} className="er-user-table-skeleton">
+                        <td>
+                          <Skeleton className="er-skeleton--text" />
+                        </td>
+                        <td>
+                          <Skeleton className="er-skeleton--text er-skeleton--short" />
+                        </td>
+                        <td>
+                          <Skeleton className="er-skeleton--text" />
+                        </td>
+                        <td>
+                          <Skeleton className="er-skeleton--short" />
+                        </td>
+                        <td>
+                          <Skeleton className="er-skeleton--button" />
+                        </td>
+                      </tr>
+                    ))
+                  ) : users.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="er-muted">
+                        등록된 계정이 없습니다.
+                      </td>
+                    </tr>
+                  ) : (
+                    users.map((user) => (
+                      <UserEditRow
+                        key={user.id}
+                        user={user}
+                        onSave={saveUser}
+                        onReset={reset}
+                      />
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
       </Card>
       {temporaryPassword ? (
         <TemporaryPasswordDialog
