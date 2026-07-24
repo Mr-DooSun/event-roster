@@ -55,3 +55,33 @@ corepack pnpm@10.28.1 --filter @event-roster/web check
 ## 우려사항
 
 - 이번 UI 문구 변경은 App 회귀 테스트의 selector도 변경해야 했습니다. 기능 범위는 확장하지 않았고, 동기화된 테스트는 전부 통과했습니다.
+
+## Fix Review Findings
+
+### 변경 내용
+
+- 성공한 후보 검색 뒤 사용자가 후보와 역할을 선택한 상태에서 같은 검색을 다시 실행해 서버 오류가 나도, 기존 `candidates`, `selectedUserId`, 검색어, 역할을 유지하도록 했습니다.
+- 재검색 실패 시에는 `candidateSearchError`만 설정합니다. 따라서 사용자는 기존 선택으로 바로 지정을 계속할 수 있습니다.
+
+### RED
+
+```bash
+corepack pnpm@10.28.1 --filter @event-roster/web test -- src/features/admin/admin.test.tsx
+```
+
+- 결과: exit 1. 새 `preserves existing assignment choices when a repeated candidate search fails` 테스트가 `지정할 계정`의 기대값 `candidate-1` 대신 빈 값을 받아 실패했습니다.
+- 같은 실행에서 기존 조직 목록 테스트 1건이 비동기 로딩 대기 중 간헐적으로 실패했으나, 재실행 GREEN에서는 통과했습니다.
+
+### GREEN
+
+```bash
+corepack pnpm@10.28.1 --filter @event-roster/web test -- src/features/admin/admin.test.tsx
+```
+
+- 결과: exit 0, 14 files / 206 tests passed. 기존 stale response 및 abort 테스트도 포함해 통과했습니다.
+
+```bash
+corepack pnpm@10.28.1 --filter @event-roster/web check
+```
+
+- 결과: exit 0 (`tsc --noEmit` 및 `tsc --noEmit -p tsconfig.e2e.json`).

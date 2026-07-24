@@ -101,8 +101,6 @@ export function OrganizationManagersPanel({
         generation === candidateSearchGeneration.current &&
         !controller.signal.aborted
       ) {
-        setCandidates([]);
-        setSelectedUserId("");
         setHasSearchedCandidates(true);
         setCandidateSearchError("지정 가능한 계정을 찾지 못했습니다.");
       }
