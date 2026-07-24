@@ -26,22 +26,41 @@ export function ParticipantEditDialog({
   const [organizationId, setOrganizationId] = useState(
     participant.organizationId,
   );
+  const [busy, setBusy] = useState(false);
   const selectableOrganizations = organizations.filter(
     (organization) =>
       organization.isActive || organization.id === participant.organizationId,
   );
+
+  async function save() {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await onSave({
+        name: name.trim(),
+        organizationId,
+        expectedRevision: participant.revision,
+      });
+    } catch {
+      // The parent owns mutation feedback; keep this dialog and its input.
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <Dialog title="참가자 정보 수정" onClose={onClose}>
       <TextInput
         label="이름"
         required
         value={name}
+        disabled={busy}
         onChange={(event) => setName(event.currentTarget.value)}
       />
       <label className="er-field">
         <span>소속 조직</span>
         <select
-          disabled={!allowOrganizationChange}
+          disabled={busy || !allowOrganizationChange}
           value={organizationId}
           onChange={(event) => setOrganizationId(event.currentTarget.value)}
         >
@@ -58,13 +77,9 @@ export function ParticipantEditDialog({
       <Button
         type="button"
         variant="primary"
-        onClick={() =>
-          void onSave({
-            name: name.trim(),
-            organizationId,
-            expectedRevision: participant.revision,
-          })
-        }
+        loading={busy}
+        loadingText="정보 저장 중…"
+        onClick={() => void save()}
       >
         정보 저장
       </Button>

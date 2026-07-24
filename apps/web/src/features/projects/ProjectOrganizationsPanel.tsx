@@ -31,6 +31,12 @@ interface PanelMessage {
   text: string;
 }
 
+type OrganizationAction =
+  | "ADD_EXISTING"
+  | "CREATE_AND_ADD"
+  | `TOGGLE:${string}`
+  | null;
+
 export function ProjectOrganizationsPanel({
   projectId,
   projectRevision,
@@ -53,6 +59,7 @@ export function ProjectOrganizationsPanel({
     name: string;
   } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [busyAction, setBusyAction] = useState<OrganizationAction>(null);
   const [message, setMessage] = useState<PanelMessage | null>(null);
   const [observedProjectRevision, setObservedProjectRevision] =
     useState(projectRevision);
@@ -73,10 +80,12 @@ export function ProjectOrganizationsPanel({
   }
 
   async function mutate(
+    action: Exclude<OrganizationAction, null>,
     operation: () => Promise<ProjectOrganizationMutationResult>,
   ) {
     if (busy) return false;
     setBusy(true);
+    setBusyAction(action);
     setMessage(null);
     try {
       const result = await operation();
@@ -130,13 +139,14 @@ export function ProjectOrganizationsPanel({
       return false;
     } finally {
       setBusy(false);
+      setBusyAction(null);
     }
   }
 
   async function addExisting(event: FormEvent) {
     event.preventDefault();
     if (pendingSelection?.kind !== "EXISTING") return;
-    await mutate(() =>
+    await mutate("ADD_EXISTING", () =>
       api.post<ProjectOrganizationMutationResult>(
         `/projects/${projectId}/organizations`,
         {
@@ -149,7 +159,7 @@ export function ProjectOrganizationsPanel({
 
   async function confirmCreate() {
     if (!newConfirmation) return;
-    await mutate(() =>
+    await mutate("CREATE_AND_ADD", () =>
       api.post<ProjectOrganizationMutationResult>(
         `/projects/${projectId}/organizations`,
         {
@@ -161,7 +171,7 @@ export function ProjectOrganizationsPanel({
   }
 
   async function setActive(membership: ProjectOrganization, active: boolean) {
-    await mutate(() =>
+    await mutate(`TOGGLE:${membership.organizationId}`, () =>
       api.patch<ProjectOrganizationMutationResult>(
         `/projects/${projectId}/organizations/${membership.organizationId}`,
         {
@@ -191,6 +201,8 @@ export function ProjectOrganizationsPanel({
             <Button
               type="submit"
               variant="primary"
+              loading={busyAction === "ADD_EXISTING"}
+              loadingText="프로젝트에 추가 중…"
               disabled={
                 busy ||
                 !canMutateMemberships ||
@@ -216,6 +228,7 @@ export function ProjectOrganizationsPanel({
                 canMutateMemberships={canMutateMemberships}
                 canManageOrganizations={canManageOrganizations}
                 busy={busy}
+                loading={busyAction === `TOGGLE:${membership.organizationId}`}
                 onSetActive={(active) => setActive(membership, active)}
               />
             ))}
@@ -234,6 +247,8 @@ export function ProjectOrganizationsPanel({
           <Button
             type="button"
             variant="primary"
+            loading={busyAction === "CREATE_AND_ADD"}
+            loadingText="생성 후 추가 중…"
             disabled={busy}
             onClick={() => void confirmCreate()}
           >
@@ -250,12 +265,14 @@ function OrganizationMembershipRow({
   canMutateMemberships,
   canManageOrganizations,
   busy,
+  loading,
   onSetActive,
 }: {
   membership: ProjectOrganization;
   canMutateMemberships: boolean;
   canManageOrganizations: boolean;
   busy: boolean;
+  loading: boolean;
   onSetActive: (active: boolean) => Promise<void>;
 }) {
   return (
@@ -288,6 +305,8 @@ function OrganizationMembershipRow({
           <Button
             type="button"
             variant={membership.isActive ? "danger" : "secondary"}
+            loading={loading}
+            loadingText="변경 중…"
             disabled={
               busy || (!membership.isActive && !membership.masterIsActive)
             }

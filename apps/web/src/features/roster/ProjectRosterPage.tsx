@@ -1,5 +1,5 @@
 import type { Organization, Project } from "@event-roster/contracts";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Button } from "../../components/ui/Button";
 import { Card } from "../../components/ui/Card";
 import { StatusMessage } from "../../components/ui/StatusMessage";
@@ -36,6 +36,12 @@ export function ProjectRosterPage({
   const [editingParticipant, setEditingParticipant] =
     useState<ParticipantView | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [busyRowIds, setBusyRowIds] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+  const [exporting, setExporting] = useState(false);
+  const busyRowIdsRef = useRef<ReadonlySet<string>>(new Set());
+  const exportingRef = useRef(false);
   const activeOrganizationIds = useMemo(
     () =>
       new Set(
@@ -90,13 +96,24 @@ export function ProjectRosterPage({
   }
 
   async function changeStatus(row: RosterView, status: "ACTIVE" | "CANCELLED") {
-    await handleMutation(() =>
-      api.patch(`/projects/${project.id}/roster/${row.id}`, {
-        status,
-        expectedRevision: project.revision,
-        expectedEntryRevision: row.revision,
-      }),
-    );
+    if (busyRowIdsRef.current.has(row.id)) return;
+    const nextBusyRowIds = new Set(busyRowIdsRef.current).add(row.id);
+    busyRowIdsRef.current = nextBusyRowIds;
+    setBusyRowIds(nextBusyRowIds);
+    try {
+      await handleMutation(() =>
+        api.patch(`/projects/${project.id}/roster/${row.id}`, {
+          status,
+          expectedRevision: project.revision,
+          expectedEntryRevision: row.revision,
+        }),
+      );
+    } finally {
+      const remainingBusyRowIds = new Set(busyRowIdsRef.current);
+      remainingBusyRowIds.delete(row.id);
+      busyRowIdsRef.current = remainingBusyRowIds;
+      setBusyRowIds(remainingBusyRowIds);
+    }
   }
 
   function edit(row: RosterView) {
@@ -152,6 +169,9 @@ export function ProjectRosterPage({
   }
 
   async function exportRoster() {
+    if (exportingRef.current) return;
+    exportingRef.current = true;
+    setExporting(true);
     setMessage(null);
     try {
       const data = await api.get<ExportData>(
@@ -164,6 +184,9 @@ export function ProjectRosterPage({
       downloadExportWorkbook(data, filename);
     } catch {
       setMessage("엑셀 명단을 내보내지 못했습니다.");
+    } finally {
+      exportingRef.current = false;
+      setExporting(false);
     }
   }
 
@@ -184,7 +207,12 @@ export function ProjectRosterPage({
             엑셀 가져오기
           </a>
         ) : null}
-        <Button type="button" onClick={() => void exportRoster()}>
+        <Button
+          type="button"
+          loading={exporting}
+          loadingText="내보내는 중…"
+          onClick={() => void exportRoster()}
+        >
           엑셀 내보내기
         </Button>
         {canMutate ? (
@@ -202,6 +230,7 @@ export function ProjectRosterPage({
         <RosterTable
           rows={rows}
           canMutate={canMutate}
+          busyRowIds={busyRowIds}
           canMutateRow={(row) =>
             auth?.session.user.role === "OPERATOR" ||
             activeOrganizationIds.has(row.organizationId)

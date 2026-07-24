@@ -182,6 +182,52 @@ it("adds an existing organization with the observed project revision", async () 
   );
 });
 
+it("shows progress while adding an existing organization", async () => {
+  const pendingMutation = deferred<{
+    organization: ProjectOrganization;
+    projectRevision: number;
+  }>();
+  const onChanged = vi.fn().mockResolvedValue(undefined);
+  mockApi.post.mockReturnValue(pendingMutation.promise);
+  render(
+    <ProjectOrganizationsPanel
+      projectId="project-1"
+      projectRevision={7}
+      memberships={[organizationMembership()]}
+      allOrganizations={[{ id: "org-2", name: "2팀", isActive: true }]}
+      canMutateMemberships
+      canManageOrganizations
+      onChanged={onChanged}
+    />,
+  );
+  const input = screen.getByRole("combobox", {
+    name: "조직 이름 검색 또는 입력",
+  });
+  fireEvent.change(input, { target: { value: "2팀" } });
+  fireEvent.click(screen.getByRole("option", { name: "2팀" }));
+
+  fireEvent.click(screen.getByRole("button", { name: "프로젝트에 추가" }));
+
+  const pendingButton = screen.getByRole("button", {
+    name: "프로젝트에 추가 중…",
+  });
+  expect(pendingButton).toBeDisabled();
+  fireEvent.click(pendingButton);
+  expect(mockApi.post).toHaveBeenCalledTimes(1);
+  expect(screen.getByText("Ｅ２Ｅ 1팀")).toBeVisible();
+
+  await act(async () =>
+    pendingMutation.resolve({
+      organization: organizationMembership({
+        organizationId: "org-2",
+        name: "2팀",
+      }),
+      projectRevision: 8,
+    }),
+  );
+  await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1));
+});
+
 it("chains mutation response revisions even when refresh fails without a rerender", async () => {
   const onChanged = vi.fn().mockRejectedValue(new Error("refresh failed"));
   mockApi.post
@@ -394,6 +440,54 @@ it("requires explicit confirmation before creating a global organization", async
   );
 });
 
+it("shows progress while creating and adding a new organization", async () => {
+  const pendingMutation = deferred<{
+    organization: ProjectOrganization;
+    projectRevision: number;
+  }>();
+  mockApi.post.mockReturnValue(pendingMutation.promise);
+  render(
+    <ProjectOrganizationsPanel
+      projectId="project-1"
+      projectRevision={7}
+      memberships={[]}
+      allOrganizations={[]}
+      canMutateMemberships
+      canManageOrganizations
+      onChanged={vi.fn().mockResolvedValue(undefined)}
+    />,
+  );
+  fireEvent.change(
+    screen.getByRole("combobox", {
+      name: "조직 이름 검색 또는 입력",
+    }),
+    { target: { value: "신규 조직" } },
+  );
+  fireEvent.click(screen.getByRole("option", { name: /새 조직 생성 후 추가/ }));
+
+  fireEvent.click(screen.getByRole("button", { name: "생성 후 추가" }));
+
+  const pendingButton = screen.getByRole("button", {
+    name: "생성 후 추가 중…",
+  });
+  expect(pendingButton).toBeDisabled();
+  fireEvent.click(pendingButton);
+  expect(mockApi.post).toHaveBeenCalledTimes(1);
+  expect(
+    screen.getByRole("dialog", { name: "새 조직 생성 후 추가" }),
+  ).toBeVisible();
+
+  await act(async () =>
+    pendingMutation.resolve({
+      organization: organizationMembership({
+        organizationId: "org-new",
+        name: "신규 조직",
+      }),
+      projectRevision: 8,
+    }),
+  );
+});
+
 it("reloads a recoverable name conflict without replaying or clearing the query", async () => {
   const onChanged = vi.fn().mockResolvedValue(undefined);
   mockApi.post.mockRejectedValueOnce(
@@ -590,6 +684,47 @@ it("chains project revisions for deactivation and reactivation", async () => {
       "/projects/project-1/organizations/org-1",
       { isActive: true, expectedProjectRevision: 8 },
     ),
+  );
+});
+
+it("shows progress only on the membership being changed", async () => {
+  const pendingMutation = deferred<{
+    organization: ProjectOrganization;
+    projectRevision: number;
+  }>();
+  mockApi.patch.mockReturnValue(pendingMutation.promise);
+  render(
+    <ProjectOrganizationsPanel
+      projectId="project-1"
+      projectRevision={7}
+      memberships={[
+        organizationMembership(),
+        organizationMembership({
+          organizationId: "org-2",
+          name: "2팀",
+        }),
+      ]}
+      allOrganizations={[]}
+      canMutateMemberships
+      canManageOrganizations
+      onChanged={vi.fn().mockResolvedValue(undefined)}
+    />,
+  );
+
+  fireEvent.click(
+    screen.getAllByRole("button", { name: "사용 중지" })[0] as HTMLElement,
+  );
+
+  expect(screen.getByRole("button", { name: "변경 중…" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "사용 중지" })).toBeDisabled();
+  expect(screen.getByText("Ｅ２Ｅ 1팀")).toBeVisible();
+  expect(screen.getByText("2팀")).toBeVisible();
+
+  await act(async () =>
+    pendingMutation.resolve({
+      organization: organizationMembership({ isActive: false }),
+      projectRevision: 8,
+    }),
   );
 });
 
@@ -1412,8 +1547,9 @@ it("invalidates the audit cursor and preserves a newer request lock across a ful
     await oldPage.promise;
   });
   expect(screen.queryByText("무효 이력")).not.toBeInTheDocument();
-
-  fireEvent.click(screen.getByRole("button", { name: "이력 더 보기" }));
+  expect(
+    screen.getByRole("button", { name: "더 불러오는 중…" }),
+  ).toBeDisabled();
   expect(
     mockApi.get.mock.calls.filter(([path]) =>
       path.endsWith("cursor=new-cursor"),
@@ -1450,13 +1586,51 @@ it("keeps audit items and retries after pagination fails", async () => {
     await screen.findByText("변경 이력을 더 불러오지 못했습니다."),
   ).toBeVisible();
   expect(screen.getByText("기존 이력")).toBeVisible();
-  fireEvent.click(screen.getByRole("button", { name: "이력 더 보기" }));
+  fireEvent.click(screen.getByRole("button", { name: "다시 시도" }));
 
   expect(await screen.findByText("재시도 이력")).toBeVisible();
   expect(paginationReads).toBe(2);
   expect(
     screen.queryByText("변경 이력을 더 불러오지 못했습니다."),
   ).not.toBeInTheDocument();
+});
+
+it("shows audit pagination progress and prevents duplicate requests", async () => {
+  const pendingPage = deferred<{
+    items: ReturnType<typeof auditItem>[];
+    nextCursor: string | null;
+  }>();
+  let paginationReads = 0;
+  mockApi.get.mockImplementation((path: string) => {
+    if (path === "/projects/project-1/audit?limit=50") {
+      return { items: [auditItem("기존 이력")], nextCursor: "next-cursor" };
+    }
+    if (path.endsWith("cursor=next-cursor")) {
+      paginationReads += 1;
+      return pendingPage.promise;
+    }
+    return defaultGet(path);
+  });
+  render(<ProjectDetailPage projectId="project-1" />);
+  fireEvent.click(await screen.findByRole("tab", { name: "변경 이력" }));
+
+  fireEvent.click(screen.getByRole("button", { name: "이력 더 보기" }));
+
+  const pendingButton = screen.getByRole("button", {
+    name: "더 불러오는 중…",
+  });
+  expect(pendingButton).toBeDisabled();
+  fireEvent.click(pendingButton);
+  expect(paginationReads).toBe(1);
+  expect(screen.getByText("기존 이력")).toBeVisible();
+
+  await act(async () =>
+    pendingPage.resolve({
+      items: [auditItem("추가 이력")],
+      nextCursor: null,
+    }),
+  );
+  expect(await screen.findByText("추가 이력")).toBeVisible();
 });
 
 it("ignores a successful transition response after switching projects", async () => {

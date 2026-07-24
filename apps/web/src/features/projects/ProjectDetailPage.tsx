@@ -131,6 +131,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
   const [auditPaginationError, setAuditPaginationError] = useState<
     string | null
   >(null);
+  const [auditLoadingMore, setAuditLoadingMore] = useState(false);
   const [projectLoading, setProjectLoading] = useState(true);
   const [resourceLoading, setResourceLoading] = useState<DetailLoading>({});
   const [resourceLoaded, setResourceLoaded] = useState<DetailLoaded>({});
@@ -173,6 +174,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
       resourceRequestTokens.current[resource] = requestToken;
       if (resource === "audit") {
         auditPaginationRequest.current = null;
+        setAuditLoadingMore(false);
         updateAuditNextCursor(null);
       }
       const ownsRequest = () =>
@@ -279,6 +281,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
     };
     if (!isCurrent(context)) return;
     auditPaginationRequest.current = null;
+    setAuditLoadingMore(false);
     updateAuditNextCursor(null);
     setProjectLoading(true);
     setResourceLoading({});
@@ -476,6 +479,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
       return;
     }
     auditPaginationRequest.current = context;
+    setAuditLoadingMore(true);
     const ownsRequest = () =>
       isCurrent(context) &&
       resourceRequestTokens.current.audit === context.auditResourceToken &&
@@ -500,6 +504,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
     } finally {
       if (ownsRequest()) {
         auditPaginationRequest.current = null;
+        setAuditLoadingMore(false);
       }
     }
   }
@@ -685,11 +690,16 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
         {showTabContent && selectedTab === "audit" ? (
           <div className="er-page-stack">
             {auditPaginationError ? (
-              <StatusMessage tone="error">{auditPaginationError}</StatusMessage>
+              <RetryableError
+                message={auditPaginationError}
+                retrying={auditLoadingMore}
+                onRetry={() => loadMoreAudit(renderGeneration, auditNextCursor)}
+              />
             ) : null}
             <AuditPanel
               items={audit}
               nextCursor={auditNextCursor}
+              loadingMore={auditLoadingMore}
               onLoadMore={() =>
                 loadMoreAudit(renderGeneration, auditNextCursor)
               }

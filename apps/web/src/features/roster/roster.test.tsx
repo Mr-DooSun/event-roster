@@ -1,11 +1,19 @@
 import "@testing-library/jest-dom/vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+} from "@testing-library/react";
+import { useState } from "react";
 import { afterEach, expect, it, vi } from "vitest";
 import { AuthProvider, useAuth } from "../auth/AuthProvider";
 import { LoginPage } from "../auth/LoginPage";
 import { ProjectDetailPage } from "../projects/ProjectDetailPage";
 import { ParticipantDialog } from "./ParticipantDialog";
 import { ParticipantEditDialog } from "./ParticipantEditDialog";
+import { RosterTable, type RosterView } from "./RosterTable";
 
 afterEach(() => {
   cleanup();
@@ -63,6 +71,180 @@ it("defaults reusable participants from an inactive master organization to an ac
     organizationId: "org-active",
     expectedParticipantRevision: 3,
   });
+});
+
+it("shows the pending roster row without removing the table", async () => {
+  const pendingStatus = deferred<void>();
+
+  function PendingRosterHarness() {
+    const [busyRowIds, setBusyRowIds] = useState<ReadonlySet<string>>(
+      () => new Set(),
+    );
+    const first = entry("ACTIVE");
+    const second = {
+      ...entry("ACTIVE"),
+      id: "entry-2",
+      participantId: "person-2",
+      participantName: "다른 참가자",
+      participantNumber: "P-002",
+    };
+    async function change(row: RosterView) {
+      setBusyRowIds((current) => new Set(current).add(row.id));
+      try {
+        await pendingStatus.promise;
+      } finally {
+        setBusyRowIds((current) => {
+          const next = new Set(current);
+          next.delete(row.id);
+          return next;
+        });
+      }
+    }
+    return (
+      <RosterTable
+        rows={[first, second]}
+        canMutate
+        busyRowIds={busyRowIds}
+        onStatusChange={change}
+        onEdit={vi.fn()}
+      />
+    );
+  }
+
+  render(<PendingRosterHarness />);
+
+  fireEvent.click(screen.getByRole("button", { name: "박민수 취소" }));
+  expect(screen.getByRole("button", { name: "변경 중…" })).toBeDisabled();
+  expect(screen.getByText("박민수")).toBeVisible();
+  expect(
+    screen.getByRole("button", { name: "다른 참가자 취소" }),
+  ).toBeEnabled();
+
+  await act(async () => {
+    pendingStatus.resolve(undefined);
+    await pendingStatus.promise;
+  });
+});
+
+it("keeps an existing-participant dialog pending without submitting twice", async () => {
+  const pendingAdd = deferred<void>();
+  const onAdd = vi.fn(() => pendingAdd.promise);
+  const onClose = vi.fn();
+  render(
+    <ParticipantDialog
+      participants={[
+        {
+          id: "person-1",
+          participantId: "P-001",
+          name: "박민수",
+          organizationId: "org-1",
+          revision: 3,
+        },
+      ]}
+      organizations={[{ id: "org-1", name: "1팀", isActive: true }]}
+      onAdd={onAdd}
+      onCreateAndAdd={vi.fn().mockResolvedValue(undefined)}
+      onClose={onClose}
+    />,
+  );
+  fireEvent.change(screen.getByLabelText("확정 이름"), {
+    target: { value: "확정 이름" },
+  });
+
+  fireEvent.click(screen.getByRole("button", { name: "명단에 추가" }));
+
+  const pendingButton = screen.getByRole("button", {
+    name: "명단에 추가 중…",
+  });
+  expect(pendingButton).toBeDisabled();
+  fireEvent.click(pendingButton);
+  expect(onAdd).toHaveBeenCalledTimes(1);
+  expect(screen.getByLabelText("확정 이름")).toHaveValue("확정 이름");
+  expect(screen.getByRole("dialog", { name: "참가자 추가" })).toBeVisible();
+
+  await act(async () => {
+    pendingAdd.reject(new Error("add failed"));
+    await pendingAdd.promise.catch(() => undefined);
+  });
+  expect(onClose).not.toHaveBeenCalled();
+  expect(screen.getByLabelText("확정 이름")).toHaveValue("확정 이름");
+});
+
+it("keeps a new-participant dialog pending without submitting twice", async () => {
+  const pendingCreate = deferred<void>();
+  const onCreateAndAdd = vi.fn(() => pendingCreate.promise);
+  render(
+    <ParticipantDialog
+      participants={[]}
+      organizations={[{ id: "org-1", name: "1팀", isActive: true }]}
+      onAdd={vi.fn().mockResolvedValue(undefined)}
+      onCreateAndAdd={onCreateAndAdd}
+      onClose={vi.fn()}
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "새 참가자" }));
+  fireEvent.change(screen.getByLabelText("이름"), {
+    target: { value: "새 참가자 이름" },
+  });
+
+  fireEvent.click(screen.getByRole("button", { name: "참가자 생성 후 추가" }));
+
+  const pendingButton = screen.getByRole("button", {
+    name: "참가자 만드는 중…",
+  });
+  expect(pendingButton).toBeDisabled();
+  fireEvent.click(pendingButton);
+  expect(onCreateAndAdd).toHaveBeenCalledTimes(1);
+  expect(screen.getByLabelText("이름")).toHaveValue("새 참가자 이름");
+
+  await act(async () => {
+    pendingCreate.reject(new Error("create failed"));
+    await pendingCreate.promise.catch(() => undefined);
+  });
+  expect(screen.getByRole("dialog", { name: "참가자 추가" })).toBeVisible();
+  expect(screen.getByLabelText("이름")).toHaveValue("새 참가자 이름");
+});
+
+it("keeps participant edits pending without submitting twice", async () => {
+  const pendingSave = deferred<void>();
+  const onSave = vi.fn(() => pendingSave.promise);
+  render(
+    <ParticipantEditDialog
+      participant={{
+        id: "person-1",
+        participantId: "P-001",
+        name: "박민수",
+        organizationId: "org-1",
+        revision: 1,
+      }}
+      organizations={[{ id: "org-1", name: "1팀", isActive: true }]}
+      allowOrganizationChange
+      onSave={onSave}
+      onClose={vi.fn()}
+    />,
+  );
+  fireEvent.change(screen.getByLabelText("이름"), {
+    target: { value: "수정 이름" },
+  });
+
+  fireEvent.click(screen.getByRole("button", { name: "정보 저장" }));
+
+  const pendingButton = screen.getByRole("button", {
+    name: "정보 저장 중…",
+  });
+  expect(pendingButton).toBeDisabled();
+  fireEvent.click(pendingButton);
+  expect(onSave).toHaveBeenCalledTimes(1);
+  expect(screen.getByLabelText("이름")).toHaveValue("수정 이름");
+
+  await act(async () => {
+    pendingSave.reject(new Error("save failed"));
+    await pendingSave.promise.catch(() => undefined);
+  });
+  expect(
+    screen.getByRole("dialog", { name: "참가자 정보 수정" }),
+  ).toBeVisible();
+  expect(screen.getByLabelText("이름")).toHaveValue("수정 이름");
 });
 
 it("updates expected and actual totals after an in-progress cancellation", async () => {
@@ -977,7 +1159,7 @@ function project() {
   };
 }
 
-function entry(status: "ACTIVE" | "CANCELLED") {
+function entry(status: "ACTIVE" | "CANCELLED"): RosterView {
   return {
     id: "entry-1",
     projectId: "project-1",
@@ -1012,4 +1194,14 @@ function summary(final: number) {
       },
     ],
   };
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((nextResolve, nextReject) => {
+    resolve = nextResolve;
+    reject = nextReject;
+  });
+  return { promise, resolve, reject };
 }

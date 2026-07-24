@@ -14,10 +14,12 @@ export interface AuditView {
 export function AuditPanel({
   items,
   nextCursor,
+  loadingMore = false,
   onLoadMore,
 }: {
   items: AuditView[];
   nextCursor: string | null;
+  loadingMore?: boolean;
   onLoadMore: () => Promise<void>;
 }) {
   return (
@@ -50,8 +52,13 @@ export function AuditPanel({
           ))}
         </ol>
       )}
-      {nextCursor ? (
-        <Button type="button" onClick={() => void onLoadMore()}>
+      {nextCursor || loadingMore ? (
+        <Button
+          type="button"
+          loading={loadingMore}
+          loadingText="더 불러오는 중…"
+          onClick={() => void onLoadMore()}
+        >
           이력 더 보기
         </Button>
       ) : null}

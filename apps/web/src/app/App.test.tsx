@@ -69,7 +69,9 @@ it("marks the lazy import fallback as busy", () => {
 
   render(<App />);
 
-  expect(screen.getByText("엑셀 도구 불러오는 중…").closest("[aria-busy=true]")).not.toBeNull();
+  expect(
+    screen.getByText("엑셀 도구 불러오는 중…").closest("[aria-busy=true]"),
+  ).not.toBeNull();
 });
 
 afterEach(() => {
@@ -1123,10 +1125,15 @@ it("does not let an old audit request clear a newer lock for the same cursor", a
     oldPage.resolve({ items: [], nextCursor: null });
     await oldPage.promise;
   });
-  fireEvent.click(screen.getByRole("button", { name: "이력 더 보기" }));
+  expect(
+    screen.getByRole("button", { name: "더 불러오는 중…" }),
+  ).toBeDisabled();
 
   expect(paginationReads).toBe(2);
-  newPage.resolve({ items: [], nextCursor: null });
+  await act(async () => {
+    newPage.resolve({ items: [], nextCursor: null });
+    await newPage.promise;
+  });
 });
 
 it("keeps organization administration hidden from managers", async () => {

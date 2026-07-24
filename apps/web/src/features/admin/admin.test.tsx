@@ -1,5 +1,6 @@
 import "@testing-library/jest-dom/vitest";
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -10,6 +11,7 @@ import {
 import { afterEach, expect, it, vi } from "vitest";
 import { AuthProvider, useAuth } from "../auth/AuthProvider";
 import { LoginPage } from "../auth/LoginPage";
+import { OrganizationDetailPage } from "./OrganizationDetailPage";
 import { OrganizationsPage } from "./OrganizationsPage";
 import { UsersPage } from "./UsersPage";
 
@@ -385,6 +387,76 @@ it("groups organization creation actions with close first", async () => {
   ).toEqual(["닫기", "조직 만들기"]);
 });
 
+it("shows organization audit pagination progress without replacing items", async () => {
+  const pendingPage = deferred<Response>();
+  let paginationReads = 0;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/auth/login")) {
+        return Promise.resolve(Response.json(auth()));
+      }
+      if (url.endsWith("/organizations/org-1")) {
+        return Promise.resolve(
+          Response.json({
+            id: "org-1",
+            name: "1팀",
+            isActive: true,
+            primaryLeader: null,
+            managerCount: 0,
+            projectCount: 0,
+            managers: [],
+            projects: [],
+          }),
+        );
+      }
+      if (url.endsWith("/organizations/org-1/audit?limit=50")) {
+        return Promise.resolve(
+          Response.json({
+            items: [auditItem("기존 이력")],
+            nextCursor: "next-cursor",
+          }),
+        );
+      }
+      if (url.endsWith("cursor=next-cursor")) {
+        paginationReads += 1;
+        return pendingPage.promise;
+      }
+      throw new Error(`unexpected request: ${url}`);
+    }),
+  );
+  render(
+    <AuthProvider restoreOnMount={false}>
+      <Gate>
+        <OrganizationDetailPage organizationId="org-1" />
+      </Gate>
+    </AuthProvider>,
+  );
+  await login();
+  expect(await screen.findByText("기존 이력")).toBeVisible();
+
+  fireEvent.click(screen.getByRole("button", { name: "이력 더 보기" }));
+
+  const pendingButton = screen.getByRole("button", {
+    name: "더 불러오는 중…",
+  });
+  expect(pendingButton).toBeDisabled();
+  fireEvent.click(pendingButton);
+  expect(paginationReads).toBe(1);
+  expect(screen.getByText("기존 이력")).toBeVisible();
+
+  await act(async () =>
+    pendingPage.resolve(
+      Response.json({
+        items: [auditItem("추가 이력")],
+        nextCursor: null,
+      }),
+    ),
+  );
+  expect(await screen.findByText("추가 이력")).toBeVisible();
+});
+
 function Gate({ children }: { children: React.ReactNode }) {
   return useAuth().auth ? children : <LoginPage />;
 }
@@ -423,4 +495,15 @@ function deferred<T>() {
     resolve = next;
   });
   return { promise, resolve };
+}
+
+function auditItem(action: string) {
+  return {
+    id: `audit-${action}`,
+    actorUserId: "operator-1",
+    action,
+    entityType: "ORGANIZATION",
+    entityId: "org-1",
+    occurredAt: "2026-07-22T00:00:00.000Z",
+  };
 }

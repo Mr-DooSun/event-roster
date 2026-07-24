@@ -47,6 +47,7 @@ export function ParticipantDialog({
       participant.id === (initialParticipantId ?? participants[0]?.id),
   );
   const [mode, setMode] = useState<"EXISTING" | "NEW">("EXISTING");
+  const [busy, setBusy] = useState<"EXISTING" | "NEW" | null>(null);
   const [name, setName] = useState("");
   const [confirmedName, setConfirmedName] = useState(
     initialParticipant?.name ?? "",
@@ -98,12 +99,43 @@ export function ParticipantDialog({
   const selectedParticipant = participants.find(
     (participant) => participant.id === participantId,
   );
+
+  async function addExisting() {
+    if (busy || !selectedParticipant) return;
+    setBusy("EXISTING");
+    try {
+      await onAdd({
+        participantId: selectedParticipant.id,
+        name: confirmedName.trim(),
+        organizationId: confirmedOrganizationId,
+        expectedParticipantRevision: selectedParticipant.revision,
+      });
+    } catch {
+      // The parent owns mutation feedback; keep this dialog and its input.
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function createAndAdd() {
+    if (busy) return;
+    setBusy("NEW");
+    try {
+      await onCreateAndAdd({ name: name.trim(), organizationId });
+    } catch {
+      // The parent owns mutation feedback; keep this dialog and its input.
+    } finally {
+      setBusy(null);
+    }
+  }
+
   return (
     <Dialog title="참가자 추가" onClose={onClose}>
       <div className="er-action-row">
         <Button
           type="button"
           variant={mode === "EXISTING" ? "primary" : "secondary"}
+          disabled={busy !== null}
           onClick={() => setMode("EXISTING")}
         >
           기존 참가자
@@ -111,6 +143,7 @@ export function ParticipantDialog({
         <Button
           type="button"
           variant={mode === "NEW" ? "primary" : "secondary"}
+          disabled={busy !== null}
           onClick={() => setMode("NEW")}
         >
           새 참가자
@@ -122,6 +155,7 @@ export function ParticipantDialog({
             <span>참가자</span>
             <select
               value={participantId}
+              disabled={busy !== null}
               onChange={(event) => setParticipantId(event.currentTarget.value)}
             >
               {participants.map((participant) => (
@@ -135,13 +169,14 @@ export function ParticipantDialog({
             label="확정 이름"
             required
             value={confirmedName}
+            disabled={busy !== null}
             onChange={(event) => setConfirmedName(event.currentTarget.value)}
           />
           <label className="er-field">
             <span>확정 소속 조직</span>
             <select
               value={confirmedOrganizationId}
-              disabled={!allowExistingOrganizationChange}
+              disabled={busy !== null || !allowExistingOrganizationChange}
               onChange={
                 allowExistingOrganizationChange
                   ? (event) =>
@@ -165,20 +200,15 @@ export function ParticipantDialog({
           <Button
             type="button"
             variant="primary"
+            loading={busy === "EXISTING"}
+            loadingText="명단에 추가 중…"
             disabled={
+              busy !== null ||
               !selectedParticipant ||
               !confirmedName.trim() ||
               !confirmedOrganizationId
             }
-            onClick={() => {
-              if (!selectedParticipant) return;
-              void onAdd({
-                participantId: selectedParticipant.id,
-                name: confirmedName.trim(),
-                organizationId: confirmedOrganizationId,
-                expectedParticipantRevision: selectedParticipant.revision,
-              });
-            }}
+            onClick={() => void addExisting()}
           >
             명단에 추가
           </Button>
@@ -189,12 +219,14 @@ export function ParticipantDialog({
             label="이름"
             required
             value={name}
+            disabled={busy !== null}
             onChange={(event) => setName(event.currentTarget.value)}
           />
           <label className="er-field">
             <span>소속 조직</span>
             <select
               value={organizationId}
+              disabled={busy !== null}
               onChange={(event) => setOrganizationId(event.currentTarget.value)}
             >
               {organizations
@@ -209,10 +241,10 @@ export function ParticipantDialog({
           <Button
             type="button"
             variant="primary"
-            disabled={!name.trim() || !organizationId}
-            onClick={() =>
-              void onCreateAndAdd({ name: name.trim(), organizationId })
-            }
+            loading={busy === "NEW"}
+            loadingText="참가자 만드는 중…"
+            disabled={busy !== null || !name.trim() || !organizationId}
+            onClick={() => void createAndAdd()}
           >
             참가자 생성 후 추가
           </Button>

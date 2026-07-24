@@ -12,6 +12,7 @@ import {
 import { Button } from "../../components/ui/Button";
 import { Card } from "../../components/ui/Card";
 import { Dialog } from "../../components/ui/Dialog";
+import { RetryableError } from "../../components/ui/RetryableError";
 import { StatusMessage } from "../../components/ui/StatusMessage";
 import { TextInput } from "../../components/ui/TextInput";
 import { ApiError } from "../../lib/api";
@@ -49,6 +50,10 @@ export function OrganizationDetailPage({
   const [auditNextCursor, setAuditNextCursor] = useState<string | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [auditError, setAuditError] = useState<string | null>(null);
+  const [auditPaginationError, setAuditPaginationError] = useState<
+    string | null
+  >(null);
+  const [auditLoadingMore, setAuditLoadingMore] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [showStatusConfirmation, setShowStatusConfirmation] = useState(false);
   const [temporaryPassword, setTemporaryPassword] = useState<{
@@ -118,6 +123,8 @@ export function OrganizationDetailPage({
     }
     const generation = ++auditGeneration.current;
     auditPaginationRequest.current = null;
+    setAuditLoadingMore(false);
+    setAuditPaginationError(null);
     try {
       const page = await api.get<{
         items: AuditView[];
@@ -155,6 +162,8 @@ export function OrganizationDetailPage({
     setAuditNextCursor(null);
     setDetailError(null);
     setAuditError(null);
+    setAuditPaginationError(null);
+    setAuditLoadingMore(false);
     setMessage(null);
     setShowStatusConfirmation(false);
     setTemporaryPassword(null);
@@ -243,6 +252,8 @@ export function OrganizationDetailPage({
     const generation = auditGeneration.current;
     const request = { cursor, generation };
     auditPaginationRequest.current = request;
+    setAuditLoadingMore(true);
+    setAuditPaginationError(null);
     try {
       const page = await api.get<{
         items: AuditView[];
@@ -262,7 +273,7 @@ export function OrganizationDetailPage({
       }
       setAudit((current) => [...current, ...page.items]);
       setAuditNextCursor(page.nextCursor);
-      setAuditError(null);
+      setAuditPaginationError(null);
     } catch {
       if (
         instanceActive.current &&
@@ -270,11 +281,12 @@ export function OrganizationDetailPage({
         activeOrganizationId.current === requestedOrganizationId &&
         auditPaginationRequest.current === request
       ) {
-        setAuditError("변경 이력을 더 불러오지 못했습니다.");
+        setAuditPaginationError("변경 이력을 더 불러오지 못했습니다.");
       }
     } finally {
       if (auditPaginationRequest.current === request) {
         auditPaginationRequest.current = null;
+        setAuditLoadingMore(false);
       }
     }
   }
@@ -429,9 +441,17 @@ export function OrganizationDetailPage({
       {auditError ? (
         <StatusMessage tone="error">{auditError}</StatusMessage>
       ) : null}
+      {auditPaginationError ? (
+        <RetryableError
+          message={auditPaginationError}
+          retrying={auditLoadingMore}
+          onRetry={loadMoreAudit}
+        />
+      ) : null}
       <AuditPanel
         items={audit}
         nextCursor={auditNextCursor}
+        loadingMore={auditLoadingMore}
         onLoadMore={loadMoreAudit}
       />
       {showStatusConfirmation && organization ? (
