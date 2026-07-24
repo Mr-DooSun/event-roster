@@ -45,6 +45,8 @@ vi.mock("../features/auth/AuthProvider", () => ({
   }),
 }));
 
+vi.mock("../features/imports/ImportWizard", () => new Promise(() => {}));
+
 beforeEach(() => {
   authState.role = "OPERATOR";
   authState.status = "AUTHENTICATED";
@@ -60,6 +62,14 @@ it("announces authentication restoration while the session is restoring", () => 
   render(<App />);
 
   expect(screen.getByRole("status")).toHaveTextContent("로그인 상태 확인 중…");
+});
+
+it("marks the lazy import fallback as busy", () => {
+  window.history.replaceState(null, "", "/projects/project-1/import");
+
+  render(<App />);
+
+  expect(screen.getByText("엑셀 도구 불러오는 중…").closest("[aria-busy=true]")).not.toBeNull();
 });
 
 afterEach(() => {

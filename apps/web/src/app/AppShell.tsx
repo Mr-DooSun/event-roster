@@ -83,9 +83,11 @@ function route(path: string, operator: boolean) {
     return (
       <Suspense
         fallback={
-          <LoadingStatus className="er-panel-loading">
-            엑셀 도구 불러오는 중…
-          </LoadingStatus>
+          <div aria-busy="true">
+            <LoadingStatus className="er-panel-loading">
+              엑셀 도구 불러오는 중…
+            </LoadingStatus>
+          </div>
         }
       >
         <ImportWizard projectId={decodeURIComponent(importMatch[1])} />

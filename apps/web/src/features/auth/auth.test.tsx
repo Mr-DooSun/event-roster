@@ -511,6 +511,43 @@ it("clears memory auth even when logout fails", async () => {
   );
 });
 
+it("keeps logout progress visible until the pending logout completes", async () => {
+  let resolveLogout: ((value: Response) => void) | undefined;
+  const pendingLogout = new Promise<Response>((resolve) => {
+    resolveLogout = resolve;
+  });
+  const fetchMock = vi.fn((input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.endsWith("/auth/login")) {
+      return Promise.resolve(Response.json(authSuccess("FULL")));
+    }
+    if (url.endsWith("/auth/logout")) return pendingLogout;
+    return Promise.resolve(Response.json([]));
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  render(
+    <AuthProvider restoreOnMount={false}>
+      <AuthBoundary />
+    </AuthProvider>,
+  );
+
+  await submitLogin();
+  await screen.findByRole("heading", { name: "프로젝트" });
+  fireEvent.click(screen.getByRole("button", { name: "로그아웃" }));
+
+  const pendingButton = await screen.findByRole("button", {
+    name: "로그아웃 중…",
+  });
+  expect(pendingButton).toBeDisabled();
+  fireEvent.click(pendingButton);
+  expect(
+    fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/auth/logout")),
+  ).toHaveLength(1);
+
+  resolveLogout?.(new Response(null, { status: 204 }));
+  expect(await screen.findByRole("button", { name: "로그인" })).toBeVisible();
+});
+
 it("uses cookie-only logout even when the access token may be expired", async () => {
   const fetchMock = vi
     .fn()

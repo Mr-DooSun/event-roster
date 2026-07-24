@@ -125,7 +125,7 @@ export function AuthProvider({
   const logout = useCallback(async () => {
     setError(null);
     authEpochRef.current += 1;
-    commitState({ auth: null, status: "RESTORING" });
+    stateRef.current = { auth: null, status: "RESTORING" };
     try {
       await api.waitForRefresh();
       await parseResponse<void>(
