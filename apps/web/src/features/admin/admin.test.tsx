@@ -510,6 +510,9 @@ it("keeps the account table header and shows skeleton rows while the first list 
     "aria-busy",
     "true",
   );
+  expect(screen.getByRole("status")).toHaveTextContent(
+    "계정 목록 불러오는 중…",
+  );
   expect(screen.queryByText("등록된 계정이 없습니다.")).not.toBeInTheDocument();
 
   users.resolve(Response.json([]));

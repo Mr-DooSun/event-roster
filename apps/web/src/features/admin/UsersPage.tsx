@@ -154,9 +154,14 @@ export function UsersPage() {
                   aria-busy={(loading && !hasLoaded) || undefined}
                 >
                   {loading && !hasLoaded ? (
-                    userSkeletonKeys.map((key) => (
+                    userSkeletonKeys.map((key, index) => (
                       <tr key={key} className="er-user-table-skeleton">
                         <td>
+                          {index === 0 ? (
+                            <LoadingStatus visuallyHidden>
+                              계정 목록 불러오는 중…
+                            </LoadingStatus>
+                          ) : null}
                           <Skeleton className="er-skeleton--text" />
                         </td>
                         <td>
