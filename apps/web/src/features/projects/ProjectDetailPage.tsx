@@ -44,6 +44,10 @@ interface RequestContext {
   generation: number;
 }
 
+interface AuditPaginationContext extends RequestContext {
+  auditResourceToken: number;
+}
+
 const RESOURCE_ERROR_MESSAGE: Record<DetailResource, string> = {
   summary: "프로젝트 집계를 불러오지 못했습니다.",
   memberships: "프로젝트 조직을 불러오지 못했습니다.",
@@ -141,8 +145,14 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
   const resourceRequestTokens = useRef({
     ...INITIAL_RESOURCE_REQUEST_TOKEN,
   });
-  const auditPaginationRequest = useRef<RequestContext | null>(null);
+  const auditNextCursorRef = useRef<string | null>(null);
+  const auditPaginationRequest = useRef<AuditPaginationContext | null>(null);
   currentProjectId.current = projectId;
+
+  const updateAuditNextCursor = useCallback((nextCursor: string | null) => {
+    auditNextCursorRef.current = nextCursor;
+    setAuditNextCursor(nextCursor);
+  }, []);
 
   const isCurrent = useCallback(
     (context: RequestContext) =>
@@ -161,6 +171,10 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
       if (!isCurrent(context)) return false;
       const requestToken = resourceRequestTokens.current[resource] + 1;
       resourceRequestTokens.current[resource] = requestToken;
+      if (resource === "audit") {
+        auditPaginationRequest.current = null;
+        updateAuditNextCursor(null);
+      }
       const ownsRequest = () =>
         isCurrent(context) &&
         resourceRequestTokens.current[resource] === requestToken;
@@ -192,7 +206,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
         }
       }
     },
-    [isCurrent],
+    [isCurrent, updateAuditNextCursor],
   );
 
   const loadDetailResource = useCallback(
@@ -248,14 +262,14 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
               ),
             (page) => {
               setAudit(page.items);
-              setAuditNextCursor(page.nextCursor);
+              updateAuditNextCursor(page.nextCursor);
             },
           );
         default:
           return assertNever(resource);
       }
     },
-    [api, loadResource],
+    [api, loadResource, updateAuditNextCursor],
   );
 
   const load = useCallback(async () => {
@@ -265,7 +279,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
     };
     if (!isCurrent(context)) return;
     auditPaginationRequest.current = null;
-    setAuditNextCursor(null);
+    updateAuditNextCursor(null);
     setProjectLoading(true);
     setResourceLoading({});
     setProjectLoadError(null);
@@ -301,7 +315,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
         ] satisfies DetailResource[]
       ).map((resource) => loadDetailResource(context, resource)),
     ]);
-  }, [api, isCurrent, loadDetailResource, projectId]);
+  }, [api, isCurrent, loadDetailResource, projectId, updateAuditNextCursor]);
 
   const retryProject = useCallback(() => load(), [load]);
   const retryTab = useCallback(
@@ -330,7 +344,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
     setRows([]);
     setParticipants([]);
     setAudit([]);
-    setAuditNextCursor(null);
+    updateAuditNextCursor(null);
     setAuditPaginationError(null);
     setProjectLoadError(null);
     setResourceErrors({});
@@ -346,7 +360,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
     return () => {
       loadGeneration.current += 1;
     };
-  }, [load, projectId]);
+  }, [load, projectId, updateAuditNextCursor]);
 
   async function reloadProjectForContext(context: RequestContext) {
     if (!isCurrent(context)) return null;
@@ -448,16 +462,24 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
     expectedGeneration: number,
     expectedCursor: string | null,
   ) {
-    const context = { projectId, generation: expectedGeneration };
+    const context: AuditPaginationContext = {
+      projectId,
+      generation: expectedGeneration,
+      auditResourceToken: resourceRequestTokens.current.audit,
+    };
     if (
       !expectedCursor ||
       !isCurrent(context) ||
-      auditNextCursor !== expectedCursor ||
+      auditNextCursorRef.current !== expectedCursor ||
       auditPaginationRequest.current
     ) {
       return;
     }
     auditPaginationRequest.current = context;
+    const ownsRequest = () =>
+      isCurrent(context) &&
+      resourceRequestTokens.current.audit === context.auditResourceToken &&
+      auditPaginationRequest.current === context;
     setAuditPaginationError(null);
     try {
       const page = await api.get<{
@@ -468,17 +490,15 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
           expectedCursor,
         )}`,
       );
-      if (!isCurrent(context) || auditPaginationRequest.current !== context) {
-        return;
-      }
+      if (!ownsRequest()) return;
       setAudit((current) => [...current, ...page.items]);
-      setAuditNextCursor(page.nextCursor);
+      updateAuditNextCursor(page.nextCursor);
     } catch {
-      if (isCurrent(context) && auditPaginationRequest.current === context) {
+      if (ownsRequest()) {
         setAuditPaginationError("변경 이력을 더 불러오지 못했습니다.");
       }
     } finally {
-      if (auditPaginationRequest.current === context) {
+      if (ownsRequest()) {
         auditPaginationRequest.current = null;
       }
     }

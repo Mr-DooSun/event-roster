@@ -1230,6 +1230,121 @@ it("ignores an audit pagination handler captured before a newer full load", asyn
   expect(await screen.findByText("새 페이지")).toBeVisible();
 });
 
+it("ignores an old audit pagination handler after the live cursor advances", async () => {
+  let firstCursorReads = 0;
+  let secondCursorReads = 0;
+  mockApi.get.mockImplementation((path: string) => {
+    if (path === "/projects/project-1/audit?limit=50") {
+      return {
+        items: [auditItem("기준 이력")],
+        nextCursor: "cursor-1",
+      };
+    }
+    if (path.endsWith("cursor=cursor-1")) {
+      firstCursorReads += 1;
+      return {
+        items: [auditItem("첫 페이지")],
+        nextCursor: "cursor-2",
+      };
+    }
+    if (path.endsWith("cursor=cursor-2")) {
+      secondCursorReads += 1;
+      return {
+        items: [auditItem("둘째 페이지")],
+        nextCursor: null,
+      };
+    }
+    return defaultGet(path);
+  });
+
+  render(<ProjectDetailPage projectId="project-1" />);
+  fireEvent.click(await screen.findByRole("tab", { name: "변경 이력" }));
+  expect(await screen.findByText("기준 이력")).toBeVisible();
+  const staleFirstCursor = captureReactClickHandler(
+    screen.getByRole("button", { name: "이력 더 보기" }),
+  );
+
+  fireEvent.click(screen.getByRole("button", { name: "이력 더 보기" }));
+  expect(await screen.findByText("첫 페이지")).toBeVisible();
+  await act(async () => {
+    staleFirstCursor();
+    await Promise.resolve();
+  });
+
+  expect(firstCursorReads).toBe(1);
+  fireEvent.click(screen.getByRole("button", { name: "이력 더 보기" }));
+  expect(secondCursorReads).toBe(1);
+  expect(await screen.findByText("둘째 페이지")).toBeVisible();
+});
+
+it("lets a same-generation audit retry supersede pending pagination", async () => {
+  const oldPage = deferred<{
+    items: ReturnType<typeof auditItem>[];
+    nextCursor: string | null;
+  }>();
+  let baseAuditReads = 0;
+  let firstCursorReads = 0;
+  let latestCursorReads = 0;
+  mockApi.get.mockImplementation((path: string) => {
+    if (path === "/projects/project-1/audit?limit=50") {
+      baseAuditReads += 1;
+      if (baseAuditReads === 1) {
+        return Promise.reject(new Error("offline"));
+      }
+      if (baseAuditReads === 2) {
+        return {
+          items: [auditItem("이전 기준")],
+          nextCursor: "cursor-1",
+        };
+      }
+      return {
+        items: [auditItem("최신 기준")],
+        nextCursor: "latest-cursor",
+      };
+    }
+    if (path.endsWith("cursor=cursor-1")) {
+      firstCursorReads += 1;
+      return oldPage.promise;
+    }
+    if (path.endsWith("cursor=latest-cursor")) {
+      latestCursorReads += 1;
+      return {
+        items: [auditItem("최신 페이지")],
+        nextCursor: null,
+      };
+    }
+    return defaultGet(path);
+  });
+
+  render(<ProjectDetailPage projectId="project-1" />);
+  fireEvent.click(await screen.findByRole("tab", { name: "변경 이력" }));
+  const retryAudit = captureReactClickHandler(
+    await screen.findByRole("button", { name: "다시 시도" }),
+  );
+  act(() => retryAudit());
+  expect(await screen.findByText("이전 기준")).toBeVisible();
+
+  fireEvent.click(screen.getByRole("button", { name: "이력 더 보기" }));
+  await waitFor(() => expect(firstCursorReads).toBe(1));
+  act(() => retryAudit());
+  expect(await screen.findByText("최신 기준")).toBeVisible();
+
+  await act(async () => {
+    oldPage.resolve({
+      items: [auditItem("무효 페이지")],
+      nextCursor: null,
+    });
+    await oldPage.promise;
+  });
+
+  expect(screen.getByText("최신 기준")).toBeVisible();
+  expect(screen.queryByText("이전 기준")).not.toBeInTheDocument();
+  expect(screen.queryByText("무효 페이지")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "이력 더 보기" }));
+  expect(latestCursorReads).toBe(1);
+  expect(await screen.findByText("최신 페이지")).toBeVisible();
+});
+
 it("invalidates the audit cursor and preserves a newer request lock across a full reload", async () => {
   const oldPage = deferred<{
     items: ReturnType<typeof auditItem>[];
