@@ -10,6 +10,10 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { ProjectFormDialog } from "./ProjectFormDialog";
+import {
+  ProjectHeaderSkeleton,
+  ProjectTabSkeleton,
+} from "./ProjectLoadingStates";
 import { ProjectsPage } from "./ProjectsPage";
 
 const { mockApi, mockRole } = vi.hoisted(() => ({
@@ -63,9 +67,7 @@ it("shows project skeletons before deciding the list is empty", async () => {
   mockApi.get.mockReturnValueOnce(request.promise);
   render(<ProjectsPage />);
 
-  expect(screen.getByRole("status")).toHaveTextContent(
-    "프로젝트 불러오는 중…",
-  );
+  expect(screen.getByRole("status")).toHaveTextContent("프로젝트 불러오는 중…");
   expect(screen.getByTestId("project-grid-skeleton")).toHaveAttribute(
     "aria-busy",
     "true",
@@ -92,6 +94,80 @@ it("retries a failed project list request", async () => {
   expect(mockApi.get).toHaveBeenCalledTimes(2);
 });
 
+it("keeps the initial skeleton when project creation fails before the list loads", async () => {
+  const initial = deferred<(typeof projectFixture)[]>();
+  mockApi.get.mockReturnValueOnce(initial.promise);
+  mockApi.post.mockRejectedValueOnce(new Error("create failed"));
+  render(<ProjectsPage />);
+
+  fireEvent.click(screen.getByRole("button", { name: "새 프로젝트" }));
+  fireEvent.change(screen.getByLabelText("프로젝트 이름"), {
+    target: { value: "실패 프로젝트" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "프로젝트 만들기" }));
+
+  expect(
+    await screen.findByText("프로젝트를 만들지 못했습니다."),
+  ).toBeVisible();
+  expect(screen.getByTestId("project-grid-skeleton")).toBeVisible();
+  expect(
+    screen.queryByText("등록된 프로젝트가 없습니다."),
+  ).not.toBeInTheDocument();
+
+  await act(async () => {
+    initial.resolve([]);
+    await initial.promise;
+  });
+  expect(screen.getByText("등록된 프로젝트가 없습니다.")).toBeVisible();
+});
+
+it("keeps the retry button loading while a retry request is pending", async () => {
+  const retry = deferred<(typeof projectFixture)[]>();
+  mockApi.get
+    .mockRejectedValueOnce(new Error("offline"))
+    .mockReturnValueOnce(retry.promise);
+  render(<ProjectsPage />);
+
+  fireEvent.click(await screen.findByRole("button", { name: "다시 시도" }));
+  const retryButton = screen.getByRole("button", { name: "다시 시도 중…" });
+  expect(retryButton).toBeDisabled();
+  fireEvent.click(retryButton);
+  expect(mockApi.get).toHaveBeenCalledTimes(2);
+
+  await act(async () => {
+    retry.resolve([projectFixture]);
+    await retry.promise;
+  });
+});
+
+it("exposes the supplied loading message from project header and tab skeletons", () => {
+  const header = render(
+    <ProjectHeaderSkeleton message="프로젝트 정보 불러오는 중…" />,
+  );
+  expect(screen.getByRole("status")).toHaveTextContent(
+    "프로젝트 정보 불러오는 중…",
+  );
+  expect(screen.getByRole("status").parentElement).toHaveAttribute(
+    "aria-busy",
+    "true",
+  );
+  header.unmount();
+
+  for (const [kind, message] of [
+    ["cards", "카드 프로젝트 불러오는 중…"],
+    ["list", "목록 프로젝트 불러오는 중…"],
+    ["table", "표 프로젝트 불러오는 중…"],
+  ] as const) {
+    const tab = render(<ProjectTabSkeleton kind={kind} message={message} />);
+    expect(screen.getByRole("status")).toHaveTextContent(message);
+    expect(screen.getByRole("status").parentElement).toHaveAttribute(
+      "aria-busy",
+      "true",
+    );
+    tab.unmount();
+  }
+});
+
 it("keeps existing projects visible when a project refresh fails", async () => {
   mockApi.get
     .mockResolvedValueOnce([projectFixture])
@@ -106,7 +182,9 @@ it("keeps existing projects visible when a project refresh fails", async () => {
   });
   fireEvent.click(screen.getByRole("button", { name: "프로젝트 만들기" }));
 
-  expect(await screen.findByText("프로젝트 목록을 불러오지 못했습니다.")).toBeVisible();
+  expect(
+    await screen.findByText("프로젝트 목록을 불러오지 못했습니다."),
+  ).toBeVisible();
   expect(screen.getByText(projectFixture.name)).toBeVisible();
   expect(screen.getByRole("button", { name: "다시 시도" })).toBeVisible();
 });
@@ -349,7 +427,7 @@ it("does not let a stale initial response overwrite the post-create reload", asy
   expect(screen.queryByText("오래된 응답")).not.toBeInTheDocument();
 });
 
-it("does not let a late initial load failure overwrite the current create failure", async () => {
+it("keeps the create failure visible when the pending initial load also fails", async () => {
   let rejectInitial: ((reason?: unknown) => void) | undefined;
   const initial = new Promise<(typeof projectFixture)[]>((_resolve, reject) => {
     rejectInitial = reject;
@@ -373,8 +451,9 @@ it("does not let a late initial load failure overwrite the current create failur
   });
   expect(screen.getByText("프로젝트를 만들지 못했습니다.")).toBeVisible();
   expect(
-    screen.queryByText("프로젝트 목록을 불러오지 못했습니다."),
-  ).not.toBeInTheDocument();
+    screen.getByText("프로젝트 목록을 불러오지 못했습니다."),
+  ).toBeVisible();
+  expect(screen.getByRole("button", { name: "다시 시도" })).toBeVisible();
 });
 
 it("links cards to project details", async () => {

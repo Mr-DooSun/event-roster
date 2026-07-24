@@ -54,8 +54,6 @@ export function ProjectsPage() {
   }, [load]);
 
   async function create(input: ProjectCreateInput) {
-    loadGeneration.current += 1;
-    setLoadState(null);
     setCreateError(null);
     try {
       await api.post("/projects", input);
@@ -86,14 +84,14 @@ export function ProjectsPage() {
       {createError ? (
         <StatusMessage tone="error">{createError}</StatusMessage>
       ) : null}
-      {loadState === "INITIAL" && !hasLoaded.current ? (
-        <ProjectGridSkeleton />
-      ) : error && !hasLoaded.current ? (
+      {error && !hasLoaded.current ? (
         <RetryableError
           message={error}
           retrying={loadState === "INITIAL"}
           onRetry={load}
         />
+      ) : loadState === "INITIAL" && !hasLoaded.current ? (
+        <ProjectGridSkeleton />
       ) : (
         <>
           {error ? (
