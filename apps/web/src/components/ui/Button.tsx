@@ -20,8 +20,8 @@ export function Button({
     <button
       className={`er-button er-button--${variant} ${className}`.trim()}
       disabled={disabled || loading}
-      aria-busy={loading || undefined}
       {...props}
+      aria-busy={loading || props["aria-busy"] || undefined}
     >
       {loading ? (
         <>

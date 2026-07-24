@@ -178,11 +178,10 @@ it("tracks concurrent production roster rows without replaying the same row", as
   const firstButton = await screen.findByRole("button", {
     name: "박민수 취소",
   });
-  const clickFirst = captureReactClickHandler(firstButton);
 
   act(() => {
-    clickFirst();
-    clickFirst();
+    firstButton.click();
+    firstButton.click();
   });
 
   await waitFor(() =>
@@ -1311,16 +1310,4 @@ function deferred<T>() {
     reject = nextReject;
   });
   return { promise, resolve, reject };
-}
-
-function captureReactClickHandler(element: HTMLElement) {
-  const reactPropsKey = Object.getOwnPropertyNames(element).find((key) =>
-    key.startsWith("__reactProps$"),
-  );
-  if (!reactPropsKey) throw new Error("React click props not found");
-  const props = (
-    element as unknown as Record<string, { onClick?: () => void }>
-  )[reactPropsKey];
-  if (!props?.onClick) throw new Error("React click handler not found");
-  return props.onClick;
 }

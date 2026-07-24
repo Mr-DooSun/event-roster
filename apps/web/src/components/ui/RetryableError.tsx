@@ -7,7 +7,7 @@ export function RetryableError({
   retrying = false,
 }: {
   message: string;
-  onRetry: () => void | Promise<unknown>;
+  onRetry: () => unknown;
   retrying?: boolean;
 }) {
   return (

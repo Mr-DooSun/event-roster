@@ -2,9 +2,11 @@ import type {
   NormalizedImportRow,
   ProjectOrganization,
 } from "@event-roster/contracts";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "../../components/ui/Button";
 import { Card } from "../../components/ui/Card";
+import { LoadingStatus } from "../../components/ui/LoadingStatus";
+import { RetryableError } from "../../components/ui/RetryableError";
 import { StatusMessage } from "../../components/ui/StatusMessage";
 import { ApiError } from "../../lib/api";
 import {
@@ -27,6 +29,8 @@ interface ImportRequestOwner {
   generation: number;
 }
 
+type ImportBusyAction = "READ_FILE" | "VALIDATE" | "COMMIT" | null;
+
 export function ImportWizard({ projectId }: { projectId: string }) {
   const { api } = useAuth();
   const [parsed, setParsed] = useState<ParsedWorkbook | null>(null);
@@ -45,13 +49,16 @@ export function ImportWizard({ projectId }: { projectId: string }) {
   const [organizationError, setOrganizationError] = useState<string | null>(
     null,
   );
+  const [organizationLoading, setOrganizationLoading] = useState(true);
+  const organizationGeneration = useRef(0);
   const fileInput = useRef<HTMLInputElement>(null);
   const workflowGeneration = useRef(0);
   const currentProjectId = useRef(projectId);
   currentProjectId.current = projectId;
   const requestInFlight = useRef(false);
   const requestOwner = useRef<ImportRequestOwner | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [busyAction, setBusyAction] = useState<ImportBusyAction>(null);
+  const busy = busyAction !== null;
   const headers = useMemo(
     () => (parsed && sheetName ? getSheetHeaders(parsed, sheetName) : []),
     [parsed, sheetName],
@@ -69,7 +76,7 @@ export function ImportWizard({ projectId }: { projectId: string }) {
     workflowGeneration.current += 1;
     requestOwner.current = null;
     requestInFlight.current = false;
-    setBusy(false);
+    setBusyAction(null);
     setParsed(null);
     setSheetName("");
     setColumns({ name: "", organization: "" });
@@ -80,28 +87,50 @@ export function ImportWizard({ projectId }: { projectId: string }) {
     setProjectClosed(false);
     if (fileInput.current) fileInput.current.value = "";
   }, [projectId]);
-  useEffect(() => {
-    let current = true;
-    api
-      .get<ProjectOrganization[]>(`/projects/${projectId}/organizations`)
-      .then((memberships) => {
-        if (!current) return;
-        setActiveOrganizations(
-          memberships.filter(
-            (membership) => membership.isActive && membership.masterIsActive,
-          ),
-        );
-        setOrganizationError(null);
-      })
-      .catch(() => {
-        if (current) {
-          setOrganizationError("프로젝트 조직을 불러오지 못했습니다.");
-        }
-      });
-    return () => {
-      current = false;
-    };
+  const loadOrganizations = useCallback(async () => {
+    const generation = organizationGeneration.current + 1;
+    organizationGeneration.current = generation;
+    const requestedProjectId = projectId;
+    setOrganizationLoading(true);
+    setOrganizationError(null);
+    try {
+      const memberships = await api.get<ProjectOrganization[]>(
+        `/projects/${projectId}/organizations`,
+      );
+      if (
+        generation !== organizationGeneration.current ||
+        requestedProjectId !== currentProjectId.current
+      )
+        return;
+      setActiveOrganizations(
+        memberships.filter(
+          (membership) => membership.isActive && membership.masterIsActive,
+        ),
+      );
+    } catch {
+      if (
+        generation === organizationGeneration.current &&
+        requestedProjectId === currentProjectId.current
+      ) {
+        setOrganizationError("프로젝트 조직을 불러오지 못했습니다.");
+      }
+    } finally {
+      if (
+        generation === organizationGeneration.current &&
+        requestedProjectId === currentProjectId.current
+      ) {
+        setOrganizationLoading(false);
+      }
+    }
   }, [api, projectId]);
+  useEffect(() => {
+    setActiveOrganizations([]);
+    setOrganizationError(null);
+    void loadOrganizations();
+    return () => {
+      organizationGeneration.current += 1;
+    };
+  }, [loadOrganizations]);
   useEffect(() => {
     if (!busy) return;
     const preventExit = (event: BeforeUnloadEvent) => {
@@ -117,6 +146,7 @@ export function ImportWizard({ projectId }: { projectId: string }) {
     if (!file) return;
     const generation = workflowGeneration.current;
     const requestedProjectId = projectId;
+    setBusyAction("READ_FILE");
     try {
       const next = await readWorkbook(file);
       if (
@@ -141,6 +171,13 @@ export function ImportWizard({ projectId }: { projectId: string }) {
       )
         return;
       setMessage("엑셀 파일을 읽지 못했습니다.");
+    } finally {
+      if (
+        generation === workflowGeneration.current &&
+        requestedProjectId === currentProjectId.current
+      ) {
+        setBusyAction(null);
+      }
     }
   }
 
@@ -175,7 +212,7 @@ export function ImportWizard({ projectId }: { projectId: string }) {
     const owner = { projectId, generation };
     requestOwner.current = owner;
     requestInFlight.current = true;
-    setBusy(true);
+    setBusyAction("VALIDATE");
     try {
       const result = await api.post<ValidationResult>(
         `/projects/${projectId}/imports/validate`,
@@ -223,7 +260,7 @@ export function ImportWizard({ projectId }: { projectId: string }) {
     const owner = { projectId, generation };
     requestOwner.current = owner;
     requestInFlight.current = true;
-    setBusy(true);
+    setBusyAction("COMMIT");
     try {
       const result = await api.post<{ importedCount: number }>(
         `/projects/${projectId}/imports/commit`,
@@ -260,14 +297,14 @@ export function ImportWizard({ projectId }: { projectId: string }) {
     if (requestOwner.current !== owner) return;
     requestOwner.current = null;
     requestInFlight.current = false;
-    setBusy(false);
+    setBusyAction(null);
   }
 
   function clearWorkbook() {
     workflowGeneration.current += 1;
     requestOwner.current = null;
     requestInFlight.current = false;
-    setBusy(false);
+    setBusyAction(null);
     setParsed(null);
     setSheetName("");
     setColumns({ name: "", organization: "" });
@@ -283,7 +320,7 @@ export function ImportWizard({ projectId }: { projectId: string }) {
     workflowGeneration.current += 1;
     requestOwner.current = null;
     requestInFlight.current = false;
-    setBusy(false);
+    setBusyAction(null);
     setParsed(null);
     setSheetName("");
     setColumns({ name: "", organization: "" });
@@ -311,18 +348,12 @@ export function ImportWizard({ projectId }: { projectId: string }) {
             원본 파일은 브라우저에서만 읽고 서버에 보관하지 않습니다.
           </p>
         </div>
-        {busy ? (
-          <span className="er-button er-button--secondary" aria-disabled="true">
-            처리 중…
-          </span>
-        ) : (
-          <a
-            className="er-button er-button--secondary"
-            href={`/projects/${projectId}`}
-          >
-            명단으로 돌아가기
-          </a>
-        )}
+        <a
+          className="er-button er-button--secondary"
+          href={`/projects/${projectId}`}
+        >
+          명단으로 돌아가기
+        </a>
       </header>
       {message ? (
         <StatusMessage tone={projectClosed ? "error" : "info"}>
@@ -337,10 +368,18 @@ export function ImportWizard({ projectId }: { projectId: string }) {
           최신 프로젝트 보기
         </a>
       ) : null}
-      <Card className="er-panel">
+      <Card className="er-panel" aria-busy={organizationLoading || undefined}>
         <h2>가져오기 대상 조직</h2>
-        {organizationError ? (
-          <StatusMessage tone="error">{organizationError}</StatusMessage>
+        {organizationLoading ? (
+          <div aria-busy="true">
+            <LoadingStatus>프로젝트 조직 불러오는 중…</LoadingStatus>
+          </div>
+        ) : organizationError ? (
+          <RetryableError
+            message={organizationError}
+            onRetry={loadOrganizations}
+            retrying={organizationLoading}
+          />
         ) : (
           <>
             <p className="er-muted">활성 조직 {activeOrganizations.length}개</p>
@@ -352,7 +391,10 @@ export function ImportWizard({ projectId }: { projectId: string }) {
           </>
         )}
       </Card>
-      <Card className="er-panel">
+      <Card
+        className="er-panel"
+        aria-busy={busyAction === "READ_FILE" || undefined}
+      >
         <label className="er-field">
           <span>엑셀 파일</span>
           <input
@@ -365,9 +407,15 @@ export function ImportWizard({ projectId }: { projectId: string }) {
             }
           />
         </label>
+        {busyAction === "READ_FILE" ? (
+          <LoadingStatus>파일 읽는 중…</LoadingStatus>
+        ) : null}
       </Card>
       {parsed ? (
-        <Card className="er-panel er-page-stack">
+        <Card
+          className="er-panel er-page-stack"
+          aria-busy={busyAction === "VALIDATE" || undefined}
+        >
           <label className="er-field">
             <span>시트</span>
             <select
@@ -399,7 +447,9 @@ export function ImportWizard({ projectId }: { projectId: string }) {
             <Button
               type="button"
               variant="primary"
-              disabled={busy}
+              loading={busyAction === "VALIDATE"}
+              loadingText="검증 중…"
+              disabled={busyAction === "COMMIT"}
               onClick={() => void validate()}
             >
               {resolutionDirty ? "다시 검증" : "서버 검증"}
@@ -411,7 +461,10 @@ export function ImportWizard({ projectId }: { projectId: string }) {
         </Card>
       ) : null}
       {validation ? (
-        <Card className="er-panel er-page-stack">
+        <Card
+          className="er-panel er-page-stack"
+          aria-busy={busyAction === "COMMIT" || undefined}
+        >
           <h2>검증 결과</h2>
           <ValidationTable
             rows={validation.rows}
@@ -422,7 +475,9 @@ export function ImportWizard({ projectId }: { projectId: string }) {
           <Button
             type="button"
             variant="primary"
-            disabled={!canCommit || busy}
+            loading={busyAction === "COMMIT"}
+            loadingText="가져오는 중…"
+            disabled={!canCommit || busyAction === "VALIDATE"}
             onClick={() => void commit()}
           >
             명단 확정

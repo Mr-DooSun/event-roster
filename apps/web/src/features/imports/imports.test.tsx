@@ -78,6 +78,202 @@ it("loads only active project organizations as import targets", async () => {
   ).toBe(true);
 });
 
+it("shows organization loading without flashing an empty count", async () => {
+  let resolveOrganizations: ((response: Response) => void) | undefined;
+  const pendingOrganizations = new Promise<Response>((resolve) => {
+    resolveOrganizations = resolve;
+  });
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/auth/login")) {
+        return Promise.resolve(Response.json(auth()));
+      }
+      if (url.endsWith("/projects/project-1/organizations")) {
+        return pendingOrganizations;
+      }
+      throw new Error(`unexpected request: ${url}`);
+    }),
+  );
+  render(
+    <AuthProvider restoreOnMount={false}>
+      <Gate>
+        <ImportWizard projectId="project-1" />
+      </Gate>
+    </AuthProvider>,
+  );
+  await login();
+
+  expect(await screen.findByText("프로젝트 조직 불러오는 중…")).toBeVisible();
+  expect(screen.queryByText("활성 조직 0개")).not.toBeInTheDocument();
+
+  await act(async () => {
+    resolveOrganizations?.(Response.json([]));
+    await pendingOrganizations;
+  });
+  expect(await screen.findByText("활성 조직 0개")).toBeVisible();
+});
+
+it("retries only the failed organization region", async () => {
+  let organizationReads = 0;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/auth/login")) {
+        return Promise.resolve(Response.json(auth()));
+      }
+      if (url.endsWith("/projects/project-1/organizations")) {
+        organizationReads += 1;
+        return organizationReads === 1
+          ? Promise.reject(new Error("organizations unavailable"))
+          : Promise.resolve(
+              Response.json([
+                {
+                  organizationId: "org-recovered",
+                  name: "복구된 조직",
+                  isActive: true,
+                  masterIsActive: true,
+                  activeProjectCount: 1,
+                  hasHistory: false,
+                },
+              ]),
+            );
+      }
+      throw new Error(`unexpected request: ${url}`);
+    }),
+  );
+  render(
+    <AuthProvider restoreOnMount={false}>
+      <Gate>
+        <ImportWizard projectId="project-1" />
+      </Gate>
+    </AuthProvider>,
+  );
+  await login();
+
+  expect(
+    await screen.findByText("프로젝트 조직을 불러오지 못했습니다."),
+  ).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "다시 시도" }));
+
+  expect(await screen.findByText("복구된 조직")).toBeVisible();
+  expect(organizationReads).toBe(2);
+});
+
+it("ignores organizations loaded for an obsolete project", async () => {
+  let resolveProjectOne: ((response: Response) => void) | undefined;
+  const projectOneOrganizations = new Promise<Response>((resolve) => {
+    resolveProjectOne = resolve;
+  });
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/auth/login")) {
+        return Promise.resolve(Response.json(auth()));
+      }
+      if (url.endsWith("/projects/project-1/organizations")) {
+        return projectOneOrganizations;
+      }
+      if (url.endsWith("/projects/project-2/organizations")) {
+        return Promise.resolve(
+          Response.json([
+            {
+              organizationId: "org-current",
+              name: "현재 프로젝트 조직",
+              isActive: true,
+              masterIsActive: true,
+              activeProjectCount: 1,
+              hasHistory: false,
+            },
+          ]),
+        );
+      }
+      throw new Error(`unexpected request: ${url}`);
+    }),
+  );
+  const view = render(
+    <AuthProvider restoreOnMount={false}>
+      <Gate>
+        <ImportWizard projectId="project-1" />
+      </Gate>
+    </AuthProvider>,
+  );
+  await login();
+  expect(await screen.findByText("프로젝트 조직 불러오는 중…")).toBeVisible();
+
+  view.rerender(
+    <AuthProvider restoreOnMount={false}>
+      <Gate>
+        <ImportWizard projectId="project-2" />
+      </Gate>
+    </AuthProvider>,
+  );
+  expect(await screen.findByText("현재 프로젝트 조직")).toBeVisible();
+
+  await act(async () => {
+    resolveProjectOne?.(
+      Response.json([
+        {
+          organizationId: "org-obsolete",
+          name: "이전 프로젝트 조직",
+          isActive: true,
+          masterIsActive: true,
+          activeProjectCount: 1,
+          hasHistory: false,
+        },
+      ]),
+    );
+    await projectOneOrganizations;
+  });
+  expect(screen.queryByText("이전 프로젝트 조직")).not.toBeInTheDocument();
+  expect(screen.getByText("현재 프로젝트 조직")).toBeVisible();
+});
+
+it("shows file reading progress and locks the file input", async () => {
+  let resolveWorkbook:
+    | ((workbook: workbookReader.ParsedWorkbook) => void)
+    | undefined;
+  const pendingWorkbook = new Promise<workbookReader.ParsedWorkbook>(
+    (resolve) => {
+      resolveWorkbook = resolve;
+    },
+  );
+  vi.spyOn(workbookReader, "readWorkbook").mockReturnValueOnce(pendingWorkbook);
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL) =>
+      String(input).endsWith("/auth/login")
+        ? Promise.resolve(Response.json(auth()))
+        : Promise.reject(new Error("organizations unavailable")),
+    ),
+  );
+  render(
+    <AuthProvider restoreOnMount={false}>
+      <Gate>
+        <ImportWizard projectId="project-1" />
+      </Gate>
+    </AuthProvider>,
+  );
+  await login();
+  fireEvent.change(await screen.findByLabelText("엑셀 파일"), {
+    target: { files: [new File(["workbook"], "roster.xlsx")] },
+  });
+
+  const fileLoadingStatus = await screen.findByText("파일 읽는 중…");
+  expect(fileLoadingStatus).toBeVisible();
+  expect(fileLoadingStatus.closest("[aria-busy=true]")).not.toBeNull();
+  expect(screen.getByLabelText("엑셀 파일")).toBeDisabled();
+
+  await act(async () => {
+    resolveWorkbook?.(parsedWorkbookFixture([{ 이름: "박민수", 조직: "1팀" }]));
+    await pendingWorkbook;
+  });
+  expect(await screen.findByLabelText("시트")).toBeEnabled();
+});
+
 it("sends normalized rows without uploading the source workbook", async () => {
   const fetchMock = vi.fn((input: RequestInfo | URL, _init?: RequestInit) => {
     const url = String(input);
@@ -241,6 +437,8 @@ it("ignores a validation response from an obsolete column mapping", async () => 
     target: { files: [workbookFixture([{ 이름: "박민수", 조직: "1팀" }])] },
   });
   fireEvent.click(await screen.findByRole("button", { name: "서버 검증" }));
+  expect(screen.getByRole("button", { name: "검증 중…" })).toBeDisabled();
+  expect(screen.getByLabelText("엑셀 파일")).toBeDisabled();
   fireEvent.change(screen.getByLabelText("조직 열"), {
     target: { value: "이름" },
   });
@@ -318,14 +516,17 @@ it("locks workflow controls until an atomic commit response arrives", async () =
   fireEvent.click(await screen.findByRole("button", { name: "서버 검증" }));
   fireEvent.click(await screen.findByRole("button", { name: "명단 확정" }));
 
+  expect(screen.getByRole("button", { name: "가져오는 중…" })).toBeDisabled();
+  const validationHeading = screen.getByRole("heading", {
+    name: "검증 결과",
+  });
+  expect(validationHeading).toBeVisible();
+  expect(validationHeading.closest("[aria-busy=true]")).not.toBeNull();
   expect(screen.getByLabelText("엑셀 파일")).toBeDisabled();
   expect(screen.getByLabelText("시트")).toBeDisabled();
   expect(screen.getByLabelText("이름 열")).toBeDisabled();
   expect(screen.getByRole("button", { name: "취소" })).toBeDisabled();
-  expect(
-    screen.queryByRole("link", { name: "명단으로 돌아가기" }),
-  ).not.toBeInTheDocument();
-  expect(screen.getByText("처리 중…")).toHaveAttribute("aria-disabled", "true");
+  expect(screen.getByRole("link", { name: "명단으로 돌아가기" })).toBeVisible();
 
   await act(async () => {
     resolveCommit(
@@ -574,9 +775,9 @@ it("keeps a current project request locked when an obsolete project request sett
     resolveProjectOne(Response.json({ projectRevision: 1, rows: [] }));
     await projectOneRequest;
   });
-  expect(screen.getByText("처리 중…")).toBeVisible();
+  expect(screen.getByText("검증 중…")).toBeVisible();
   expect(screen.getByLabelText("엑셀 파일")).toBeDisabled();
-  const validateButton = screen.getByRole("button", { name: "서버 검증" });
+  const validateButton = screen.getByRole("button", { name: "검증 중…" });
   expect(validateButton).toBeDisabled();
   fireEvent.click(validateButton);
   expect(
@@ -620,16 +821,23 @@ async function login() {
 }
 
 function workbookFixture(rows: Array<Record<string, string>>) {
+  const { workbook } = parsedWorkbookFixture(rows);
+  const bytes = XLSX.write(workbook, { type: "array", bookType: "xlsx" });
+  return new File([bytes], "source-roster.xlsx", {
+    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  });
+}
+
+function parsedWorkbookFixture(
+  rows: Array<Record<string, string>>,
+): workbookReader.ParsedWorkbook {
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(
     workbook,
     XLSX.utils.json_to_sheet(rows),
     "참가자",
   );
-  const bytes = XLSX.write(workbook, { type: "array", bookType: "xlsx" });
-  return new File([bytes], "source-roster.xlsx", {
-    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  });
+  return { workbook, sheetNames: ["참가자"] };
 }
 
 function auth() {

@@ -73,7 +73,9 @@ it("shows pending feedback and prevents duplicate password changes", async () =>
   });
   const fetchMock = vi.fn((input: RequestInfo | URL) => {
     if (String(input).endsWith("/auth/login")) {
-      return Promise.resolve(Response.json(authSuccess("MUST_CHANGE_PASSWORD")));
+      return Promise.resolve(
+        Response.json(authSuccess("MUST_CHANGE_PASSWORD")),
+      );
     }
     if (String(input).endsWith("/auth/change-password")) return pendingChange;
     if (String(input).endsWith("/auth/logout")) {
@@ -541,7 +543,9 @@ it("keeps logout progress visible until the pending logout completes", async () 
   expect(pendingButton).toBeDisabled();
   fireEvent.click(pendingButton);
   expect(
-    fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/auth/logout")),
+    fetchMock.mock.calls.filter(([url]) =>
+      String(url).endsWith("/auth/logout"),
+    ),
   ).toHaveLength(1);
 
   resolveLogout?.(new Response(null, { status: 204 }));

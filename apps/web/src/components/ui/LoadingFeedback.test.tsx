@@ -20,15 +20,13 @@ it("hides skeleton shapes and exposes the live loading message", () => {
     "aria-hidden",
     "true",
   );
-  expect(screen.getByRole("status")).toHaveTextContent(
-    "프로젝트 불러오는 중…",
-  );
+  expect(screen.getByRole("status")).toHaveTextContent("프로젝트 불러오는 중…");
   expect(screen.getByRole("status")).toHaveClass("er-visually-hidden");
 });
 
 it("disables a loading button and replaces its visible label", () => {
   render(
-    <Button loading loadingText="저장 중…" variant="primary">
+    <Button loading loadingText="저장 중…" variant="primary" aria-busy="false">
       저장
     </Button>,
   );
