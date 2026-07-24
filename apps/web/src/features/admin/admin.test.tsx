@@ -176,31 +176,13 @@ it("updates an existing account role and active state without assignments", asyn
 });
 
 it("searches and filters organization summaries", async () => {
+  const organizations = deferred<Response>();
   const fetchMock = vi.fn((input: RequestInfo | URL) => {
     const url = String(input);
     if (url.endsWith("/auth/login"))
       return Promise.resolve(Response.json(auth()));
     if (url.includes("/organizations?")) {
-      return Promise.resolve(
-        Response.json([
-          {
-            id: "org-1",
-            name: "1팀",
-            isActive: true,
-            primaryLeader: null,
-            managerCount: 0,
-            projectCount: 0,
-          },
-          {
-            id: "org-2",
-            name: "2팀",
-            isActive: true,
-            primaryLeader: { userId: "leader-1", displayName: "김대표" },
-            managerCount: 2,
-            projectCount: 1,
-          },
-        ]),
-      );
+      return organizations.promise;
     }
     throw new Error(`unexpected request: ${url}`);
   });
@@ -216,9 +198,34 @@ it("searches and filters organization summaries", async () => {
 
   expect(await screen.findByLabelText("조직 이름 검색")).toBeVisible();
   expect(screen.getByLabelText("대표 조직장 상태")).toBeVisible();
-  const firstCard = screen
-    .getByRole("link", { name: "1팀 상세 관리" })
-    .closest(".er-organization-summary-card");
+  expect(
+    screen.queryByRole("link", { name: "1팀 상세 관리" }),
+  ).not.toBeInTheDocument();
+
+  organizations.resolve(
+    Response.json([
+      {
+        id: "org-1",
+        name: "1팀",
+        isActive: true,
+        primaryLeader: null,
+        managerCount: 0,
+        projectCount: 0,
+      },
+      {
+        id: "org-2",
+        name: "2팀",
+        isActive: true,
+        primaryLeader: { userId: "leader-1", displayName: "김대표" },
+        managerCount: 2,
+        projectCount: 1,
+      },
+    ]),
+  );
+
+  const firstCard = (
+    await screen.findByRole("link", { name: "1팀 상세 관리" })
+  ).closest(".er-organization-summary-card");
   const secondCard = screen
     .getByRole("link", { name: "2팀 상세 관리" })
     .closest(".er-organization-summary-card");
@@ -231,10 +238,11 @@ it("searches and filters organization summaries", async () => {
   expect(within(secondCard as HTMLElement).getByText("김대표")).toBeVisible();
   expect(within(secondCard as HTMLElement).getByText("3명")).toBeVisible();
   expect(within(secondCard as HTMLElement).getByText("1개")).toBeVisible();
-  expect(screen.getByRole("link", { name: "1팀 상세 관리" })).toHaveAttribute(
-    "href",
-    "/organizations/org-1",
-  );
+  expect(
+    within(firstCard as HTMLElement).getByRole("link", {
+      name: "1팀 상세 관리",
+    }),
+  ).toHaveAttribute("href", "/organizations/org-1");
 
   fireEvent.change(screen.getByLabelText("조직 이름 검색"), {
     target: { value: "운영 팀" },
