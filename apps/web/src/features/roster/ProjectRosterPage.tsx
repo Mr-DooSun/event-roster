@@ -20,6 +20,7 @@ export interface ProjectRosterPageProps {
   participants: ParticipantView[];
   organizations: Organization[];
   canMutate: boolean;
+  participantCandidatesAvailable?: boolean;
   onChanged(): Promise<void>;
 }
 
@@ -29,6 +30,7 @@ export function ProjectRosterPage({
   participants,
   organizations,
   canMutate,
+  participantCandidatesAvailable = true,
   onChanged,
 }: ProjectRosterPageProps) {
   const { api, auth } = useAuth();
@@ -219,6 +221,7 @@ export function ProjectRosterPage({
           <Button
             type="button"
             variant="primary"
+            disabled={!participantCandidatesAvailable}
             onClick={() => setShowAdd(true)}
           >
             참가자 추가
@@ -234,6 +237,11 @@ export function ProjectRosterPage({
           canMutateRow={(row) =>
             auth?.session.user.role === "OPERATOR" ||
             activeOrganizationIds.has(row.organizationId)
+          }
+          canEditRow={(row) =>
+            participantCandidatesAvailable &&
+            (auth?.session.user.role === "OPERATOR" ||
+              activeOrganizationIds.has(row.organizationId))
           }
           onStatusChange={changeStatus}
           onEdit={edit}

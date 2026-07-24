@@ -20,6 +20,7 @@ export interface ProjectOrganizationsPanelProps {
   projectRevision: number;
   memberships: ProjectOrganization[];
   allOrganizations: Organization[];
+  organizationCandidatesAvailable?: boolean;
   canMutateMemberships: boolean;
   canManageOrganizations: boolean;
   onChanged(): Promise<void>;
@@ -42,6 +43,7 @@ export function ProjectOrganizationsPanel({
   projectRevision,
   memberships,
   allOrganizations,
+  organizationCandidatesAvailable = true,
   canMutateMemberships,
   canManageOrganizations,
   onChanged,
@@ -194,7 +196,11 @@ export function ProjectOrganizationsPanel({
             <OrganizationCombobox
               organizations={allOrganizations}
               linkedOrganizationIds={linkedOrganizationIds}
-              disabled={busy || !canMutateMemberships}
+              disabled={
+                busy ||
+                !canMutateMemberships ||
+                !organizationCandidatesAvailable
+              }
               onSelect={selectOrganization}
               onQueryChange={() => setPendingSelection(null)}
             />
@@ -206,6 +212,7 @@ export function ProjectOrganizationsPanel({
               disabled={
                 busy ||
                 !canMutateMemberships ||
+                !organizationCandidatesAvailable ||
                 !pendingSelection ||
                 pendingSelection.kind !== "EXISTING"
               }

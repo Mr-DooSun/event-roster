@@ -71,13 +71,15 @@ const TAB_RESOURCES: Record<ProjectTab, DetailResource[]> = {
   audit: ["audit"],
 };
 
-const TAB_LOADING_STATE: Record<
-  ProjectTab,
+const RESOURCE_LOADING_STATE: Record<
+  DetailResource,
   { kind: "cards" | "list" | "table"; message: string }
 > = {
-  overview: { kind: "cards", message: "프로젝트 개요 불러오는 중…" },
-  organizations: { kind: "list", message: "프로젝트 조직 불러오는 중…" },
+  summary: { kind: "cards", message: "프로젝트 개요 불러오는 중…" },
+  memberships: { kind: "list", message: "프로젝트 조직 불러오는 중…" },
+  organizations: { kind: "list", message: "전체 조직 불러오는 중…" },
   roster: { kind: "table", message: "참가 명단 불러오는 중…" },
+  participants: { kind: "list", message: "참가자 후보 불러오는 중…" },
   audit: { kind: "list", message: "변경 이력 불러오는 중…" },
 };
 
@@ -142,6 +144,8 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
   const [showTransition, setShowTransition] = useState(false);
   const [transitioning, setTransitioning] = useState(false);
   const loadGeneration = useRef(0);
+  const projectRequestToken = useRef(0);
+  const transitionRequestToken = useRef(0);
   const currentProjectId = useRef(projectId);
   const resourceRequestTokens = useRef({
     ...INITIAL_RESOURCE_REQUEST_TOKEN,
@@ -274,6 +278,34 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
     [api, loadResource, updateAuditNextCursor],
   );
 
+  const loadProject = useCallback(
+    async (context: RequestContext) => {
+      if (!isCurrent(context)) return null;
+      const requestToken = projectRequestToken.current + 1;
+      projectRequestToken.current = requestToken;
+      const ownsRequest = () =>
+        isCurrent(context) && projectRequestToken.current === requestToken;
+      setProjectLoading(true);
+      setProjectLoadError(null);
+      try {
+        const nextProject = await api.get<Project>(
+          `/projects/${context.projectId}`,
+        );
+        if (!ownsRequest()) return null;
+        setProject(nextProject);
+        return nextProject;
+      } catch {
+        if (ownsRequest()) {
+          setProjectLoadError("프로젝트 정보를 불러오지 못했습니다.");
+        }
+        return null;
+      } finally {
+        if (ownsRequest()) setProjectLoading(false);
+      }
+    },
+    [api, isCurrent],
+  );
+
   const load = useCallback(async () => {
     const context = {
       projectId,
@@ -283,30 +315,13 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
     auditPaginationRequest.current = null;
     setAuditLoadingMore(false);
     updateAuditNextCursor(null);
-    setProjectLoading(true);
     setResourceLoading({});
-    setProjectLoadError(null);
     setResourceErrors({});
     setAuditPaginationError(null);
     setMessage(null);
 
-    const projectRequest = (async () => {
-      try {
-        const nextProject = await api.get<Project>(
-          `/projects/${context.projectId}`,
-        );
-        if (isCurrent(context)) setProject(nextProject);
-      } catch {
-        if (isCurrent(context)) {
-          setProjectLoadError("프로젝트 정보를 불러오지 못했습니다.");
-        }
-      } finally {
-        if (isCurrent(context)) setProjectLoading(false);
-      }
-    })();
-
     await Promise.all([
-      projectRequest,
+      loadProject(context),
       ...(
         [
           "summary",
@@ -318,24 +333,32 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
         ] satisfies DetailResource[]
       ).map((resource) => loadDetailResource(context, resource)),
     ]);
-  }, [api, isCurrent, loadDetailResource, projectId, updateAuditNextCursor]);
+  }, [
+    isCurrent,
+    loadDetailResource,
+    loadProject,
+    projectId,
+    updateAuditNextCursor,
+  ]);
 
-  const retryProject = useCallback(() => load(), [load]);
-  const retryTab = useCallback(
-    async (tab: ProjectTab, expectedGeneration: number) => {
+  const retryProject = useCallback(
+    () =>
+      loadProject({
+        projectId,
+        generation: loadGeneration.current,
+      }),
+    [loadProject, projectId],
+  );
+  const retryResource = useCallback(
+    async (resource: DetailResource, expectedGeneration: number) => {
       const context = {
         projectId,
         generation: expectedGeneration,
       };
       if (!isCurrent(context)) return;
-      const failed = TAB_RESOURCES[tab].filter(
-        (resource) => resourceErrors[resource],
-      );
-      await Promise.all(
-        failed.map((resource) => loadDetailResource(context, resource)),
-      );
+      await loadDetailResource(context, resource);
     },
-    [isCurrent, loadDetailResource, projectId, resourceErrors],
+    [isCurrent, loadDetailResource, projectId],
   );
 
   useEffect(() => {
@@ -357,6 +380,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
     setShowEdit(false);
     setShowTransition(false);
     setTransitioning(false);
+    transitionRequestToken.current += 1;
     setProjectLoading(true);
     auditPaginationRequest.current = null;
     void load();
@@ -366,18 +390,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
   }, [load, projectId, updateAuditNextCursor]);
 
   async function reloadProjectForContext(context: RequestContext) {
-    if (!isCurrent(context)) return null;
-    try {
-      const latest = await api.get<Project>(`/projects/${context.projectId}`);
-      if (!isCurrent(context)) return null;
-      setProject(latest);
-      return latest;
-    } catch {
-      if (isCurrent(context)) {
-        setProjectLoadError("프로젝트 정보를 불러오지 못했습니다.");
-      }
-      return null;
-    }
+    return loadProject(context);
   }
 
   async function updateProject(input: ProjectEditInput) {
@@ -422,6 +435,11 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
     if (!project || transitioning) return;
     const context = { projectId, generation: loadGeneration.current };
     if (!isCurrent(context)) return;
+    const transitionToken = transitionRequestToken.current + 1;
+    transitionRequestToken.current = transitionToken;
+    const ownsTransition = () =>
+      currentProjectId.current === context.projectId &&
+      transitionRequestToken.current === transitionToken;
     const action = NEXT_ACTION[project.status];
     setTransitioning(true);
     setMessage(null);
@@ -430,12 +448,11 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
         targetStatus: action.target,
         expectedRevision: project.revision,
       });
-      if (!isCurrent(context)) return;
+      if (!isCurrent(context) || !ownsTransition()) return;
       setShowTransition(false);
-      setTransitioning(false);
       await load();
     } catch (error) {
-      if (!isCurrent(context)) return;
+      if (!isCurrent(context) || !ownsTransition()) return;
       setShowTransition(false);
       if (
         error instanceof ApiError &&
@@ -457,7 +474,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
         setMessage("프로젝트 상태를 변경하지 못했습니다.");
       }
     } finally {
-      if (isCurrent(context)) setTransitioning(false);
+      if (ownsTransition()) setTransitioning(false);
     }
   }
 
@@ -549,19 +566,48 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
     projectId: project.id,
     generation: loadGeneration.current,
   };
-  const selectedTabErrors = TAB_RESOURCES[selectedTab]
-    .map((resource) => resourceErrors[resource])
-    .filter((error): error is string => Boolean(error));
   const selectedTabLoading = TAB_RESOURCES[selectedTab].some(
     (resource) => resourceLoading[resource],
   );
-  const selectedTabLoaded = TAB_RESOURCES[selectedTab].every(
-    (resource) => resourceLoaded[resource],
-  );
   const renderGeneration = loadGeneration.current;
-  const showRefreshingContent = selectedTabLoaded && selectedTabLoading;
-  const showTabContent = selectedTabLoaded;
-  const tabLoadingState = TAB_LOADING_STATE[selectedTab];
+  const projectActionsBlocked =
+    projectLoading || Boolean(projectLoadError) || transitioning;
+  const membershipsLoaded = Boolean(resourceLoaded.memberships);
+  const organizationsLoaded = Boolean(resourceLoaded.organizations);
+  const rosterLoaded = Boolean(resourceLoaded.roster);
+  const participantsLoaded = Boolean(resourceLoaded.participants);
+
+  function renderResourceFeedback(
+    resource: DetailResource,
+    options: { compact?: boolean } = {},
+  ) {
+    const loaded = Boolean(resourceLoaded[resource]);
+    const loading = Boolean(resourceLoading[resource]);
+    const error = resourceErrors[resource];
+    const loadingState = RESOURCE_LOADING_STATE[resource];
+    return (
+      <>
+        {loading && loaded ? <LoadingStatus>새로고침 중…</LoadingStatus> : null}
+        {loading && !loaded ? (
+          options.compact ? (
+            <LoadingStatus>{loadingState.message}</LoadingStatus>
+          ) : (
+            <ProjectTabSkeleton
+              kind={loadingState.kind}
+              message={loadingState.message}
+            />
+          )
+        ) : null}
+        {error ? (
+          <RetryableError
+            message={error}
+            retrying={loading}
+            onRetry={() => retryResource(resource, renderGeneration)}
+          />
+        ) : null}
+      </>
+    );
+  }
 
   async function reloadAfterChildMutation() {
     if (!isCurrent(childContext)) return;
@@ -576,7 +622,10 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
 
   return (
     <div className="er-page-stack">
-      <header className="er-page-heading">
+      <header
+        className="er-page-heading"
+        aria-busy={projectLoading || undefined}
+      >
         <div>
           <p className="er-eyebrow">PROJECT DETAIL</p>
           <h1>{project.name}</h1>
@@ -592,13 +641,17 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
         </div>
         {operator ? (
           <div className="er-project-actions">
-            <Button type="button" onClick={() => setShowEdit(true)}>
+            <Button
+              type="button"
+              disabled={projectActionsBlocked}
+              onClick={() => setShowEdit(true)}
+            >
               {project.status === "CLOSED" ? "일정 수정" : "프로젝트 수정"}
             </Button>
             <Button
               type="button"
               variant={action.target === "CLOSED" ? "danger" : "primary"}
-              disabled={reopenBlocked}
+              disabled={reopenBlocked || projectActionsBlocked}
               onClick={() => setShowTransition(true)}
             >
               {action.label}
@@ -645,50 +698,60 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
         aria-labelledby={`project-${project.id}-${selectedTab}-tab`}
         aria-busy={selectedTabLoading}
       >
-        {showRefreshingContent ? (
-          <LoadingStatus>새로고침 중…</LoadingStatus>
-        ) : null}
-        {!selectedTabLoaded && selectedTabLoading ? (
-          <ProjectTabSkeleton
-            kind={tabLoadingState.kind}
-            message={tabLoadingState.message}
-          />
-        ) : null}
-        {selectedTabErrors.length > 0 ? (
-          <RetryableError
-            message={selectedTabErrors.join(" ")}
-            onRetry={() => retryTab(selectedTab, renderGeneration)}
-          />
-        ) : null}
-        {showTabContent && selectedTab === "overview" ? (
-          <ProjectOverview summary={summary} memberships={memberships} />
-        ) : null}
-        {showTabContent && selectedTab === "organizations" ? (
-          <ProjectOrganizationsPanel
-            key={project.id}
-            projectId={project.id}
-            projectRevision={project.revision}
-            memberships={memberships}
-            allOrganizations={allOrganizations}
-            canMutateMemberships={operator && project.status !== "CLOSED"}
-            canManageOrganizations={operator}
-            onChanged={reloadAfterChildMutation}
-            onProjectClosed={handleChildProjectClosed}
-          />
-        ) : null}
-        {showTabContent && selectedTab === "roster" ? (
-          <ProjectRosterPage
-            key={project.id}
-            project={project}
-            rows={rows}
-            participants={participants}
-            organizations={rosterOrganizations}
-            canMutate={canMutateRoster}
-            onChanged={reloadAfterChildMutation}
-          />
-        ) : null}
-        {showTabContent && selectedTab === "audit" ? (
+        {selectedTab === "overview" ? (
           <div className="er-page-stack">
+            {renderResourceFeedback("memberships")}
+            {renderResourceFeedback("summary")}
+            <ProjectOverview
+              summary={summary}
+              memberships={memberships}
+              showMemberships={Boolean(resourceLoaded.memberships)}
+              showSummary={Boolean(resourceLoaded.summary)}
+            />
+          </div>
+        ) : null}
+        {selectedTab === "organizations" ? (
+          <div className="er-page-stack">
+            {renderResourceFeedback("memberships")}
+            {renderResourceFeedback("organizations", { compact: true })}
+            {membershipsLoaded ? (
+              <ProjectOrganizationsPanel
+                key={project.id}
+                projectId={project.id}
+                projectRevision={project.revision}
+                memberships={memberships}
+                allOrganizations={allOrganizations}
+                organizationCandidatesAvailable={organizationsLoaded}
+                canMutateMemberships={operator && project.status !== "CLOSED"}
+                canManageOrganizations={operator}
+                onChanged={reloadAfterChildMutation}
+                onProjectClosed={handleChildProjectClosed}
+              />
+            ) : null}
+          </div>
+        ) : null}
+        {selectedTab === "roster" ? (
+          <div className="er-page-stack">
+            {renderResourceFeedback("memberships")}
+            {renderResourceFeedback("roster")}
+            {renderResourceFeedback("participants", { compact: true })}
+            {membershipsLoaded && rosterLoaded ? (
+              <ProjectRosterPage
+                key={project.id}
+                project={project}
+                rows={rows}
+                participants={participants}
+                organizations={rosterOrganizations}
+                canMutate={canMutateRoster}
+                participantCandidatesAvailable={participantsLoaded}
+                onChanged={reloadAfterChildMutation}
+              />
+            ) : null}
+          </div>
+        ) : null}
+        {selectedTab === "audit" ? (
+          <div className="er-page-stack">
+            {renderResourceFeedback("audit")}
             {auditPaginationError ? (
               <RetryableError
                 message={auditPaginationError}
@@ -696,14 +759,16 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
                 onRetry={() => loadMoreAudit(renderGeneration, auditNextCursor)}
               />
             ) : null}
-            <AuditPanel
-              items={audit}
-              nextCursor={auditNextCursor}
-              loadingMore={auditLoadingMore}
-              onLoadMore={() =>
-                loadMoreAudit(renderGeneration, auditNextCursor)
-              }
-            />
+            {resourceLoaded.audit ? (
+              <AuditPanel
+                items={audit}
+                nextCursor={auditNextCursor}
+                loadingMore={auditLoadingMore}
+                onLoadMore={() =>
+                  loadMoreAudit(renderGeneration, auditNextCursor)
+                }
+              />
+            ) : null}
           </div>
         ) : null}
       </div>
@@ -728,6 +793,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
             variant={action.target === "CLOSED" ? "danger" : "primary"}
             loading={transitioning}
             loadingText="변경 중…"
+            disabled={projectLoading || Boolean(projectLoadError)}
             onClick={() => void transitionProject()}
           >
             변경 확인

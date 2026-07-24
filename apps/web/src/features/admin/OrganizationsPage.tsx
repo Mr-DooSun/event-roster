@@ -174,7 +174,10 @@ export function OrganizationsPage() {
           ) : null}
         </form>
       </Card>
-      <section aria-labelledby="organization-list-title">
+      <section
+        aria-labelledby="organization-list-title"
+        aria-busy={loadState === "REFRESHING" || undefined}
+      >
         <h2 id="organization-list-title">조직 목록</h2>
         {loadState === "INITIAL" && !hasLoaded.current ? (
           <div data-testid="organization-grid-skeleton" aria-busy="true">

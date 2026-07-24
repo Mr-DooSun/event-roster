@@ -189,6 +189,29 @@ it("keeps existing projects visible when a project refresh fails", async () => {
   expect(screen.getByRole("button", { name: "다시 시도" })).toBeVisible();
 });
 
+it("marks the preserved project result grid busy during refresh", async () => {
+  const refresh = deferred<(typeof projectFixture)[]>();
+  mockApi.get
+    .mockResolvedValueOnce([projectFixture])
+    .mockReturnValueOnce(refresh.promise);
+  mockApi.post.mockResolvedValueOnce(projectFixture);
+  render(<ProjectsPage />);
+  await screen.findByText(projectFixture.name);
+
+  fireEvent.click(screen.getByRole("button", { name: "새 프로젝트" }));
+  fireEvent.change(screen.getByLabelText("프로젝트 이름"), {
+    target: { value: "새 프로젝트" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "프로젝트 만들기" }));
+
+  const results = await screen.findByRole("region", { name: "프로젝트 목록" });
+  expect(results).toHaveAttribute("aria-busy", "true");
+  expect(screen.getByText(projectFixture.name)).toBeVisible();
+
+  await act(async () => refresh.resolve([projectFixture]));
+  expect(results).not.toHaveAttribute("aria-busy");
+});
+
 it("keeps existing projects visible while reloading after create", async () => {
   const reload = deferred<(typeof projectFixture)[]>();
   mockApi.get

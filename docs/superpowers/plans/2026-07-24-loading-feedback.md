@@ -786,8 +786,8 @@ git commit -m "feat: add project list loading states"
 
 - Consumes: `ProjectHeaderSkeleton`, `ProjectTabSkeleton`, `RetryableError`, `LoadingStatus`
 - Produces: `DetailLoading = Partial<Record<DetailResource, boolean>>`
-- Produces: `retryProject()`, `retryTab(tab: ProjectTab)`
-- Preserves: 병렬 request, `loadGeneration`, projectId context와 resource별 오류 문구
+- Produces: project 전용 `retryProject()`, 영역 전용 `retryResource(resource)`
+- Preserves: 병렬 request, `loadGeneration`, project request token, projectId context와 resource별 오류 문구
 
 - [ ] **Step 1: 상세 최초 로딩과 독립 영역 테스트 작성**
 
@@ -857,7 +857,6 @@ type DetailLoading = Partial<Record<DetailResource, boolean>>;
 
 const [resourceLoading, setResourceLoading] = useState<DetailLoading>({});
 const [projectLoading, setProjectLoading] = useState(true);
-const [projectRefreshing, setProjectRefreshing] = useState(false);
 ```
 
 기존 `loadResource`는 시작·종료 상태를 현재 context에서만 갱신한다.
@@ -906,30 +905,21 @@ const loadResource = useCallback(
 project 응답이 오면 즉시 header/tabs를 렌더링한다. 전체 `loading` boolean은
 제거한다.
 
-- [ ] **Step 4: tab별 retry mapping 구현**
+- [ ] **Step 4: project 전용 재시도와 resource별 retry mapping 구현**
 
 각 resource의 request와 apply를 한 곳에서 재사용할 수 있게
 `loadDetailResource(context, resource)` switch를 만든다. 모든 case는
 `loadResource`를 호출하고 `default`에 도달하지 않는 exhaustive check를
 사용한다.
 
-```tsx
-const retryTab = useCallback(
-  async (tab: ProjectTab) => {
-    const context = { projectId, generation: loadGeneration.current };
-    const failed = TAB_RESOURCES[tab].filter(
-      (resource) => resourceErrors[resource],
-    );
-    await Promise.all(
-      failed.map((resource) => loadDetailResource(context, resource)),
-    );
-  },
-  [loadDetailResource, projectId, resourceErrors],
-);
-```
+프로젝트 header 요청은 resource 요청과 별도의 request token을 사용한다.
+`retryProject()`는 `/projects/:id`만 다시 요청하며 summary, memberships,
+roster, participants, organizations, audit 및 audit pagination 상태를
+초기화하거나 재조회하지 않는다. 오래된 project 요청의 success, catch,
+finally는 최신 project shell을 덮어쓰지 못한다.
 
-프로젝트 자체 실패는 `RetryableError`에서 전체 `load()`를 다시 호출한다.
-tab 실패는 `retryTab(selectedTab)`만 실행한다.
+각 resource 오류의 `RetryableError`는 `retryResource(resource)`로 해당
+endpoint 하나만 다시 요청한다.
 
 - [ ] **Step 5: 상세 skeleton과 상태 render 연결**
 
@@ -950,11 +940,21 @@ if (!project) {
 }
 ```
 
-선택 tab의 resource 중 하나라도 loading이면 `ProjectTabSkeleton`을
-렌더링한다. 이미 해당 tab 데이터가 있는 `projectRefreshing` 상황에는
-기존 콘텐츠 위에 `LoadingStatus>새로고침 중…</LoadingStatus>`만 표시한다.
-오류가 있으면 `RetryableError` 하나에 오류 문구를 줄바꿈 없이 결합하고
-재시도한다.
+선택 tab 전체를 하나의 loading/error 경계로 묶지 않는다. 개요의 summary와
+memberships, 조직 tab의 memberships와 전체 조직 후보, 명단 tab의 roster와
+participants 후보를 각각 렌더링한다. participants 후보가 느리거나
+실패해도 성공한 roster 표는 유지하고 참가자 추가·수정 후보 동작만
+비활성화한다. 전체 조직 후보가 느리거나 실패해도 성공한 프로젝트
+memberships 목록은 유지하고 조직 추가 후보 동작만 비활성화한다.
+
+최초 응답 전인 개별 영역에는 `ProjectTabSkeleton` 또는 보조
+`LoadingStatus`를 표시한다. 이미 성공한 영역의 refresh에는 기존 콘텐츠와
+`LoadingStatus>새로고침 중…</LoadingStatus>`를 함께 유지한다. 오류와
+재시도 버튼도 resource별로 표시한다.
+
+상태 변경 POST 성공 뒤 project 재조회가 pending 또는 failed인 동안 header에
+`aria-busy`를 연결하고 프로젝트 수정·상태 변경 동작을 비활성화해 이전
+revision으로 두 번째 mutation을 실행하지 못하게 한다.
 
 `ProjectEditDialog`의 저장 버튼은 `loading={busy}`,
 `loadingText="저장 중…"`을 사용한다. 프로젝트 상태 변경 dialog에는

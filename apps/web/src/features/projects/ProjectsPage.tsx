@@ -104,17 +104,22 @@ export function ProjectsPage() {
           {loadState === "REFRESHING" ? (
             <LoadingStatus>새로고침 중…</LoadingStatus>
           ) : null}
-          {projects.length === 0 ? (
-            <Card className="er-panel">
-              <p className="er-muted">등록된 프로젝트가 없습니다.</p>
-            </Card>
-          ) : (
-            <div className="er-project-grid">
-              {projects.map((project) => (
-                <ProjectCard key={project.id} project={project} />
-              ))}
-            </div>
-          )}
+          <section
+            aria-label="프로젝트 목록"
+            aria-busy={loadState === "REFRESHING" || undefined}
+          >
+            {projects.length === 0 ? (
+              <Card className="er-panel">
+                <p className="er-muted">등록된 프로젝트가 없습니다.</p>
+              </Card>
+            ) : (
+              <div className="er-project-grid">
+                {projects.map((project) => (
+                  <ProjectCard key={project.id} project={project} />
+                ))}
+              </div>
+            )}
+          </section>
         </>
       )}
       <ProjectFormDialog

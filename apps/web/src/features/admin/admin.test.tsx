@@ -306,6 +306,10 @@ it("keeps organization results visible while applying filters", async () => {
   fireEvent.submit(screen.getByRole("form", { name: "조직 검색 및 필터" }));
   expect(screen.getByText("1팀")).toBeVisible();
   expect(screen.getByRole("status")).toHaveTextContent("검색 중…");
+  expect(screen.getByRole("region", { name: "조직 목록" })).toHaveAttribute(
+    "aria-busy",
+    "true",
+  );
   second.resolve(Response.json([]));
 });
 

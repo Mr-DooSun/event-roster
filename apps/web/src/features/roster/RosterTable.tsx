@@ -22,6 +22,7 @@ export function RosterTable({
   canMutate,
   busyRowIds,
   canMutateRow = () => true,
+  canEditRow = canMutateRow,
   onStatusChange,
   onEdit,
 }: {
@@ -29,6 +30,7 @@ export function RosterTable({
   canMutate: boolean;
   busyRowIds?: ReadonlySet<string>;
   canMutateRow?: (row: RosterView) => boolean;
+  canEditRow?: (row: RosterView) => boolean;
   onStatusChange: (
     row: RosterView,
     status: "ACTIVE" | "CANCELLED",
@@ -125,7 +127,7 @@ export function RosterTable({
                     <div className="er-action-row">
                       <Button
                         type="button"
-                        disabled={busyRowIds?.has(row.id)}
+                        disabled={busyRowIds?.has(row.id) || !canEditRow(row)}
                         onClick={() => onEdit(row)}
                       >
                         정보 수정
