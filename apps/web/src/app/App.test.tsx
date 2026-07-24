@@ -480,10 +480,10 @@ it("assigns existing and newly provisioned organization managers", async () => {
   expect(await screen.findByRole("heading", { name: "1팀" })).toBeVisible();
 
   fireEvent.click(screen.getByRole("button", { name: "기존 계정 지정" }));
-  fireEvent.change(screen.getByLabelText("계정 검색"), {
+  fireEvent.change(screen.getByLabelText("로그인 ID 또는 표시 이름"), {
     target: { value: "신규" },
   });
-  fireEvent.click(screen.getByRole("button", { name: "계정 찾기" }));
+  fireEvent.click(screen.getByRole("button", { name: "검색" }));
   expect(
     await screen.findByRole("option", { name: /신규 후보/ }),
   ).toBeVisible();
@@ -580,8 +580,8 @@ it("keeps only the newest assignable-user search result and error", async () => 
   render(<App />);
   await screen.findByRole("heading", { name: "1팀" });
   fireEvent.click(screen.getByRole("button", { name: "기존 계정 지정" }));
-  const search = screen.getByLabelText("계정 검색");
-  const searchButton = screen.getByRole("button", { name: "계정 찾기" });
+  const search = screen.getByLabelText("로그인 ID 또는 표시 이름");
+  const searchButton = screen.getByRole("button", { name: "검색" });
   for (const query of ["첫번째", "두번째", "세번째"]) {
     fireEvent.change(search, { target: { value: query } });
     fireEvent.click(searchButton);
@@ -647,7 +647,7 @@ it("aborts an assignable-user search when leaving organization detail", async ()
   render(<App />);
   await screen.findByRole("heading", { name: "1팀" });
   fireEvent.click(screen.getByRole("button", { name: "기존 계정 지정" }));
-  fireEvent.click(screen.getByRole("button", { name: "계정 찾기" }));
+  fireEvent.click(screen.getByRole("button", { name: "검색" }));
   const searchCall = mockApi.get.mock.calls.find(([path]) =>
     String(path).includes("/assignable-users?"),
   );
@@ -703,7 +703,7 @@ it("prevents duplicate manager assignment POST requests", async () => {
   render(<App />);
   await screen.findByRole("heading", { name: "1팀" });
   fireEvent.click(screen.getByRole("button", { name: "기존 계정 지정" }));
-  fireEvent.click(screen.getByRole("button", { name: "계정 찾기" }));
+  fireEvent.click(screen.getByRole("button", { name: "검색" }));
   fireEvent.change(await screen.findByLabelText("지정할 계정"), {
     target: { value: "candidate-1" },
   });

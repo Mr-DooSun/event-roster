@@ -50,6 +50,13 @@ export function OrganizationManagersPanel({
   const [message, setMessage] = useState<string | null>(null);
   const [isMutating, setIsMutating] = useState(false);
   const [searchingCandidates, setSearchingCandidates] = useState(false);
+  const [hasSearchedCandidates, setHasSearchedCandidates] = useState(false);
+  const [candidateSearchError, setCandidateSearchError] = useState<
+    string | null
+  >(null);
+  const [existingAssignmentError, setExistingAssignmentError] = useState<
+    string | null
+  >(null);
   const newManagerTrigger = useRef<HTMLButtonElement | null>(null);
   const candidateSearchGeneration = useRef(0);
   const candidateSearchController = useRef<AbortController | null>(null);
@@ -70,7 +77,9 @@ export function OrganizationManagersPanel({
     const controller = new AbortController();
     candidateSearchController.current = controller;
     setSearchingCandidates(true);
-    setMessage(null);
+    setHasSearchedCandidates(false);
+    setCandidateSearchError(null);
+    setExistingAssignmentError(null);
     try {
       const next = await api.get<AssignableManager[]>(
         `/organizations/${encodeURIComponent(
@@ -85,13 +94,17 @@ export function OrganizationManagersPanel({
         return;
       }
       setCandidates(next);
-      setSelectedUserId(next[0]?.userId ?? "");
+      setSelectedUserId("");
+      setHasSearchedCandidates(true);
     } catch {
       if (
         generation === candidateSearchGeneration.current &&
         !controller.signal.aborted
       ) {
-        setMessage("지정 가능한 계정을 찾지 못했습니다.");
+        setCandidates([]);
+        setSelectedUserId("");
+        setHasSearchedCandidates(true);
+        setCandidateSearchError("지정 가능한 계정을 찾지 못했습니다.");
       }
     } finally {
       if (generation === candidateSearchGeneration.current) {
@@ -109,19 +122,36 @@ export function OrganizationManagersPanel({
     candidateSearchController.current = null;
     setSearchingCandidates(false);
     setQuery(nextQuery);
+    setCandidates([]);
+    setSelectedUserId("");
+    setHasSearchedCandidates(false);
+    setCandidateSearchError(null);
+    setExistingAssignmentError(null);
+  }
+
+  function closeExistingAssignment() {
+    candidateSearchGeneration.current += 1;
+    candidateSearchController.current?.abort();
+    candidateSearchController.current = null;
+    setSearchingCandidates(false);
+    setMode(null);
   }
 
   async function assignExisting(event: FormEvent) {
     event.preventDefault();
     if (!selectedUserId) return;
-    await mutate(async () => {
-      await api.post(`/organizations/${organization.id}/managers`, {
-        kind: "EXISTING",
-        userId: selectedUserId,
-        assignmentRole,
-      });
-      setMode(null);
-    });
+    setExistingAssignmentError(null);
+    await mutate(
+      async () => {
+        await api.post(`/organizations/${organization.id}/managers`, {
+          kind: "EXISTING",
+          userId: selectedUserId,
+          assignmentRole,
+        });
+        closeExistingAssignment();
+      },
+      setExistingAssignmentError,
+    );
   }
 
   async function provision(event: FormEvent) {
@@ -183,7 +213,10 @@ export function OrganizationManagersPanel({
     });
   }
 
-  async function mutate(operation: () => Promise<void>) {
+  async function mutate(
+    operation: () => Promise<void>,
+    reportOperationError: (message: string) => void = setMessage,
+  ) {
     if (mutationInFlight.current) return;
     mutationInFlight.current = true;
     setIsMutating(true);
@@ -194,13 +227,13 @@ export function OrganizationManagersPanel({
       } catch (error) {
         if (error instanceof ApiError && error.status === 409) {
           const reloaded = await onChanged();
-          setMessage(
+          reportOperationError(
             reloaded
               ? "다른 관리 변경이 먼저 반영되어 최신 조직 정보를 불러왔습니다."
               : "다른 관리 변경이 먼저 반영되었지만 최신 조직 정보를 불러오지 못했습니다.",
           );
         } else {
-          setMessage("담당자 변경을 반영하지 못했습니다.");
+          reportOperationError("담당자 변경을 반영하지 못했습니다.");
         }
         return;
       }
@@ -221,6 +254,18 @@ export function OrganizationManagersPanel({
       organization.primaryLeader ? "MANAGER" : "PRIMARY_LEADER",
     );
     setMessage(null);
+    if (nextMode === "EXISTING") {
+      candidateSearchGeneration.current += 1;
+      candidateSearchController.current?.abort();
+      candidateSearchController.current = null;
+      setSearchingCandidates(false);
+      setQuery("");
+      setCandidates([]);
+      setSelectedUserId("");
+      setHasSearchedCandidates(false);
+      setCandidateSearchError(null);
+      setExistingAssignmentError(null);
+    }
   }
 
   return (
@@ -312,10 +357,10 @@ export function OrganizationManagersPanel({
         </ul>
       )}
       {mode === "EXISTING" ? (
-        <Dialog title="기존 담당자 지정" onClose={() => setMode(null)}>
+        <Dialog title="기존 담당자 지정" onClose={closeExistingAssignment}>
           <form className="er-form-grid" onSubmit={searchCandidates}>
             <TextInput
-              label="계정 검색"
+              label="로그인 ID 또는 표시 이름"
               value={query}
               onChange={(event) =>
                 changeCandidateQuery(event.currentTarget.value)
@@ -324,18 +369,26 @@ export function OrganizationManagersPanel({
             <Button
               type="submit"
               loading={searchingCandidates}
-              loadingText="계정 찾는 중…"
+              loadingText="검색 중…"
               disabled={isMutating}
             >
-              계정 찾기
+              검색
             </Button>
           </form>
+          {candidateSearchError ? (
+            <StatusMessage tone="error">{candidateSearchError}</StatusMessage>
+          ) : hasSearchedCandidates && candidates.length === 0 ? (
+            <StatusMessage>검색된 계정이 없습니다.</StatusMessage>
+          ) : null}
           <form className="er-form-grid" onSubmit={assignExisting}>
             <label className="er-field">
               <span>지정할 계정</span>
               <select
                 className="er-control er-control--select"
                 value={selectedUserId}
+                disabled={
+                  isMutating || searchingCandidates || candidates.length === 0
+                }
                 onChange={(event) =>
                   setSelectedUserId(event.currentTarget.value)
                 }
@@ -362,6 +415,11 @@ export function OrganizationManagersPanel({
               담당자로 지정
             </Button>
           </form>
+          {existingAssignmentError ? (
+            <StatusMessage tone="error">
+              {existingAssignmentError}
+            </StatusMessage>
+          ) : null}
         </Dialog>
       ) : null}
       {mode === "NEW" ? (
