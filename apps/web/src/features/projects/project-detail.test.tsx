@@ -594,8 +594,9 @@ it("renders leadership metadata and only operator management links", () => {
   );
 
   expect(screen.getByText("대표 조직장 미지정")).toBeVisible();
-  expect(screen.getByText("김대표")).toBeVisible();
-  expect(screen.getByText("추가 관리자 2명")).toBeVisible();
+  expect(screen.getByText("대표 조직장 김대표")).toBeVisible();
+  expect(screen.getByText("담당자 0명")).toBeVisible();
+  expect(screen.getByText("담당자 3명")).toBeVisible();
   expect(screen.getByText("현재 명단 11명")).toBeVisible();
   expect(
     screen.getAllByRole("link", { name: "조직 관리에서 담당자 지정" })[1],

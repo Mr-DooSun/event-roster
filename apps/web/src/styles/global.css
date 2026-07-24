@@ -717,6 +717,10 @@ a {
 .er-organization-facts div {
   display: grid;
   gap: var(--er-space-1);
+  min-width: 0;
+  border-radius: var(--er-radius-sm);
+  padding: var(--er-space-3);
+  background: var(--er-color-canvas);
 }
 .er-organization-facts dt {
   color: var(--er-color-muted);

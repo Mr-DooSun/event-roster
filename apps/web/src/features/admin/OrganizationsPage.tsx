@@ -15,6 +15,7 @@ import { Skeleton } from "../../components/ui/Skeleton";
 import { StatusMessage } from "../../components/ui/StatusMessage";
 import { TextInput } from "../../components/ui/TextInput";
 import { ApiError } from "../../lib/api";
+import { getTotalOrganizationManagerCount } from "../../lib/organization-summary";
 import { useAuth } from "../auth/AuthProvider";
 
 type OrganizationStatus = "ALL" | "ACTIVE" | "INACTIVE";
@@ -229,18 +230,15 @@ export function OrganizationsPage() {
                   <dl className="er-organization-facts">
                     <div>
                       <dt>대표 조직장</dt>
-                      <dd>
-                        {organization.primaryLeader?.displayName ??
-                          "대표 조직장 미지정"}
-                      </dd>
+                      <dd>{organization.primaryLeader?.displayName ?? "미지정"}</dd>
                     </div>
                     <div>
                       <dt>담당자</dt>
-                      <dd>추가 관리자 {organization.managerCount}명</dd>
+                      <dd>{getTotalOrganizationManagerCount(organization)}명</dd>
                     </div>
                     <div>
                       <dt>프로젝트</dt>
-                      <dd>연결 프로젝트 {organization.projectCount}개</dd>
+                      <dd>{organization.projectCount}개</dd>
                     </div>
                   </dl>
                 </Card>

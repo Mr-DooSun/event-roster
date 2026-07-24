@@ -188,8 +188,16 @@ it("searches and filters organization summaries", async () => {
             name: "1팀",
             isActive: true,
             primaryLeader: null,
+            managerCount: 0,
+            projectCount: 0,
+          },
+          {
+            id: "org-2",
+            name: "2팀",
+            isActive: true,
+            primaryLeader: { userId: "leader-1", displayName: "김대표" },
             managerCount: 2,
-            projectCount: 3,
+            projectCount: 1,
           },
         ]),
       );
@@ -208,9 +216,21 @@ it("searches and filters organization summaries", async () => {
 
   expect(await screen.findByLabelText("조직 이름 검색")).toBeVisible();
   expect(screen.getByLabelText("대표 조직장 상태")).toBeVisible();
-  expect(await screen.findByText("대표 조직장 미지정")).toBeVisible();
-  expect(screen.getByText("추가 관리자 2명")).toBeVisible();
-  expect(screen.getByText("연결 프로젝트 3개")).toBeVisible();
+  const firstCard = screen
+    .getByRole("link", { name: "1팀 상세 관리" })
+    .closest(".er-organization-summary-card");
+  const secondCard = screen
+    .getByRole("link", { name: "2팀 상세 관리" })
+    .closest(".er-organization-summary-card");
+
+  expect(firstCard).not.toBeNull();
+  expect(secondCard).not.toBeNull();
+  expect(within(firstCard as HTMLElement).getByText("미지정")).toBeVisible();
+  expect(within(firstCard as HTMLElement).getByText("0명")).toBeVisible();
+  expect(within(firstCard as HTMLElement).getByText("0개")).toBeVisible();
+  expect(within(secondCard as HTMLElement).getByText("김대표")).toBeVisible();
+  expect(within(secondCard as HTMLElement).getByText("3명")).toBeVisible();
+  expect(within(secondCard as HTMLElement).getByText("1개")).toBeVisible();
   expect(screen.getByRole("link", { name: "1팀 상세 관리" })).toHaveAttribute(
     "href",
     "/organizations/org-1",
@@ -1408,6 +1428,9 @@ it("labels each manager mutation with its specific pending action", async () => 
   );
   await login();
   await screen.findByRole("heading", { name: "1팀" });
+  expect(await screen.findByText("대표 조직장 김대표")).toBeVisible();
+  expect(screen.getByText("담당자 2명")).toBeVisible();
+  expect(screen.getByText("프로젝트 0개")).toBeVisible();
 
   fireEvent.click(screen.getByRole("button", { name: "기존 계정 지정" }));
   fireEvent.click(screen.getByRole("button", { name: "계정 찾기" }));
@@ -1766,7 +1789,7 @@ function organizationDetailWithManagers() {
     primaryLeader: {
       userId: "leader-1",
       loginId: "leader-01",
-      displayName: "대표 조직장",
+      displayName: "김대표",
       isActive: true,
       assignmentRole: "PRIMARY_LEADER" as const,
       assignedAt: "2026-07-22T00:00:00.000Z",
@@ -1776,7 +1799,7 @@ function organizationDetailWithManagers() {
       {
         userId: "leader-1",
         loginId: "leader-01",
-        displayName: "대표 조직장",
+        displayName: "김대표",
         isActive: true,
         assignmentRole: "PRIMARY_LEADER" as const,
         assignedAt: "2026-07-22T00:00:00.000Z",

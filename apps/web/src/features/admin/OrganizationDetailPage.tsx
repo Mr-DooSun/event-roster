@@ -18,6 +18,7 @@ import { Skeleton } from "../../components/ui/Skeleton";
 import { StatusMessage } from "../../components/ui/StatusMessage";
 import { TextInput } from "../../components/ui/TextInput";
 import { ApiError } from "../../lib/api";
+import { getTotalOrganizationManagerCount } from "../../lib/organization-summary";
 import { useAuth } from "../auth/AuthProvider";
 import { AuditPanel, type AuditView } from "../roster/AuditPanel";
 import { OrganizationManagersPanel } from "./OrganizationManagersPanel";
@@ -433,11 +434,12 @@ export function OrganizationDetailPage({
                   {organization.isActive ? "사용 중" : "사용 중지"}
                 </span>
                 <span>
-                  {organization.primaryLeader?.displayName ??
-                    "대표 조직장 미지정"}
+                  대표 조직장 {organization.primaryLeader?.displayName ?? "미지정"}
                 </span>
-                <span>추가 관리자 {organization.managerCount}명</span>
-                <span>연결 프로젝트 {organization.projectCount}개</span>
+                <span>
+                  담당자 {getTotalOrganizationManagerCount(organization)}명
+                </span>
+                <span>프로젝트 {organization.projectCount}개</span>
               </div>
             </div>
           </header>

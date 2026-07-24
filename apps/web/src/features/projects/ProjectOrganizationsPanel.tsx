@@ -9,6 +9,7 @@ import { Card } from "../../components/ui/Card";
 import { Dialog } from "../../components/ui/Dialog";
 import { StatusMessage } from "../../components/ui/StatusMessage";
 import { ApiError } from "../../lib/api";
+import { getTotalOrganizationManagerCount } from "../../lib/organization-summary";
 import { useAuth } from "../auth/AuthProvider";
 import {
   OrganizationCombobox,
@@ -294,9 +295,9 @@ function OrganizationMembershipRow({
         </span>
         <div className="er-membership-meta">
           <span>
-            {membership.primaryLeader?.displayName ?? "대표 조직장 미지정"}
+            대표 조직장 {membership.primaryLeader?.displayName ?? "미지정"}
           </span>
-          <span>추가 관리자 {membership.managerCount}명</span>
+          <span>담당자 {getTotalOrganizationManagerCount(membership)}명</span>
           <span>현재 명단 {membership.rosterCount}명</span>
         </div>
         {canManageOrganizations ? (
