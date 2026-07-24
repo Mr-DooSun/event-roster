@@ -809,6 +809,113 @@ it("preserves existing tab content when retrying a failed project refresh", asyn
   await act(async () => retrySummary.resolve(emptySummary("project-1")));
 });
 
+it("keeps loaded overview content when a full refresh resource fails", async () => {
+  let summaryReads = 0;
+  mockApi.get.mockImplementation((path: string) => {
+    if (path === "/projects/project-1/summary") {
+      summaryReads += 1;
+      if (summaryReads === 1) {
+        return { ...emptySummary("project-1"), expectedTotal: 7 };
+      }
+      return Promise.reject(new Error("summary unavailable"));
+    }
+    return defaultGet(path);
+  });
+  render(<ProjectDetailPage projectId="project-1" />);
+  expect(await screen.findByText("예상 7명")).toBeVisible();
+
+  fireEvent.click(screen.getByRole("button", { name: "진행 시작" }));
+  fireEvent.click(screen.getByRole("button", { name: "변경 확인" }));
+
+  expect(
+    await screen.findByText("프로젝트 집계를 불러오지 못했습니다."),
+  ).toBeVisible();
+  expect(screen.getByText("예상 7명")).toBeVisible();
+});
+
+it("keeps loaded audit content visible while its retry is pending", async () => {
+  const retryAudit = deferred<{
+    items: ReturnType<typeof auditItem>[];
+    nextCursor: string | null;
+  }>();
+  let auditReads = 0;
+  mockApi.get.mockImplementation((path: string) => {
+    if (path === "/projects/project-1/audit?limit=50") {
+      auditReads += 1;
+      if (auditReads === 1) {
+        return {
+          items: [auditItem("기존 이력")],
+          nextCursor: null,
+        };
+      }
+      if (auditReads === 2) {
+        return Promise.reject(new Error("audit unavailable"));
+      }
+      return retryAudit.promise;
+    }
+    return defaultGet(path);
+  });
+  render(<ProjectDetailPage projectId="project-1" />);
+  fireEvent.click(await screen.findByRole("tab", { name: "변경 이력" }));
+  expect(await screen.findByText("기존 이력")).toBeVisible();
+
+  fireEvent.click(screen.getByRole("button", { name: "진행 시작" }));
+  fireEvent.click(screen.getByRole("button", { name: "변경 확인" }));
+  expect(
+    await screen.findByText("변경 이력을 불러오지 못했습니다."),
+  ).toBeVisible();
+  expect(screen.getByText("기존 이력")).toBeVisible();
+
+  fireEvent.click(screen.getByRole("button", { name: "다시 시도" }));
+  await waitFor(() => expect(auditReads).toBe(3));
+  expect(screen.getByText("기존 이력")).toBeVisible();
+  expect(screen.getByRole("status")).toHaveTextContent("새로고침 중…");
+
+  await act(async () =>
+    retryAudit.resolve({
+      items: [auditItem("재시도 이력")],
+      nextCursor: null,
+    }),
+  );
+});
+
+it("does not show an empty audit state before that resource first succeeds", async () => {
+  const refreshedAudit = deferred<{
+    items: ReturnType<typeof auditItem>[];
+    nextCursor: string | null;
+  }>();
+  let auditReads = 0;
+  mockApi.get.mockImplementation((path: string) => {
+    if (path === "/projects/project-1/audit?limit=50") {
+      auditReads += 1;
+      if (auditReads === 1) {
+        return Promise.reject(new Error("audit unavailable"));
+      }
+      return refreshedAudit.promise;
+    }
+    return defaultGet(path);
+  });
+  render(<ProjectDetailPage projectId="project-1" />);
+  fireEvent.click(await screen.findByRole("tab", { name: "변경 이력" }));
+  expect(
+    await screen.findByText("변경 이력을 불러오지 못했습니다."),
+  ).toBeVisible();
+
+  fireEvent.click(screen.getByRole("button", { name: "진행 시작" }));
+  fireEvent.click(screen.getByRole("button", { name: "변경 확인" }));
+  await waitFor(() => expect(auditReads).toBe(2));
+
+  expect(screen.queryByText("아직 기록이 없습니다.")).not.toBeInTheDocument();
+
+  await act(async () =>
+    refreshedAudit.resolve({
+      items: [],
+      nextCursor: null,
+    }),
+  );
+  expect(await screen.findByText("아직 기록이 없습니다.")).toBeVisible();
+});
+
 it("reloads once after a stale transition without replaying it", async () => {
   mockApi.post.mockRejectedValueOnce(
     new ApiError(409, {
@@ -959,6 +1066,101 @@ it("retries only the failed audit resource", async () => {
   expect(
     mockApi.get.mock.calls.slice(readsBeforeRetry.length).map(([path]) => path),
   ).toEqual(["/projects/project-1/audit?limit=50"]);
+});
+
+it("ignores a retry handler captured before a newer full load", async () => {
+  const refreshedAudit = deferred<{
+    items: ReturnType<typeof auditItem>[];
+    nextCursor: string | null;
+  }>();
+  let auditReads = 0;
+  mockApi.get.mockImplementation((path: string) => {
+    if (path === "/projects/project-1/audit?limit=50") {
+      auditReads += 1;
+      if (auditReads === 1) return Promise.reject(new Error("offline"));
+      return refreshedAudit.promise;
+    }
+    return defaultGet(path);
+  });
+  render(<ProjectDetailPage projectId="project-1" />);
+  fireEvent.click(await screen.findByRole("tab", { name: "변경 이력" }));
+  const staleRetry = captureReactClickHandler(
+    await screen.findByRole("button", { name: "다시 시도" }),
+  );
+
+  fireEvent.click(screen.getByRole("button", { name: "진행 시작" }));
+  fireEvent.click(screen.getByRole("button", { name: "변경 확인" }));
+  await waitFor(() => expect(auditReads).toBe(2));
+  act(() => staleRetry());
+
+  expect(auditReads).toBe(2);
+
+  await act(async () =>
+    refreshedAudit.resolve({
+      items: [],
+      nextCursor: null,
+    }),
+  );
+});
+
+it("lets only the latest same-generation resource request update state", async () => {
+  type AuditPage = {
+    items: ReturnType<typeof auditItem>[];
+    nextCursor: string | null;
+  };
+  const earlyRequest = deferred<AuditPage>();
+  const lateRequest = deferred<AuditPage>();
+  const latestRequest = deferred<AuditPage>();
+  let auditReads = 0;
+  mockApi.get.mockImplementation((path: string) => {
+    if (path === "/projects/project-1/audit?limit=50") {
+      auditReads += 1;
+      if (auditReads === 1) return Promise.reject(new Error("offline"));
+      if (auditReads === 2) return earlyRequest.promise;
+      if (auditReads === 3) return lateRequest.promise;
+      return latestRequest.promise;
+    }
+    return defaultGet(path);
+  });
+  render(<ProjectDetailPage projectId="project-1" />);
+  fireEvent.click(await screen.findByRole("tab", { name: "변경 이력" }));
+  const retry = captureReactClickHandler(
+    await screen.findByRole("button", { name: "다시 시도" }),
+  );
+
+  act(() => {
+    retry();
+    retry();
+    retry();
+  });
+  expect(auditReads).toBe(4);
+
+  await act(async () =>
+    earlyRequest.resolve({
+      items: [auditItem("먼저 끝난 이전 요청")],
+      nextCursor: null,
+    }),
+  );
+  expect(screen.getByRole("tabpanel")).toHaveAttribute("aria-busy", "true");
+  expect(screen.queryByText("먼저 끝난 이전 요청")).not.toBeInTheDocument();
+
+  await act(async () =>
+    latestRequest.resolve({
+      items: [auditItem("최신 요청")],
+      nextCursor: null,
+    }),
+  );
+  expect(screen.getByRole("tabpanel")).toHaveAttribute("aria-busy", "false");
+  expect(screen.getByText("최신 요청")).toBeVisible();
+
+  await act(async () =>
+    lateRequest.resolve({
+      items: [auditItem("늦게 끝난 이전 요청")],
+      nextCursor: null,
+    }),
+  );
+  expect(screen.getByText("최신 요청")).toBeVisible();
+  expect(screen.queryByText("늦게 끝난 이전 요청")).not.toBeInTheDocument();
 });
 
 it("invalidates the audit cursor and preserves a newer request lock across a full reload", async () => {
@@ -1354,4 +1556,16 @@ function deferred<T>() {
     reject = promiseReject;
   });
   return { promise, resolve, reject };
+}
+
+function captureReactClickHandler(element: HTMLElement) {
+  const reactPropsKey = Object.getOwnPropertyNames(element).find((key) =>
+    key.startsWith("__reactProps$"),
+  );
+  if (!reactPropsKey) throw new Error("React click props not found");
+  const props = (
+    element as unknown as Record<string, { onClick?: () => void }>
+  )[reactPropsKey];
+  if (!props?.onClick) throw new Error("React click handler not found");
+  return props.onClick;
 }
