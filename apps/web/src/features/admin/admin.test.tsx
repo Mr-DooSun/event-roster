@@ -13,6 +13,7 @@ import { AuthProvider, useAuth } from "../auth/AuthProvider";
 import { LoginPage } from "../auth/LoginPage";
 import { OrganizationDetailPage } from "./OrganizationDetailPage";
 import { OrganizationsPage } from "./OrganizationsPage";
+import { UserForm } from "./UserForm";
 import { UsersPage } from "./UsersPage";
 
 afterEach(() => {
@@ -630,6 +631,273 @@ it("keeps account form values when creation fails", async () => {
   expect(await screen.findByText("계정을 만들지 못했습니다.")).toBeVisible();
   expect(loginId).toHaveValue("staff-03");
   expect(displayName).toHaveValue("실패 담당자");
+});
+
+it("keeps the latest account users when an older initial request succeeds late", async () => {
+  const initial = deferred<Response>();
+  let reads = 0;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/auth/login"))
+        return Promise.resolve(Response.json(auth()));
+      if (url.endsWith("/users") && init?.method === "POST") {
+        return Promise.resolve(
+          Response.json({ id: "user-3", temporaryPassword: "create-password" }),
+        );
+      }
+      if (url.endsWith("/users")) {
+        reads += 1;
+        return reads === 1
+          ? initial.promise
+          : Promise.resolve(Response.json(usersResponse()));
+      }
+      throw new Error(`unexpected request: ${url}`);
+    }),
+  );
+  render(
+    <AuthProvider restoreOnMount={false}>
+      <Gate>
+        <UsersPage />
+      </Gate>
+    </AuthProvider>,
+  );
+  await login();
+  fireEvent.change(await screen.findByLabelText("영문 로그인 ID"), {
+    target: { value: "staff-03" },
+  });
+  fireEvent.change(screen.getByLabelText("표시 이름"), {
+    target: { value: "새 담당자" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "계정 만들기" }));
+  expect(await screen.findByLabelText("staff-01 표시 이름")).toBeVisible();
+
+  initial.resolve(Response.json([]));
+  await waitFor(() =>
+    expect(screen.getByLabelText("staff-01 표시 이름")).toBeVisible(),
+  );
+  expect(screen.queryByText("등록된 계정이 없습니다.")).not.toBeInTheDocument();
+});
+
+it("keeps the latest account users when an older initial request fails late", async () => {
+  const initial = deferred<Response>();
+  let reads = 0;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/auth/login"))
+        return Promise.resolve(Response.json(auth()));
+      if (url.endsWith("/users") && init?.method === "POST") {
+        return Promise.resolve(
+          Response.json({ id: "user-3", temporaryPassword: "create-password" }),
+        );
+      }
+      if (url.endsWith("/users")) {
+        reads += 1;
+        return reads === 1
+          ? initial.promise
+          : Promise.resolve(Response.json(usersResponse()));
+      }
+      throw new Error(`unexpected request: ${url}`);
+    }),
+  );
+  render(
+    <AuthProvider restoreOnMount={false}>
+      <Gate>
+        <UsersPage />
+      </Gate>
+    </AuthProvider>,
+  );
+  await login();
+  fireEvent.change(await screen.findByLabelText("영문 로그인 ID"), {
+    target: { value: "staff-03" },
+  });
+  fireEvent.change(screen.getByLabelText("표시 이름"), {
+    target: { value: "새 담당자" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "계정 만들기" }));
+  expect(await screen.findByLabelText("staff-01 표시 이름")).toBeVisible();
+
+  initial.resolve(new Response(null, { status: 503 }));
+  await waitFor(() =>
+    expect(screen.getByLabelText("staff-01 표시 이름")).toBeVisible(),
+  );
+  expect(
+    screen.queryByText("계정 목록을 불러오지 못했습니다."),
+  ).not.toBeInTheDocument();
+});
+
+it("blocks duplicate account form submission within one render turn", async () => {
+  const submission = deferred<boolean>();
+  const onSubmit = vi.fn(() => submission.promise);
+  const rendered = render(<UserForm onSubmit={onSubmit} />);
+  const form = rendered.container.querySelector("form");
+  const submit = captureReactSubmitHandler(form as HTMLFormElement);
+
+  await act(async () => {
+    void submit({ preventDefault: () => undefined });
+    void submit({ preventDefault: () => undefined });
+  });
+  expect(onSubmit).toHaveBeenCalledTimes(1);
+
+  await act(async () => submission.resolve(false));
+});
+
+it("shows every simultaneously issued temporary password once in response order", async () => {
+  const firstReset = deferred<Response>();
+  const secondReset = deferred<Response>();
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/auth/login"))
+        return Promise.resolve(Response.json(auth()));
+      if (
+        url.endsWith("/users/user-1/password-reset") &&
+        init?.method === "POST"
+      ) {
+        return firstReset.promise;
+      }
+      if (
+        url.endsWith("/users/user-2/password-reset") &&
+        init?.method === "POST"
+      ) {
+        return secondReset.promise;
+      }
+      if (url.endsWith("/users"))
+        return Promise.resolve(Response.json(usersResponse()));
+      throw new Error(`unexpected request: ${url}`);
+    }),
+  );
+  render(
+    <AuthProvider restoreOnMount={false}>
+      <Gate>
+        <UsersPage />
+      </Gate>
+    </AuthProvider>,
+  );
+  await login();
+  await screen.findByLabelText("staff-01 표시 이름");
+
+  fireEvent.click(
+    within(
+      screen.getByLabelText("staff-01 표시 이름").closest("tr") as HTMLElement,
+    ).getByRole("button", { name: "비밀번호 재설정" }),
+  );
+  fireEvent.click(
+    within(
+      screen.getByLabelText("staff-02 표시 이름").closest("tr") as HTMLElement,
+    ).getByRole("button", { name: "비밀번호 재설정" }),
+  );
+  secondReset.resolve(Response.json({ temporaryPassword: "second-password" }));
+  expect(await screen.findByText("second-password")).toBeVisible();
+  firstReset.resolve(Response.json({ temporaryPassword: "first-password" }));
+  await act(async () => undefined);
+
+  expect(screen.getByText("second-password")).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "닫기" }));
+  expect(await screen.findByText("first-password")).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "닫기" }));
+  expect(screen.queryByText("first-password")).not.toBeInTheDocument();
+});
+
+it("marks the loaded account table busy while a mutation refreshes it", async () => {
+  const patch = deferred<Response>();
+  const refresh = deferred<Response>();
+  let reads = 0;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/auth/login"))
+        return Promise.resolve(Response.json(auth()));
+      if (url.endsWith("/users/user-1") && init?.method === "PATCH")
+        return patch.promise;
+      if (url.endsWith("/users")) {
+        reads += 1;
+        return reads === 1
+          ? Promise.resolve(Response.json(usersResponse()))
+          : refresh.promise;
+      }
+      throw new Error(`unexpected request: ${url}`);
+    }),
+  );
+  render(
+    <AuthProvider restoreOnMount={false}>
+      <Gate>
+        <UsersPage />
+      </Gate>
+    </AuthProvider>,
+  );
+  await login();
+  await screen.findByLabelText("staff-01 표시 이름");
+  fireEvent.click(
+    within(
+      screen.getByLabelText("staff-01 표시 이름").closest("tr") as HTMLElement,
+    ).getByRole("button", { name: "저장" }),
+  );
+  patch.resolve(Response.json({ id: "user-1" }));
+
+  expect(await screen.findByRole("status")).toHaveTextContent("새로고침 중…");
+  expect(screen.getByRole("table")).toHaveAttribute("aria-busy", "true");
+  expect(screen.getByLabelText("staff-01 표시 이름")).toBeVisible();
+  refresh.resolve(Response.json(usersResponse()));
+  await waitFor(() =>
+    expect(screen.getByRole("table")).not.toHaveAttribute("aria-busy"),
+  );
+});
+
+it("clears an earlier account mutation error when a new operation starts", async () => {
+  const reset = deferred<Response>();
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/auth/login"))
+        return Promise.resolve(Response.json(auth()));
+      if (url.endsWith("/users") && init?.method === "POST") {
+        return Promise.resolve(new Response(null, { status: 503 }));
+      }
+      if (
+        url.endsWith("/users/user-1/password-reset") &&
+        init?.method === "POST"
+      ) {
+        return reset.promise;
+      }
+      if (url.endsWith("/users"))
+        return Promise.resolve(Response.json(usersResponse()));
+      throw new Error(`unexpected request: ${url}`);
+    }),
+  );
+  render(
+    <AuthProvider restoreOnMount={false}>
+      <Gate>
+        <UsersPage />
+      </Gate>
+    </AuthProvider>,
+  );
+  await login();
+  fireEvent.change(await screen.findByLabelText("영문 로그인 ID"), {
+    target: { value: "staff-03" },
+  });
+  fireEvent.change(screen.getByLabelText("표시 이름"), {
+    target: { value: "실패 담당자" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "계정 만들기" }));
+  expect(await screen.findByText("계정을 만들지 못했습니다.")).toBeVisible();
+
+  fireEvent.click(
+    within(
+      screen.getByLabelText("staff-01 표시 이름").closest("tr") as HTMLElement,
+    ).getByRole("button", { name: "비밀번호 재설정" }),
+  );
+  expect(
+    screen.queryByText("계정을 만들지 못했습니다."),
+  ).not.toBeInTheDocument();
+  reset.resolve(Response.json({ temporaryPassword: "fresh-password" }));
+  expect(await screen.findByText("fresh-password")).toBeVisible();
 });
 
 it("groups organization creation actions with close first", async () => {
@@ -1444,6 +1712,21 @@ function captureReactClickHandler(element: HTMLElement) {
   )[reactPropsKey];
   if (!props?.onClick) throw new Error("React click handler not found");
   return props.onClick;
+}
+
+function captureReactSubmitHandler(element: HTMLFormElement) {
+  const reactPropsKey = Object.getOwnPropertyNames(element).find((key) =>
+    key.startsWith("__reactProps$"),
+  );
+  if (!reactPropsKey) throw new Error("React submit props not found");
+  const props = (
+    element as unknown as Record<
+      string,
+      { onSubmit?: (event: { preventDefault: () => void }) => Promise<void> }
+    >
+  )[reactPropsKey];
+  if (!props?.onSubmit) throw new Error("React submit handler not found");
+  return props.onSubmit;
 }
 
 function auditItem(action: string) {

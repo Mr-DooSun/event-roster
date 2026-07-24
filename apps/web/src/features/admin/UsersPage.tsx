@@ -17,42 +17,57 @@ const userSkeletonKeys = Array.from(
 export function UsersPage() {
   const { api } = useAuth();
   const [users, setUsers] = useState<UserView[]>([]);
-  const [temporaryPassword, setTemporaryPassword] = useState<string | null>(
-    null,
-  );
+  const [temporaryPasswords, setTemporaryPasswords] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [hasLoaded, setHasLoaded] = useState(false);
   const hasLoadedRef = useRef(false);
+  const loadGeneration = useRef(0);
 
   const load = useCallback(async () => {
+    const generation = ++loadGeneration.current;
     const initialLoad = !hasLoadedRef.current;
     if (initialLoad) setLoading(true);
     else setRefreshing(true);
     try {
-      setUsers(await api.get<UserView[]>("/users"));
+      const nextUsers = await api.get<UserView[]>("/users");
+      if (generation !== loadGeneration.current) return;
+      setUsers(nextUsers);
       hasLoadedRef.current = true;
       setHasLoaded(true);
       setLoadError(null);
     } catch {
+      if (generation !== loadGeneration.current) return;
       setLoadError("계정 목록을 불러오지 못했습니다.");
     } finally {
-      if (initialLoad) setLoading(false);
-      else setRefreshing(false);
+      if (generation === loadGeneration.current) {
+        if (initialLoad) setLoading(false);
+        else setRefreshing(false);
+      }
     }
   }, [api]);
 
-  useEffect(() => void load(), [load]);
+  useEffect(() => {
+    void load();
+    return () => {
+      loadGeneration.current += 1;
+    };
+  }, [load]);
+
+  function enqueueTemporaryPassword(value: string) {
+    setTemporaryPasswords((current) => [...current, value]);
+  }
 
   async function create(input: UserCreateInput) {
+    setError(null);
     try {
       const result = await api.post<{ id: string; temporaryPassword: string }>(
         "/users",
         input,
       );
-      setTemporaryPassword(result.temporaryPassword);
+      enqueueTemporaryPassword(result.temporaryPassword);
       await load();
       return true;
     } catch {
@@ -62,11 +77,12 @@ export function UsersPage() {
   }
 
   async function reset(userId: string) {
+    setError(null);
     try {
       const result = await api.post<{ temporaryPassword: string }>(
         `/users/${userId}/password-reset`,
       );
-      setTemporaryPassword(result.temporaryPassword);
+      enqueueTemporaryPassword(result.temporaryPassword);
       return true;
     } catch {
       setError("비밀번호를 재설정하지 못했습니다.");
@@ -78,6 +94,7 @@ export function UsersPage() {
     userId: string,
     input: Pick<UserView, "displayName" | "role" | "isActive">,
   ) {
+    setError(null);
     try {
       await api.patch(`/users/${userId}`, input);
       await load();
@@ -120,7 +137,7 @@ export function UsersPage() {
             ) : null}
             {refreshing ? <LoadingStatus>새로고침 중…</LoadingStatus> : null}
             <div className="er-table-wrap">
-              <table>
+              <table aria-busy={loading || refreshing || undefined}>
                 <thead>
                   <tr>
                     <th>이름</th>
@@ -178,10 +195,10 @@ export function UsersPage() {
           </>
         )}
       </Card>
-      {temporaryPassword ? (
+      {temporaryPasswords[0] ? (
         <TemporaryPasswordDialog
-          value={temporaryPassword}
-          onClose={() => setTemporaryPassword(null)}
+          value={temporaryPasswords[0]}
+          onClose={() => setTemporaryPasswords((current) => current.slice(1))}
         />
       ) : null}
     </div>

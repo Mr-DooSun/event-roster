@@ -1,5 +1,5 @@
 import type { Role } from "@event-roster/contracts";
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useRef, useState } from "react";
 import { Button } from "../../components/ui/Button";
 import { TextInput } from "../../components/ui/TextInput";
 
@@ -18,10 +18,12 @@ export function UserForm({
   const [displayName, setDisplayName] = useState("");
   const [role, setRole] = useState<Role>("OPERATOR");
   const [busy, setBusy] = useState(false);
+  const submissionInFlight = useRef(false);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (busy) return;
+    if (submissionInFlight.current) return;
+    submissionInFlight.current = true;
     setBusy(true);
     try {
       const succeeded = await onSubmit({ loginId, displayName, role });
@@ -30,6 +32,7 @@ export function UserForm({
         setDisplayName("");
       }
     } finally {
+      submissionInFlight.current = false;
       setBusy(false);
     }
   }
