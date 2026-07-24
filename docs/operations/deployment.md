@@ -187,3 +187,56 @@ corepack pnpm@10.28.1 --filter @event-roster/worker run smoke:remote
 Wrangler 4.112.0의 dry-run 요약이 Cron을 별도로 출력하지 않는 경우에는 exit 0과 `apps/worker/wrangler.jsonc`의 `triggers.crons`가 `["0 15 * * *"]` 하나인지를 함께 대조한다. 실제 원격 Trigger 존재 여부는 2번에서 확정한다.
 
 마지막으로 Cloudflare 대시보드에서 Workers 오류, CPU 시간, D1 오류·사용량을 확인하고 배포 시각·커밋 SHA·정확한 URL·smoke 결과만 배포 기록에 남긴다.
+
+## 7. GitHub Actions 운영 배포
+
+`main` push는 `CI`와 `Deploy production`을 각각 실행한다. 두 workflow는
+동일한 커밋을 검증하지만, 실제 Worker 배포는 `Deploy production`만
+수행한다.
+
+GitHub 저장소의 `production` Environment에 다음 두 항목을 등록한다.
+
+- Secret `CLOUDFLARE_API_TOKEN`: Cloudflare 계정 하나의 Worker 편집과 D1
+  편집에 필요한 최소 권한으로 생성한 API 토큰
+- Variable `CLOUDFLARE_ACCOUNT_ID`:
+  `dadc085d94e111ad3effd04a57b33cb9`
+
+API 토큰은 저장소 파일, `.env`, 문서, 대화, 셸 명령 인자에 넣지 않는다.
+로컬 `wrangler login` OAuth 토큰도 복사하지 않는다. GitHub
+`production` Environment의 Secret 입력 화면이나 다음 GitHub CLI의
+대화형 표준 입력만 사용한다.
+
+```bash
+gh secret set CLOUDFLARE_API_TOKEN --env production
+```
+
+명령이 값을 요청하면 토큰을 직접 붙여넣고 입력을 종료한다. 토큰 값을
+`--body` 인자에 쓰거나 셸 변수로 출력하지 않는다. Account ID는 비밀이
+아니므로 다음 명령으로 Variable에 등록한다.
+
+```bash
+gh variable set CLOUDFLARE_ACCOUNT_ID \
+  --env production \
+  --body dadc085d94e111ad3effd04a57b33cb9
+```
+
+등록 뒤 값 대신 이름과 존재만 확인한다.
+
+```bash
+gh secret list --env production
+gh variable list --env production
+```
+
+`gh secret list`에는 `CLOUDFLARE_API_TOKEN` 이름만 보여야 한다. Variable
+목록에는 `CLOUDFLARE_ACCOUNT_ID`가 위 계정 ID로 표시되어야 한다.
+
+`main` push 뒤 두 workflow를 확인한다.
+
+```bash
+gh run list --branch main --limit 4 \
+  --json databaseId,workflowName,headSha,status,conclusion,url
+```
+
+`CI`와 `Deploy production`은 같은 최신 `main` SHA에서 `success`여야 한다.
+실패하면 값을 출력하지 말고 실패 step과 Secret/Variable 이름 존재 여부만
+확인한다.
