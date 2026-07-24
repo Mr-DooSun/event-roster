@@ -7,6 +7,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { ApiError } from "../../lib/api";
@@ -1374,6 +1375,9 @@ it("keeps stale project actions disabled until the post-transition project refre
     .getByRole("heading", { name: project.name })
     .closest("header");
   expect(header).toHaveAttribute("aria-busy", "true");
+  expect(within(header as HTMLElement).getByRole("status")).toHaveTextContent(
+    "프로젝트 정보 새로고침 중…",
+  );
   expect(screen.getByRole("button", { name: "프로젝트 수정" })).toBeDisabled();
   const staleTransition = screen.getByRole("button", { name: "진행 시작" });
   expect(staleTransition).toBeDisabled();
@@ -1387,6 +1391,44 @@ it("keeps stale project actions disabled until the post-transition project refre
   expect(screen.getByRole("button", { name: "프로젝트 수정" })).toBeDisabled();
   expect(screen.getByRole("button", { name: "진행 시작" })).toBeDisabled();
   expect(mockApi.post).toHaveBeenCalledTimes(1);
+});
+
+it("releases transition actions after the project shell refresh without waiting for detail resources", async () => {
+  const refreshedParticipants = deferred<never[]>();
+  let projectReads = 0;
+  let participantReads = 0;
+  mockApi.get.mockImplementation((path: string) => {
+    if (path === "/projects/project-1") {
+      projectReads += 1;
+      return projectReads === 1
+        ? project
+        : { ...project, status: "IN_PROGRESS", revision: 2 };
+    }
+    if (path === "/participants") {
+      participantReads += 1;
+      return participantReads === 1 ? [] : refreshedParticipants.promise;
+    }
+    return defaultGet(path);
+  });
+  render(<ProjectDetailPage projectId="project-1" />);
+  fireEvent.click(await screen.findByRole("button", { name: "진행 시작" }));
+  fireEvent.click(screen.getByRole("button", { name: "변경 확인" }));
+
+  const nextAction = await screen.findByRole("button", {
+    name: "프로젝트 종료",
+  });
+  expect(nextAction).toBeEnabled();
+  const header = screen
+    .getByRole("heading", { name: project.name })
+    .closest("header");
+  expect(header).not.toHaveAttribute("aria-busy");
+
+  fireEvent.click(nextAction);
+  expect(
+    screen.getByRole("dialog", { name: "프로젝트 상태 변경" }),
+  ).toBeVisible();
+
+  await act(async () => refreshedParticipants.resolve([]));
 });
 
 it("retries only the failed audit resource", async () => {

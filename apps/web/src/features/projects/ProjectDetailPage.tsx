@@ -306,7 +306,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
     [api, isCurrent],
   );
 
-  const load = useCallback(async () => {
+  const load = useCallback(() => {
     const context = {
       projectId,
       generation: ++loadGeneration.current,
@@ -320,9 +320,9 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
     setAuditPaginationError(null);
     setMessage(null);
 
-    await Promise.all([
-      loadProject(context),
-      ...(
+    const projectRequest = loadProject(context);
+    const detailRefresh = Promise.all(
+      (
         [
           "summary",
           "memberships",
@@ -332,7 +332,8 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
           "audit",
         ] satisfies DetailResource[]
       ).map((resource) => loadDetailResource(context, resource)),
-    ]);
+    );
+    return { projectRequest, detailRefresh };
   }, [
     isCurrent,
     loadDetailResource,
@@ -383,7 +384,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
     transitionRequestToken.current += 1;
     setProjectLoading(true);
     auditPaginationRequest.current = null;
-    void load();
+    load();
     return () => {
       loadGeneration.current += 1;
     };
@@ -450,7 +451,9 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
       });
       if (!isCurrent(context) || !ownsTransition()) return;
       setShowTransition(false);
-      await load();
+      const refresh = load();
+      if (!refresh) return;
+      await refresh.projectRequest;
     } catch (error) {
       if (!isCurrent(context) || !ownsTransition()) return;
       setShowTransition(false);
@@ -611,7 +614,9 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
 
   async function reloadAfterChildMutation() {
     if (!isCurrent(childContext)) return;
-    await load();
+    const refresh = load();
+    if (!refresh) return;
+    await Promise.all([refresh.projectRequest, refresh.detailRefresh]);
   }
 
   async function handleChildProjectClosed() {
@@ -626,6 +631,11 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
         className="er-page-heading"
         aria-busy={projectLoading || undefined}
       >
+        {projectLoading ? (
+          <LoadingStatus visuallyHidden>
+            프로젝트 정보 새로고침 중…
+          </LoadingStatus>
+        ) : null}
         <div>
           <p className="er-eyebrow">PROJECT DETAIL</p>
           <h1>{project.name}</h1>
