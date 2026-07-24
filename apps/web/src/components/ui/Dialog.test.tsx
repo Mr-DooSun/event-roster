@@ -19,6 +19,30 @@ it("uses the existing close label by default", () => {
   expect(onClose).toHaveBeenCalledOnce();
 });
 
+it("applies the wide modifier only when requested", () => {
+  const view = render(
+    <Dialog title="기본" onClose={vi.fn()}>
+      <p>내용</p>
+    </Dialog>,
+  );
+
+  expect(screen.getByRole("dialog", { name: "기본" })).toHaveClass("er-dialog");
+  expect(screen.getByRole("dialog", { name: "기본" })).not.toHaveClass(
+    "er-dialog--wide",
+  );
+
+  view.rerender(
+    <Dialog title="넓은 모달" size="wide" onClose={vi.fn()}>
+      <p>내용</p>
+    </Dialog>,
+  );
+
+  expect(screen.getByRole("dialog", { name: "넓은 모달" })).toHaveClass(
+    "er-dialog",
+    "er-dialog--wide",
+  );
+});
+
 it("uses a caller-provided acknowledgement label", () => {
   const onClose = vi.fn();
   render(

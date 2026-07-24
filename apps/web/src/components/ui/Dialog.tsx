@@ -15,12 +15,14 @@ export function Dialog({
   children,
   closeLabel = "닫기",
   hideDefaultCloseAction = false,
+  size = "default",
   onClose,
 }: {
   title: string;
   children: ReactNode;
   closeLabel?: string;
   hideDefaultCloseAction?: boolean;
+  size?: "default" | "wide";
   onClose: () => void;
 }) {
   const dialogRef = useRef<HTMLElement>(null);
@@ -90,7 +92,7 @@ export function Dialog({
     <div className="er-dialog-backdrop" role="presentation">
       <section
         ref={dialogRef}
-        className="er-dialog"
+        className={`er-dialog${size === "wide" ? " er-dialog--wide" : ""}`}
         role="dialog"
         aria-modal="true"
         aria-label={title}

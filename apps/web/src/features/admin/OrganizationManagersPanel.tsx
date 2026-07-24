@@ -355,69 +355,126 @@ export function OrganizationManagersPanel({
         </ul>
       )}
       {mode === "EXISTING" ? (
-        <Dialog title="기존 담당자 지정" onClose={closeExistingAssignment}>
-          <form className="er-form-grid" onSubmit={searchCandidates}>
-            <TextInput
-              label="로그인 ID 또는 표시 이름"
-              value={query}
-              onChange={(event) =>
-                changeCandidateQuery(event.currentTarget.value)
-              }
-            />
-            <Button
-              type="submit"
-              loading={searchingCandidates}
-              loadingText="검색 중…"
-              disabled={isMutating}
+        <Dialog
+          title="기존 담당자 지정"
+          size="wide"
+          hideDefaultCloseAction
+          onClose={closeExistingAssignment}
+        >
+          <div className="er-assignment-dialog">
+            <section
+              className="er-assignment-step"
+              aria-labelledby="existing-manager-search-step"
             >
-              검색
-            </Button>
-          </form>
-          {candidateSearchError ? (
-            <StatusMessage tone="error">{candidateSearchError}</StatusMessage>
-          ) : hasSearchedCandidates && candidates.length === 0 ? (
-            <StatusMessage>검색된 계정이 없습니다.</StatusMessage>
-          ) : null}
-          <form className="er-form-grid" onSubmit={assignExisting}>
-            <label className="er-field">
-              <span>지정할 계정</span>
-              <select
-                className="er-control er-control--select"
-                value={selectedUserId}
-                disabled={
-                  isMutating || searchingCandidates || candidates.length === 0
-                }
-                onChange={(event) =>
-                  setSelectedUserId(event.currentTarget.value)
-                }
+              <h3
+                id="existing-manager-search-step"
+                className="er-assignment-step__heading"
               >
-                <option value="">계정을 선택하세요</option>
-                {candidates.map((candidate) => (
-                  <option key={candidate.userId} value={candidate.userId}>
-                    {candidate.displayName} · {candidate.loginId}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <AssignmentRoleField
-              value={assignmentRole}
-              onChange={setAssignmentRole}
-            />
-            <Button
-              type="submit"
-              variant="primary"
-              disabled={isMutating || !selectedUserId}
-              loading={isMutating}
-              loadingText="담당자로 지정 중…"
-            >
-              담당자로 지정
-            </Button>
-          </form>
-          {existingAssignmentError ? (
-            <StatusMessage tone="error">
-              {existingAssignmentError}
-            </StatusMessage>
-          ) : null}
+                <span className="er-assignment-step__number" aria-hidden="true">
+                  1
+                </span>
+                <span>계정 찾기</span>
+              </h3>
+              <form
+                className="er-assignment-search"
+                onSubmit={searchCandidates}
+              >
+                <TextInput
+                  label="로그인 ID 또는 표시 이름"
+                  value={query}
+                  onChange={(event) =>
+                    changeCandidateQuery(event.currentTarget.value)
+                  }
+                />
+                <Button
+                  type="submit"
+                  loading={searchingCandidates}
+                  loadingText="검색 중…"
+                  disabled={isMutating}
+                >
+                  검색
+                </Button>
+              </form>
+              {candidateSearchError ? (
+                <StatusMessage tone="error">
+                  {candidateSearchError}
+                </StatusMessage>
+              ) : hasSearchedCandidates && candidates.length === 0 ? (
+                <StatusMessage>검색된 계정이 없습니다.</StatusMessage>
+              ) : null}
+            </section>
+
+            <form onSubmit={assignExisting}>
+              <section
+                className="er-assignment-step"
+                aria-labelledby="existing-manager-assignment-step"
+              >
+                <h3
+                  id="existing-manager-assignment-step"
+                  className="er-assignment-step__heading"
+                >
+                  <span
+                    className="er-assignment-step__number"
+                    aria-hidden="true"
+                  >
+                    2
+                  </span>
+                  <span>담당 범위 설정</span>
+                </h3>
+                <div className="er-assignment-fields">
+                  <label className="er-field">
+                    <span>지정할 계정</span>
+                    <select
+                      className="er-control er-control--select"
+                      value={selectedUserId}
+                      disabled={
+                        isMutating ||
+                        searchingCandidates ||
+                        candidates.length === 0
+                      }
+                      onChange={(event) =>
+                        setSelectedUserId(event.currentTarget.value)
+                      }
+                    >
+                      <option value="">계정을 선택하세요</option>
+                      {candidates.map((candidate) => (
+                        <option key={candidate.userId} value={candidate.userId}>
+                          {candidate.displayName} · {candidate.loginId}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <AssignmentRoleField
+                    value={assignmentRole}
+                    onChange={setAssignmentRole}
+                  />
+                </div>
+                {existingAssignmentError ? (
+                  <StatusMessage tone="error">
+                    {existingAssignmentError}
+                  </StatusMessage>
+                ) : null}
+              </section>
+              <div className="er-dialog-actions">
+                <Button
+                  type="button"
+                  disabled={isMutating}
+                  onClick={closeExistingAssignment}
+                >
+                  취소
+                </Button>
+                <Button
+                  type="submit"
+                  variant="primary"
+                  disabled={isMutating || !selectedUserId}
+                  loading={isMutating}
+                  loadingText="담당자로 지정 중…"
+                >
+                  담당자로 지정
+                </Button>
+              </div>
+            </form>
+          </div>
         </Dialog>
       ) : null}
       {mode === "NEW" ? (

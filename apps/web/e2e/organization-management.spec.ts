@@ -1,6 +1,62 @@
 import { expect, test } from "@playwright/test";
 import { fixture, login } from "./support";
 
+test("existing manager assignment stays usable at 360px", async ({ page }) => {
+  const data = fixture();
+  await page.setViewportSize({ width: 360, height: 800 });
+  await login(page, data.operator.loginId, data.operator.password);
+  await page.getByRole("link", { name: "조직 관리" }).click();
+  expect(
+    await page
+      .locator(".er-organization-facts")
+      .evaluate(
+        (element) =>
+          getComputedStyle(element).gridTemplateColumns.trim().split(/\s+/)
+            .length,
+      ),
+  ).toBe(1);
+  await page.getByRole("link", { name: "E2E 1팀 상세 관리" }).click();
+
+  const trigger = page.getByRole("button", { name: "기존 계정 지정" });
+  await trigger.click();
+  const dialog = page.getByRole("dialog", { name: "기존 담당자 지정" });
+
+  await expect(
+    dialog.getByRole("heading", { name: "계정 찾기" }),
+  ).toBeVisible();
+  await expect(
+    dialog.getByRole("heading", { name: "담당 범위 설정" }),
+  ).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "취소" })).toBeVisible();
+  expect(
+    await dialog.evaluate(
+      (element) => element.scrollWidth <= element.clientWidth,
+    ),
+  ).toBe(true);
+  expect(
+    await dialog
+      .locator(".er-assignment-search")
+      .evaluate(
+        (element) =>
+          getComputedStyle(element).gridTemplateColumns.trim().split(/\s+/)
+            .length,
+      ),
+  ).toBe(1);
+  expect(
+    await dialog
+      .locator(".er-assignment-fields")
+      .evaluate(
+        (element) =>
+          getComputedStyle(element).gridTemplateColumns.trim().split(/\s+/)
+            .length,
+      ),
+  ).toBe(1);
+
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  await expect(trigger).toBeFocused();
+});
+
 test("operator delegates pre-registration roster entry to an organization leader", async ({
   page,
 }) => {

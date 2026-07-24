@@ -1288,6 +1288,64 @@ it("marks preserved organization content busy during a detail refresh", async ()
   expect(refreshedHeading.closest("[aria-busy=false]")).not.toBeNull();
 });
 
+it("renders existing manager assignment as two labelled steps", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/auth/login"))
+        return Promise.resolve(Response.json(auth()));
+      if (url.endsWith("/organizations/org-1"))
+        return Promise.resolve(Response.json(organizationDetail()));
+      if (url.endsWith("/organizations/org-1/audit?limit=50"))
+        return Promise.resolve(Response.json({ items: [], nextCursor: null }));
+      throw new Error(`unexpected request: ${url}`);
+    }),
+  );
+
+  render(
+    <AuthProvider restoreOnMount={false}>
+      <Gate>
+        <OrganizationDetailPage organizationId="org-1" />
+      </Gate>
+    </AuthProvider>,
+  );
+  await login();
+  fireEvent.click(
+    await screen.findByRole("button", { name: "기존 계정 지정" }),
+  );
+
+  const dialog = screen.getByRole("dialog", {
+    name: "기존 담당자 지정",
+  });
+  expect(dialog).toHaveClass("er-dialog--wide");
+  expect(
+    within(dialog).getByRole("heading", { name: "계정 찾기" }),
+  ).toBeVisible();
+  expect(
+    within(dialog).getByRole("heading", { name: "담당 범위 설정" }),
+  ).toBeVisible();
+  expect(
+    within(
+      within(dialog).getByRole("heading", { name: "계정 찾기" }),
+    ).getByText("1"),
+  ).toBeVisible();
+  expect(
+    within(
+      within(dialog).getByRole("heading", { name: "담당 범위 설정" }),
+    ).getByText("2"),
+  ).toBeVisible();
+  expect(within(dialog).getByRole("button", { name: "취소" })).toBeVisible();
+  expect(
+    within(dialog).queryByRole("button", { name: "닫기" }),
+  ).not.toBeInTheDocument();
+
+  fireEvent.click(within(dialog).getByRole("button", { name: "취소" }));
+  expect(
+    screen.queryByRole("dialog", { name: "기존 담당자 지정" }),
+  ).not.toBeInTheDocument();
+});
+
 it("gates existing assignment until candidate search succeeds", async () => {
   vi.stubGlobal(
     "fetch",
