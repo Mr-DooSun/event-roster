@@ -8,6 +8,8 @@ import type {
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "../../components/ui/Button";
 import { Dialog } from "../../components/ui/Dialog";
+import { LoadingStatus } from "../../components/ui/LoadingStatus";
+import { RetryableError } from "../../components/ui/RetryableError";
 import { StatusMessage } from "../../components/ui/StatusMessage";
 import { ApiError } from "../../lib/api";
 import { useAuth } from "../auth/AuthProvider";
@@ -16,6 +18,10 @@ import type { ParticipantView } from "../roster/ParticipantDialog";
 import { ProjectRosterPage } from "../roster/ProjectRosterPage";
 import type { RosterView } from "../roster/RosterTable";
 import { ProjectEditDialog, type ProjectEditInput } from "./ProjectEditDialog";
+import {
+  ProjectHeaderSkeleton,
+  ProjectTabSkeleton,
+} from "./ProjectLoadingStates";
 import { ProjectOrganizationsPanel } from "./ProjectOrganizationsPanel";
 import { ProjectOverview } from "./ProjectOverview";
 
@@ -30,6 +36,7 @@ type DetailResource =
   | "audit";
 
 type DetailErrors = Partial<Record<DetailResource, string>>;
+export type DetailLoading = Partial<Record<DetailResource, boolean>>;
 
 interface RequestContext {
   projectId: string;
@@ -57,6 +64,16 @@ const TAB_RESOURCES: Record<ProjectTab, DetailResource[]> = {
   organizations: ["memberships", "organizations"],
   roster: ["memberships", "roster", "participants"],
   audit: ["audit"],
+};
+
+const TAB_LOADING_STATE: Record<
+  ProjectTab,
+  { kind: "cards" | "list" | "table"; message: string }
+> = {
+  overview: { kind: "cards", message: "프로젝트 개요 불러오는 중…" },
+  organizations: { kind: "list", message: "프로젝트 조직 불러오는 중…" },
+  roster: { kind: "table", message: "참가 명단 불러오는 중…" },
+  audit: { kind: "list", message: "변경 이력 불러오는 중…" },
 };
 
 const STATUS_LABEL: Record<ProjectStatus, string> = {
@@ -100,12 +117,15 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
   const [auditPaginationError, setAuditPaginationError] = useState<
     string | null
   >(null);
-  const [loading, setLoading] = useState(true);
+  const [projectLoading, setProjectLoading] = useState(true);
+  const [projectRefreshing, setProjectRefreshing] = useState(false);
+  const [resourceLoading, setResourceLoading] = useState<DetailLoading>({});
   const [projectLoadError, setProjectLoadError] = useState<string | null>(null);
   const [resourceErrors, setResourceErrors] = useState<DetailErrors>({});
   const [message, setMessage] = useState<string | null>(null);
   const [showEdit, setShowEdit] = useState(false);
   const [showTransition, setShowTransition] = useState(false);
+  const [transitioning, setTransitioning] = useState(false);
   const loadGeneration = useRef(0);
   const currentProjectId = useRef(projectId);
   const auditPaginationRequest = useRef<RequestContext | null>(null);
@@ -118,93 +138,176 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
     [],
   );
 
-  const load = useCallback(async () => {
-    const context = {
-      projectId,
-      generation: ++loadGeneration.current,
-    };
-    if (!isCurrent(context)) return;
-    auditPaginationRequest.current = null;
-    setAuditNextCursor(null);
-    setLoading(true);
-    setProjectLoadError(null);
-    setResourceErrors({});
-    setAuditPaginationError(null);
-    setMessage(null);
-
-    const loadResource = async <T,>(
+  const loadResource = useCallback(
+    async <T,>(
+      context: RequestContext,
       resource: DetailResource,
-      request: Promise<T>,
+      request: () => Promise<T>,
       apply: (value: T) => void,
     ) => {
+      if (!isCurrent(context)) return false;
+      setResourceLoading((current) => ({ ...current, [resource]: true }));
+      setResourceErrors((current) => {
+        const next = { ...current };
+        delete next[resource];
+        return next;
+      });
       try {
-        const value = await request;
-        if (isCurrent(context)) apply(value);
+        const value = await request();
+        if (!isCurrent(context)) return false;
+        apply(value);
+        return true;
       } catch {
-        if (!isCurrent(context)) return;
+        if (!isCurrent(context)) return false;
         setResourceErrors((current) => ({
           ...current,
           [resource]: RESOURCE_ERROR_MESSAGE[resource],
         }));
-      }
-    };
-
-    const projectRequest = (async () => {
-      try {
-        const nextProject = await api.get<Project>(
-          `/projects/${context.projectId}`,
-        );
-        if (isCurrent(context)) setProject(nextProject);
-      } catch {
-        if (isCurrent(context)) {
-          setProjectLoadError("프로젝트 정보를 불러오지 못했습니다.");
-        }
+        return false;
       } finally {
-        if (isCurrent(context)) setLoading(false);
+        if (isCurrent(context)) {
+          setResourceLoading((current) => ({
+            ...current,
+            [resource]: false,
+          }));
+        }
       }
-    })();
+    },
+    [isCurrent],
+  );
 
-    await Promise.all([
-      projectRequest,
-      loadResource(
-        "summary",
-        api.get<ProjectSummary>(`/projects/${context.projectId}/summary`),
-        setSummary,
-      ),
-      loadResource(
-        "memberships",
-        api.get<ProjectOrganization[]>(
-          `/projects/${context.projectId}/organizations`,
-        ),
-        setMemberships,
-      ),
-      loadResource(
-        "organizations",
-        api.get<Organization[]>("/organizations"),
-        setAllOrganizations,
-      ),
-      loadResource(
-        "roster",
-        api.get<RosterView[]>(`/projects/${context.projectId}/roster`),
-        setRows,
-      ),
-      loadResource(
-        "participants",
-        api.get<ParticipantView[]>("/participants"),
-        setParticipants,
-      ),
-      loadResource(
-        "audit",
-        api.get<{ items: AuditView[]; nextCursor: string | null }>(
-          `/projects/${context.projectId}/audit?limit=50`,
-        ),
-        (page) => {
-          setAudit(page.items);
-          setAuditNextCursor(page.nextCursor);
-        },
-      ),
-    ]);
-  }, [api, isCurrent, projectId]);
+  const loadDetailResource = useCallback(
+    (context: RequestContext, resource: DetailResource) => {
+      switch (resource) {
+        case "summary":
+          return loadResource(
+            context,
+            resource,
+            () =>
+              api.get<ProjectSummary>(`/projects/${context.projectId}/summary`),
+            setSummary,
+          );
+        case "memberships":
+          return loadResource(
+            context,
+            resource,
+            () =>
+              api.get<ProjectOrganization[]>(
+                `/projects/${context.projectId}/organizations`,
+              ),
+            setMemberships,
+          );
+        case "organizations":
+          return loadResource(
+            context,
+            resource,
+            () => api.get<Organization[]>("/organizations"),
+            setAllOrganizations,
+          );
+        case "roster":
+          return loadResource(
+            context,
+            resource,
+            () =>
+              api.get<RosterView[]>(`/projects/${context.projectId}/roster`),
+            setRows,
+          );
+        case "participants":
+          return loadResource(
+            context,
+            resource,
+            () => api.get<ParticipantView[]>("/participants"),
+            setParticipants,
+          );
+        case "audit":
+          return loadResource(
+            context,
+            resource,
+            () =>
+              api.get<{ items: AuditView[]; nextCursor: string | null }>(
+                `/projects/${context.projectId}/audit?limit=50`,
+              ),
+            (page) => {
+              setAudit(page.items);
+              setAuditNextCursor(page.nextCursor);
+            },
+          );
+        default:
+          return assertNever(resource);
+      }
+    },
+    [api, loadResource],
+  );
+
+  const load = useCallback(
+    async (refreshing = false) => {
+      const context = {
+        projectId,
+        generation: ++loadGeneration.current,
+      };
+      if (!isCurrent(context)) return;
+      auditPaginationRequest.current = null;
+      setAuditNextCursor(null);
+      setProjectLoading(true);
+      setProjectRefreshing(refreshing);
+      setResourceLoading({});
+      setProjectLoadError(null);
+      setResourceErrors({});
+      setAuditPaginationError(null);
+      setMessage(null);
+
+      const projectRequest = (async () => {
+        try {
+          const nextProject = await api.get<Project>(
+            `/projects/${context.projectId}`,
+          );
+          if (isCurrent(context)) setProject(nextProject);
+        } catch {
+          if (isCurrent(context)) {
+            setProjectLoadError("프로젝트 정보를 불러오지 못했습니다.");
+          }
+        } finally {
+          if (isCurrent(context)) setProjectLoading(false);
+        }
+      })();
+
+      await Promise.all([
+        projectRequest,
+        ...(
+          [
+            "summary",
+            "memberships",
+            "organizations",
+            "roster",
+            "participants",
+            "audit",
+          ] satisfies DetailResource[]
+        ).map((resource) => loadDetailResource(context, resource)),
+      ]);
+      if (isCurrent(context)) setProjectRefreshing(false);
+    },
+    [api, isCurrent, loadDetailResource, projectId],
+  );
+
+  const retryProject = useCallback(
+    () => load(project !== null),
+    [load, project],
+  );
+  const retryTab = useCallback(
+    async (tab: ProjectTab) => {
+      const context = {
+        projectId,
+        generation: loadGeneration.current,
+      };
+      const failed = TAB_RESOURCES[tab].filter(
+        (resource) => resourceErrors[resource],
+      );
+      await Promise.all(
+        failed.map((resource) => loadDetailResource(context, resource)),
+      );
+    },
+    [loadDetailResource, projectId, resourceErrors],
+  );
 
   useEffect(() => {
     setSelectedTab("overview");
@@ -219,10 +322,13 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
     setAuditPaginationError(null);
     setProjectLoadError(null);
     setResourceErrors({});
+    setResourceLoading({});
     setMessage(null);
     setShowEdit(false);
     setShowTransition(false);
-    setLoading(true);
+    setTransitioning(false);
+    setProjectLoading(true);
+    setProjectRefreshing(false);
     auditPaginationRequest.current = null;
     void load();
     return () => {
@@ -284,10 +390,11 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
   }
 
   async function transitionProject() {
-    if (!project) return;
+    if (!project || transitioning) return;
     const context = { projectId, generation: loadGeneration.current };
     if (!isCurrent(context)) return;
     const action = NEXT_ACTION[project.status];
+    setTransitioning(true);
     setMessage(null);
     try {
       await api.post(`/projects/${context.projectId}/transition`, {
@@ -296,7 +403,8 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
       });
       if (!isCurrent(context)) return;
       setShowTransition(false);
-      await load();
+      setTransitioning(false);
+      await load(true);
     } catch (error) {
       if (!isCurrent(context)) return;
       setShowTransition(false);
@@ -319,6 +427,8 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
       } else {
         setMessage("프로젝트 상태를 변경하지 못했습니다.");
       }
+    } finally {
+      if (isCurrent(context)) setTransitioning(false);
     }
   }
 
@@ -350,17 +460,21 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
     }
   }
 
-  if (loading && !project) {
-    return <p className="er-muted">프로젝트 불러오는 중…</p>;
+  if (projectLoading && !project) {
+    return <ProjectHeaderSkeleton />;
   }
   if (!project) {
-    return projectLoadError ? (
-      <StatusMessage tone="error">{projectLoadError}</StatusMessage>
-    ) : null;
+    return (
+      <RetryableError
+        message={projectLoadError ?? "프로젝트 정보를 불러오지 못했습니다."}
+        retrying={projectLoading}
+        onRetry={retryProject}
+      />
+    );
   }
 
   if (project.id !== projectId) {
-    return <p className="er-muted">프로젝트 불러오는 중…</p>;
+    return <ProjectHeaderSkeleton />;
   }
 
   const operator = auth?.session.user.role === "OPERATOR";
@@ -389,10 +503,18 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
   const selectedTabErrors = TAB_RESOURCES[selectedTab]
     .map((resource) => resourceErrors[resource])
     .filter((error): error is string => Boolean(error));
+  const selectedTabLoading = TAB_RESOURCES[selectedTab].some(
+    (resource) => resourceLoading[resource],
+  );
+  const showRefreshingContent = projectRefreshing && selectedTabLoading;
+  const showTabContent =
+    showRefreshingContent ||
+    (!selectedTabLoading && selectedTabErrors.length === 0);
+  const tabLoadingState = TAB_LOADING_STATE[selectedTab];
 
   async function reloadAfterChildMutation() {
     if (!isCurrent(childContext)) return;
-    await load();
+    await load(true);
   }
 
   async function handleChildProjectClosed() {
@@ -439,7 +561,11 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
         ) : null}
       </header>
       {projectLoadError ? (
-        <StatusMessage tone="error">{projectLoadError}</StatusMessage>
+        <RetryableError
+          message={projectLoadError}
+          retrying={projectLoading}
+          onRetry={retryProject}
+        />
       ) : null}
       {message ? (
         <StatusMessage tone={message.includes("최신") ? "info" : "error"}>
@@ -466,16 +592,27 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
         id={`project-${project.id}-${selectedTab}-panel`}
         role="tabpanel"
         aria-labelledby={`project-${project.id}-${selectedTab}-tab`}
+        aria-busy={selectedTabLoading}
       >
-        {selectedTabErrors.map((error) => (
-          <StatusMessage key={error} tone="error">
-            {error}
-          </StatusMessage>
-        ))}
-        {selectedTabErrors.length === 0 && selectedTab === "overview" ? (
+        {showRefreshingContent ? (
+          <LoadingStatus>새로고침 중…</LoadingStatus>
+        ) : null}
+        {!projectRefreshing && selectedTabLoading ? (
+          <ProjectTabSkeleton
+            kind={tabLoadingState.kind}
+            message={tabLoadingState.message}
+          />
+        ) : null}
+        {!selectedTabLoading && selectedTabErrors.length > 0 ? (
+          <RetryableError
+            message={selectedTabErrors.join(" ")}
+            onRetry={() => retryTab(selectedTab)}
+          />
+        ) : null}
+        {showTabContent && selectedTab === "overview" ? (
           <ProjectOverview summary={summary} memberships={memberships} />
         ) : null}
-        {selectedTabErrors.length === 0 && selectedTab === "organizations" ? (
+        {showTabContent && selectedTab === "organizations" ? (
           <ProjectOrganizationsPanel
             key={project.id}
             projectId={project.id}
@@ -488,7 +625,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
             onProjectClosed={handleChildProjectClosed}
           />
         ) : null}
-        {selectedTabErrors.length === 0 && selectedTab === "roster" ? (
+        {showTabContent && selectedTab === "roster" ? (
           <ProjectRosterPage
             key={project.id}
             project={project}
@@ -499,7 +636,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
             onChanged={reloadAfterChildMutation}
           />
         ) : null}
-        {selectedTabErrors.length === 0 && selectedTab === "audit" ? (
+        {showTabContent && selectedTab === "audit" ? (
           <div className="er-page-stack">
             {auditPaginationError ? (
               <StatusMessage tone="error">{auditPaginationError}</StatusMessage>
@@ -531,6 +668,8 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
           <Button
             type="button"
             variant={action.target === "CLOSED" ? "danger" : "primary"}
+            loading={transitioning}
+            loadingText="변경 중…"
             onClick={() => void transitionProject()}
           >
             변경 확인
@@ -557,4 +696,8 @@ function currentKstDate(now = new Date()) {
   const part = (type: Intl.DateTimeFormatPartTypes) =>
     parts.find((item) => item.type === type)?.value ?? "";
   return `${part("year")}-${part("month")}-${part("day")}`;
+}
+
+function assertNever(value: never): never {
+  throw new Error(`Unhandled detail resource: ${String(value)}`);
 }

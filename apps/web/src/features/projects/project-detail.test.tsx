@@ -94,6 +94,76 @@ it("shows project status, dates, and automatic closing in the header", async () 
   expect(screen.getByText("자동 종료")).toBeVisible();
 });
 
+it("shows a project header skeleton while the project shell is loading", async () => {
+  const projectRequest = deferred<Project>();
+  mockApi.get.mockImplementation((path: string) => {
+    if (path === "/projects/project-1") return projectRequest.promise;
+    return defaultGet(path);
+  });
+
+  render(<ProjectDetailPage projectId="project-1" />);
+
+  expect(screen.getByRole("status")).toHaveTextContent("프로젝트 불러오는 중…");
+  expect(screen.queryByRole("heading", { name: project.name })).toBeNull();
+
+  await act(async () => projectRequest.resolve(project));
+  expect(
+    await screen.findByRole("heading", { name: project.name }),
+  ).toBeVisible();
+});
+
+it("shows the project shell before a slower overview resource completes", async () => {
+  const summary = deferred<ReturnType<typeof emptySummary>>();
+  mockApi.get.mockImplementation((path: string) => {
+    if (path === "/projects/project-1/summary") return summary.promise;
+    return defaultGet(path);
+  });
+
+  render(<ProjectDetailPage projectId="project-1" />);
+
+  expect(
+    await screen.findByRole("heading", { name: project.name }),
+  ).toBeVisible();
+  expect(screen.getByRole("tabpanel")).toHaveAttribute("aria-busy", "true");
+  expect(screen.getByRole("status")).toHaveTextContent(
+    "프로젝트 개요 불러오는 중…",
+  );
+
+  await act(async () => summary.resolve(emptySummary("project-1")));
+  expect(screen.getByRole("heading", { name: "프로젝트 개요" })).toBeVisible();
+});
+
+it("keeps a new project's resource loading after an old request settles", async () => {
+  const oldSummary = deferred<ReturnType<typeof emptySummary>>();
+  const newSummary = deferred<ReturnType<typeof emptySummary>>();
+  mockApi.get.mockImplementation((path: string) => {
+    if (path === "/projects/project-1") return project;
+    if (path === "/projects/project-1/summary") return oldSummary.promise;
+    if (path === "/projects/project-2/summary") return newSummary.promise;
+    return multiProjectGet(path);
+  });
+
+  const view = render(<ProjectDetailPage projectId="project-1" />);
+  expect(
+    await screen.findByRole("heading", { name: project.name }),
+  ).toBeVisible();
+  view.rerender(<ProjectDetailPage projectId="project-2" />);
+  expect(
+    await screen.findByRole("heading", { name: "신규 프로젝트" }),
+  ).toBeVisible();
+  expect(screen.getByRole("tabpanel")).toHaveAttribute("aria-busy", "true");
+
+  await act(async () => oldSummary.resolve(emptySummary("project-1")));
+  expect(screen.getByRole("tabpanel")).toHaveAttribute("aria-busy", "true");
+  expect(
+    screen.queryByRole("heading", { name: "프로젝트 개요" }),
+  ).not.toBeInTheDocument();
+
+  await act(async () => newSummary.resolve(emptySummary("project-2")));
+  expect(screen.getByRole("tabpanel")).toHaveAttribute("aria-busy", "false");
+  expect(screen.getByRole("heading", { name: "프로젝트 개요" })).toBeVisible();
+});
+
 it("adds an existing organization with the observed project revision", async () => {
   render(<ProjectDetailPage projectId="project-1" />);
   fireEvent.click(await screen.findByRole("tab", { name: "조직" }));
@@ -656,6 +726,89 @@ it("confirms the exhaustive next transition action", async () => {
   );
 });
 
+it("shows transition progress and prevents duplicate transition requests", async () => {
+  const transition = deferred<unknown>();
+  mockApi.post.mockReturnValueOnce(transition.promise);
+  render(<ProjectDetailPage projectId="project-1" />);
+  fireEvent.click(await screen.findByRole("button", { name: "진행 시작" }));
+  const confirm = screen.getByRole("button", { name: "변경 확인" });
+
+  fireEvent.click(confirm);
+
+  expect(screen.getByRole("button", { name: "변경 중…" })).toBeDisabled();
+  fireEvent.click(screen.getByRole("button", { name: "변경 중…" }));
+  expect(mockApi.post).toHaveBeenCalledTimes(1);
+
+  await act(async () => transition.resolve(undefined));
+});
+
+it("keeps existing tab content visible while a full refresh is pending", async () => {
+  const refreshedSummary = deferred<ReturnType<typeof emptySummary>>();
+  let summaryReads = 0;
+  mockApi.get.mockImplementation((path: string) => {
+    if (path === "/projects/project-1/summary") {
+      summaryReads += 1;
+      return summaryReads === 1
+        ? emptySummary("project-1")
+        : refreshedSummary.promise;
+    }
+    return defaultGet(path);
+  });
+  render(<ProjectDetailPage projectId="project-1" />);
+  expect(
+    await screen.findByRole("heading", { name: "프로젝트 개요" }),
+  ).toBeVisible();
+
+  fireEvent.click(screen.getByRole("button", { name: "진행 시작" }));
+  fireEvent.click(screen.getByRole("button", { name: "변경 확인" }));
+  await waitFor(() => expect(summaryReads).toBe(2));
+
+  expect(screen.getByRole("heading", { name: "프로젝트 개요" })).toBeVisible();
+  expect(screen.getByRole("status")).toHaveTextContent("새로고침 중…");
+  expect(screen.getByRole("tabpanel")).toHaveAttribute("aria-busy", "true");
+
+  await act(async () => refreshedSummary.resolve(emptySummary("project-1")));
+  expect(screen.queryByText("새로고침 중…")).not.toBeInTheDocument();
+});
+
+it("preserves existing tab content when retrying a failed project refresh", async () => {
+  const retrySummary = deferred<ReturnType<typeof emptySummary>>();
+  let projectReads = 0;
+  let summaryReads = 0;
+  mockApi.get.mockImplementation((path: string) => {
+    if (path === "/projects/project-1") {
+      projectReads += 1;
+      if (projectReads === 2) return Promise.reject(new Error("offline"));
+      return project;
+    }
+    if (path === "/projects/project-1/summary") {
+      summaryReads += 1;
+      return summaryReads === 3
+        ? retrySummary.promise
+        : emptySummary("project-1");
+    }
+    return defaultGet(path);
+  });
+  render(<ProjectDetailPage projectId="project-1" />);
+  expect(
+    await screen.findByRole("heading", { name: "프로젝트 개요" }),
+  ).toBeVisible();
+
+  fireEvent.click(screen.getByRole("button", { name: "진행 시작" }));
+  fireEvent.click(screen.getByRole("button", { name: "변경 확인" }));
+  expect(
+    await screen.findByText("프로젝트 정보를 불러오지 못했습니다."),
+  ).toBeVisible();
+
+  fireEvent.click(screen.getByRole("button", { name: "다시 시도" }));
+  await waitFor(() => expect(summaryReads).toBe(3));
+
+  expect(screen.getByRole("heading", { name: "프로젝트 개요" })).toBeVisible();
+  expect(screen.getByRole("status")).toHaveTextContent("새로고침 중…");
+
+  await act(async () => retrySummary.resolve(emptySummary("project-1")));
+});
+
 it("reloads once after a stale transition without replaying it", async () => {
   mockApi.post.mockRejectedValueOnce(
     new ApiError(409, {
@@ -779,6 +932,33 @@ it("keeps the project shell and overview when participant loading fails", async 
   expect(screen.getByRole("heading", { name: "프로젝트 개요" })).toBeVisible();
   fireEvent.click(screen.getByRole("tab", { name: "참가 명단" }));
   expect(screen.getByText("참가자 정보를 불러오지 못했습니다.")).toBeVisible();
+});
+
+it("retries only the failed audit resource", async () => {
+  let auditReads = 0;
+  mockApi.get.mockImplementation((path: string) => {
+    if (path === "/projects/project-1/audit?limit=50") {
+      auditReads += 1;
+      if (auditReads === 1) return Promise.reject(new Error("offline"));
+      return Promise.resolve({
+        items: [auditItem("재시도 성공")],
+        nextCursor: null,
+      });
+    }
+    return defaultGet(path);
+  });
+
+  render(<ProjectDetailPage projectId="project-1" />);
+
+  fireEvent.click(await screen.findByRole("tab", { name: "변경 이력" }));
+  const readsBeforeRetry = mockApi.get.mock.calls.map(([path]) => path);
+  fireEvent.click(await screen.findByRole("button", { name: "다시 시도" }));
+
+  expect(await screen.findByText("재시도 성공")).toBeVisible();
+  expect(auditReads).toBe(2);
+  expect(
+    mockApi.get.mock.calls.slice(readsBeforeRetry.length).map(([path]) => path),
+  ).toEqual(["/projects/project-1/audit?limit=50"]);
 });
 
 it("invalidates the audit cursor and preserves a newer request lock across a full reload", async () => {

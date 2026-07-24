@@ -1,6 +1,7 @@
 import type { Project } from "@event-roster/contracts";
 import "@testing-library/jest-dom/vitest";
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -82,3 +83,34 @@ it("keeps the edit payload contract after changing dates", () => {
     expectedRevision: 4,
   });
 });
+
+it("shows save progress and prevents duplicate submissions", async () => {
+  const submission = deferred<void>();
+  const onSubmit = vi.fn().mockReturnValue(submission.promise);
+  render(
+    <ProjectEditDialog
+      project={project}
+      closed={false}
+      onClose={vi.fn()}
+      onSubmit={onSubmit}
+    />,
+  );
+
+  fireEvent.click(screen.getByRole("button", { name: "저장" }));
+
+  expect(screen.getByRole("button", { name: "저장 중…" })).toBeDisabled();
+  fireEvent.click(screen.getByRole("button", { name: "저장 중…" }));
+  expect(onSubmit).toHaveBeenCalledTimes(1);
+
+  await act(async () => submission.resolve());
+});
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+  return { promise, resolve, reject };
+}

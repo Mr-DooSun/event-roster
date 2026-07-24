@@ -86,6 +86,8 @@ export function ProjectEditDialog({
           <Button
             type="submit"
             variant="primary"
+            loading={busy}
+            loadingText="저장 중…"
             disabled={busy || reversed || (!closed && !name.trim())}
           >
             저장
