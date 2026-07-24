@@ -128,6 +128,11 @@ export function OrganizationManagersPanel({
   }
 
   function closeExistingAssignment() {
+    if (mutationInFlight.current) return;
+    resetExistingAssignment();
+  }
+
+  function resetExistingAssignment() {
     candidateSearchGeneration.current += 1;
     candidateSearchController.current?.abort();
     candidateSearchController.current = null;
@@ -137,7 +142,7 @@ export function OrganizationManagersPanel({
 
   async function assignExisting(event: FormEvent) {
     event.preventDefault();
-    if (!selectedUserId) return;
+    if (searchingCandidates || !selectedUserId) return;
     setExistingAssignmentError(null);
     await mutate(async () => {
       await api.post(`/organizations/${organization.id}/managers`, {
@@ -145,7 +150,7 @@ export function OrganizationManagersPanel({
         userId: selectedUserId,
         assignmentRole,
       });
-      closeExistingAssignment();
+      resetExistingAssignment();
     }, setExistingAssignmentError);
   }
 
@@ -463,7 +468,9 @@ export function OrganizationManagersPanel({
                 <Button
                   type="submit"
                   variant="primary"
-                  disabled={isMutating || !selectedUserId}
+                  disabled={
+                    isMutating || searchingCandidates || !selectedUserId
+                  }
                   loading={isMutating}
                   loadingText="담당자로 지정 중…"
                 >

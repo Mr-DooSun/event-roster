@@ -729,6 +729,7 @@ a {
 .er-organization-facts dd {
   margin: 0;
   font-weight: var(--er-font-weight-medium);
+  overflow-wrap: anywhere;
 }
 .er-manager-list,
 .er-organization-project-list {
@@ -810,6 +811,8 @@ th {
 }
 .er-dialog {
   width: min(100%, 28rem);
+  max-height: calc(100dvh - 2rem);
+  overflow-y: auto;
   padding: var(--er-space-6);
   border-radius: var(--er-radius-md);
   background: var(--er-color-surface);
@@ -907,7 +910,7 @@ th {
   }
   .er-assignment-dialog .er-dialog-actions {
     align-items: stretch;
-    flex-direction: column-reverse;
+    flex-direction: column;
   }
   .er-assignment-dialog .er-dialog-actions .er-button {
     width: 100%;

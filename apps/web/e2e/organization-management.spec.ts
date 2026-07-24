@@ -3,7 +3,7 @@ import { fixture, login } from "./support";
 
 test("existing manager assignment stays usable at 360px", async ({ page }) => {
   const data = fixture();
-  await page.setViewportSize({ width: 360, height: 800 });
+  await page.setViewportSize({ width: 360, height: 640 });
   await login(page, data.operator.loginId, data.operator.password);
   await page.getByRole("link", { name: "조직 관리" }).click();
   expect(
@@ -17,6 +17,18 @@ test("existing manager assignment stays usable at 360px", async ({ page }) => {
   ).toBe(1);
   await page.getByRole("link", { name: "E2E 1팀 상세 관리" }).click();
 
+  await page.getByRole("button", { name: "새 담당자 발급" }).click();
+  await page.getByLabel("영문 로그인 ID").fill("e2e-tab-candidate");
+  await page.getByLabel("표시 이름").fill("E2E 탭 후보");
+  await page.getByLabel("조직별 역할").selectOption("MANAGER");
+  await page.getByRole("button", { name: "계정 발급 및 지정" }).click();
+  await page
+    .getByRole("dialog", { name: "임시 비밀번호" })
+    .getByRole("button", { name: "닫기" })
+    .click();
+  await page.getByRole("button", { name: "E2E 탭 후보 담당 해제" }).click();
+  await page.getByRole("button", { name: "담당 해제 확인" }).click();
+
   const trigger = page.getByRole("button", { name: "기존 계정 지정" });
   await trigger.click();
   const dialog = page.getByRole("dialog", { name: "기존 담당자 지정" });
@@ -28,6 +40,21 @@ test("existing manager assignment stays usable at 360px", async ({ page }) => {
     dialog.getByRole("heading", { name: "담당 범위 설정" }),
   ).toBeVisible();
   await expect(dialog.getByRole("button", { name: "취소" })).toBeVisible();
+  const dialogBox = await dialog.boundingBox();
+  expect(dialogBox).not.toBeNull();
+  expect(dialogBox?.y).toBeGreaterThanOrEqual(0);
+  expect((dialogBox?.y ?? 0) + (dialogBox?.height ?? 0)).toBeLessThanOrEqual(
+    640,
+  );
+  const verticalOverflow = await dialog.evaluate((element) => ({
+    clientHeight: element.clientHeight,
+    overflowY: getComputedStyle(element).overflowY,
+    scrollHeight: element.scrollHeight,
+  }));
+  expect(verticalOverflow.overflowY).toBe("auto");
+  expect(verticalOverflow.scrollHeight).toBeGreaterThan(
+    verticalOverflow.clientHeight,
+  );
   expect(
     await dialog.evaluate(
       (element) => element.scrollWidth <= element.clientWidth,
@@ -52,9 +79,34 @@ test("existing manager assignment stays usable at 360px", async ({ page }) => {
       ),
   ).toBe(1);
 
+  await dialog.getByRole("button", { name: "검색" }).click();
+  await dialog.getByRole("combobox", { name: "지정할 계정" }).selectOption({
+    index: 1,
+  });
+  const actions = dialog.locator(".er-dialog-actions");
+  expect(
+    await actions.evaluate(
+      (element) => getComputedStyle(element).flexDirection,
+    ),
+  ).toBe("column");
+  const cancel = dialog.getByRole("button", { name: "취소" });
+  const assign = dialog.getByRole("button", { name: "담당자로 지정" });
+  await cancel.scrollIntoViewIfNeeded();
+  await expect(cancel).toBeInViewport();
+  await cancel.focus();
+  await page.keyboard.press("Tab");
+  await expect(assign).toBeFocused();
+
   await page.keyboard.press("Escape");
   await expect(dialog).toHaveCount(0);
   await expect(trigger).toBeFocused();
+  await page.getByRole("link", { name: "조직 관리" }).click();
+  expect(
+    await page
+      .locator(".er-organization-facts dd")
+      .first()
+      .evaluate((element) => getComputedStyle(element).overflowWrap),
+  ).toBe("anywhere");
 });
 
 test("operator delegates pre-registration roster entry to an organization leader", async ({

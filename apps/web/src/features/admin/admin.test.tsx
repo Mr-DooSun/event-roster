@@ -1460,6 +1460,95 @@ it("keeps existing assignment choices after mutation failure", async () => {
   expect(within(dialog).getByLabelText("조직별 역할")).toHaveValue("MANAGER");
 });
 
+it("keeps the existing assignment dialog open when Escape is pressed during a failed mutation", async () => {
+  const assignment = deferred<Response>();
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/auth/login"))
+        return Promise.resolve(Response.json(auth()));
+      if (url.endsWith("/organizations/org-1"))
+        return Promise.resolve(Response.json(organizationDetail()));
+      if (url.endsWith("/organizations/org-1/audit?limit=50"))
+        return Promise.resolve(Response.json({ items: [], nextCursor: null }));
+      if (url.includes("/assignable-users?"))
+        return Promise.resolve(
+          Response.json([
+            {
+              userId: "candidate-1",
+              loginId: "candidate-01",
+              displayName: "지정 후보",
+              isActive: true,
+            },
+          ]),
+        );
+      if (
+        url.endsWith("/organizations/org-1/managers") &&
+        init?.method === "POST"
+      ) {
+        return assignment.promise;
+      }
+      throw new Error(`unexpected request: ${url}`);
+    }),
+  );
+
+  render(
+    <AuthProvider restoreOnMount={false}>
+      <Gate>
+        <OrganizationDetailPage organizationId="org-1" />
+      </Gate>
+    </AuthProvider>,
+  );
+  await login();
+  fireEvent.click(
+    await screen.findByRole("button", { name: "기존 계정 지정" }),
+  );
+  fireEvent.change(screen.getByLabelText("로그인 ID 또는 표시 이름"), {
+    target: { value: "지정" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "검색" }));
+  await screen.findByRole("option", { name: "지정 후보 · candidate-01" });
+  fireEvent.change(screen.getByLabelText("지정할 계정"), {
+    target: { value: "candidate-1" },
+  });
+  fireEvent.change(screen.getByLabelText("조직별 역할"), {
+    target: { value: "MANAGER" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "담당자로 지정" }));
+
+  const pendingDialog = screen.getByRole("dialog", {
+    name: "기존 담당자 지정",
+  });
+  expect(
+    within(pendingDialog).getByRole("button", { name: "취소" }),
+  ).toBeDisabled();
+  fireEvent.keyDown(pendingDialog, { key: "Escape" });
+  expect(
+    screen.getByRole("dialog", { name: "기존 담당자 지정" }),
+  ).toBeVisible();
+
+  assignment.resolve(
+    Response.json({ code: "INTERNAL", message: "failed" }, { status: 500 }),
+  );
+
+  const failedDialog = await screen.findByRole("dialog", {
+    name: "기존 담당자 지정",
+  });
+  expect(
+    within(failedDialog).getByText("담당자 변경을 반영하지 못했습니다."),
+  ).toBeVisible();
+  expect(
+    within(failedDialog).getByLabelText("로그인 ID 또는 표시 이름"),
+  ).toHaveValue("지정");
+  expect(within(failedDialog).getByLabelText("지정할 계정")).toHaveValue(
+    "candidate-1",
+  );
+  expect(within(failedDialog).getByLabelText("조직별 역할")).toHaveValue(
+    "MANAGER",
+  );
+});
+
 it("preserves existing assignment choices when a repeated candidate search fails", async () => {
   let candidateSearches = 0;
   vi.stubGlobal(
@@ -1539,6 +1628,79 @@ it("preserves existing assignment choices when a repeated candidate search fails
       name: "지정 후보 · candidate-01",
     }),
   ).toBeVisible();
+});
+
+it("blocks existing assignment while a repeated candidate search is pending", async () => {
+  const repeatedSearch = deferred<Response>();
+  let candidateSearches = 0;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/auth/login"))
+        return Promise.resolve(Response.json(auth()));
+      if (url.endsWith("/organizations/org-1"))
+        return Promise.resolve(Response.json(organizationDetail()));
+      if (url.endsWith("/organizations/org-1/audit?limit=50"))
+        return Promise.resolve(Response.json({ items: [], nextCursor: null }));
+      if (url.includes("/assignable-users?")) {
+        candidateSearches += 1;
+        return candidateSearches === 1
+          ? Promise.resolve(
+              Response.json([
+                {
+                  userId: "candidate-1",
+                  loginId: "candidate-01",
+                  displayName: "지정 후보",
+                  isActive: true,
+                },
+              ]),
+            )
+          : repeatedSearch.promise;
+      }
+      if (
+        url.endsWith("/organizations/org-1/managers") &&
+        init?.method === "POST"
+      ) {
+        return Promise.resolve(Response.json({ manager: {} }));
+      }
+      throw new Error(`unexpected request: ${url}`);
+    }),
+  );
+
+  render(
+    <AuthProvider restoreOnMount={false}>
+      <Gate>
+        <OrganizationDetailPage organizationId="org-1" />
+      </Gate>
+    </AuthProvider>,
+  );
+  await login();
+  fireEvent.click(
+    await screen.findByRole("button", { name: "기존 계정 지정" }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "검색" }));
+  await screen.findByRole("option", { name: "지정 후보 · candidate-01" });
+  fireEvent.change(screen.getByLabelText("지정할 계정"), {
+    target: { value: "candidate-1" },
+  });
+
+  fireEvent.click(screen.getByRole("button", { name: "검색" }));
+
+  const assignButton = screen.getByRole("button", { name: "담당자로 지정" });
+  const assignForm = assignButton.closest("form");
+  expect(assignForm).not.toBeNull();
+  fireEvent.click(assignButton);
+  fireEvent.submit(assignForm as HTMLFormElement);
+  const assignmentCalls = vi
+    .mocked(fetch)
+    .mock.calls.filter(
+      ([input, init]) =>
+        String(input).endsWith("/organizations/org-1/managers") &&
+        init?.method === "POST",
+    );
+  expect(assignmentCalls).toHaveLength(0);
+  expect(assignButton).toBeDisabled();
 });
 
 it("aborts stale candidate searches and only ends the current search loading", async () => {
