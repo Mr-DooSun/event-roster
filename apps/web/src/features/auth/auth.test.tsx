@@ -34,6 +34,88 @@ it("uses project branding on the login screen", () => {
   expect(screen.queryByText(retiredBrand)).not.toBeInTheDocument();
 });
 
+it("shows pending feedback and prevents duplicate login submission", async () => {
+  let resolveLogin: ((value: Response) => void) | undefined;
+  const pendingLogin = new Promise<Response>((resolve) => {
+    resolveLogin = resolve;
+  });
+  const fetchMock = vi.fn(() => pendingLogin);
+  vi.stubGlobal("fetch", fetchMock);
+  render(
+    <AuthProvider restoreOnMount={false}>
+      <LoginPage />
+    </AuthProvider>,
+  );
+
+  fireEvent.change(screen.getByLabelText("로그인 ID"), {
+    target: { value: "operator" },
+  });
+  fireEvent.change(screen.getByLabelText("비밀번호"), {
+    target: { value: "password-1234" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "로그인" }));
+
+  const pendingButton = screen.getByRole("button", { name: "로그인 중…" });
+  expect(pendingButton).toBeDisabled();
+  fireEvent.click(pendingButton);
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+
+  resolveLogin?.(Response.json(authSuccess("FULL")));
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "로그인" })).toBeEnabled(),
+  );
+});
+
+it("shows pending feedback and prevents duplicate password changes", async () => {
+  let resolveChange: ((value: Response) => void) | undefined;
+  const pendingChange = new Promise<Response>((resolve) => {
+    resolveChange = resolve;
+  });
+  const fetchMock = vi.fn((input: RequestInfo | URL) => {
+    if (String(input).endsWith("/auth/login")) {
+      return Promise.resolve(Response.json(authSuccess("MUST_CHANGE_PASSWORD")));
+    }
+    if (String(input).endsWith("/auth/change-password")) return pendingChange;
+    if (String(input).endsWith("/auth/logout")) {
+      return Promise.resolve(new Response(null, { status: 204 }));
+    }
+    throw new Error(`unexpected request: ${input}`);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  render(
+    <AuthProvider restoreOnMount={false}>
+      <AuthBoundary />
+    </AuthProvider>,
+  );
+
+  await submitLogin();
+  await screen.findByText("새 비밀번호를 설정하세요.");
+  fireEvent.change(screen.getByLabelText("현재 비밀번호"), {
+    target: { value: "temporary-password-123" },
+  });
+  fireEvent.change(screen.getByLabelText(/새 비밀번호.*10자 이상/), {
+    target: { value: "new-password-123" },
+  });
+  fireEvent.change(screen.getByLabelText("새 비밀번호 확인"), {
+    target: { value: "new-password-123" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "비밀번호 변경" }));
+
+  const pendingButton = screen.getByRole("button", {
+    name: "비밀번호 변경 중…",
+  });
+  expect(pendingButton).toBeDisabled();
+  fireEvent.click(pendingButton);
+  expect(
+    fetchMock.mock.calls.filter(([url]) =>
+      String(url).endsWith("/auth/change-password"),
+    ),
+  ).toHaveLength(1);
+
+  resolveChange?.(new Response(null, { status: 204 }));
+  expect(await screen.findByRole("button", { name: "로그인" })).toBeVisible();
+});
+
 it("keeps access and CSRF tokens only in memory", async () => {
   window.history.replaceState(null, "", "/projects/project-1");
   const auth = authSuccess("MUST_CHANGE_PASSWORD");

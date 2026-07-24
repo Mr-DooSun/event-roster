@@ -17,10 +17,13 @@ export function BootstrapHandoffPage() {
   const [displayName, setDisplayName] = useState("");
   const [handoff, setHandoff] = useState<FirstOperatorHandoff | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
+    if (submitting) return;
     setError(null);
+    setSubmitting(true);
     try {
       const result = await api.post<FirstOperatorHandoff>(
         "/bootstrap/first-operator",
@@ -29,6 +32,8 @@ export function BootstrapHandoffPage() {
       setHandoff(result);
     } catch {
       setError("첫 운영자 계정을 만들지 못했습니다.");
+    } finally {
+      setSubmitting(false);
     }
   }
 
@@ -55,7 +60,12 @@ export function BootstrapHandoffPage() {
             onChange={(event) => setDisplayName(event.currentTarget.value)}
           />
           {error ? <StatusMessage tone="error">{error}</StatusMessage> : null}
-          <Button type="submit" variant="primary">
+          <Button
+            type="submit"
+            variant="primary"
+            loading={submitting}
+            loadingText="운영자 계정 만드는 중…"
+          >
             운영자 계정 만들기
           </Button>
         </form>

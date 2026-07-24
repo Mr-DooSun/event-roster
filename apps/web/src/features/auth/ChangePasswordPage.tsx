@@ -11,10 +11,12 @@ export function ChangePasswordPage() {
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmNewPassword, setConfirmNewPassword] = useState("");
+  const [submitting, setSubmitting] = useState(false);
   const [validation, setValidation] = useState<string | null>(null);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
+    if (submitting) return;
     const parsed = PasswordSchema.safeParse(newPassword);
     if (!parsed.success) {
       setValidation(
@@ -26,7 +28,12 @@ export function ChangePasswordPage() {
       setValidation("새 비밀번호가 일치하지 않습니다.");
       return;
     }
-    await changePassword(currentPassword, parsed.data);
+    setSubmitting(true);
+    try {
+      await changePassword(currentPassword, parsed.data);
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (
@@ -75,7 +82,12 @@ export function ChangePasswordPage() {
             <StatusMessage tone="error">{validation ?? error}</StatusMessage>
           ) : null}
           <div className="er-action-row">
-            <Button type="submit" variant="primary">
+            <Button
+              type="submit"
+              variant="primary"
+              loading={submitting}
+              loadingText="비밀번호 변경 중…"
+            >
               비밀번호 변경
             </Button>
             <Button type="button" onClick={() => void logout()}>

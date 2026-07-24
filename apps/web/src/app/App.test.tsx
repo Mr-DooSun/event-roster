@@ -23,6 +23,7 @@ const { mockApi } = vi.hoisted(() => ({
 const { authState } = vi.hoisted(() => ({
   authState: {
     role: "OPERATOR" as "OPERATOR" | "ORGANIZATION_MANAGER",
+    status: "AUTHENTICATED" as "AUTHENTICATED" | "RESTORING",
   },
 }));
 
@@ -39,17 +40,26 @@ vi.mock("../features/auth/AuthProvider", () => ({
         },
       },
     },
-    status: "AUTHENTICATED",
+    status: authState.status,
     logout: vi.fn(),
   }),
 }));
 
 beforeEach(() => {
   authState.role = "OPERATOR";
+  authState.status = "AUTHENTICATED";
   mockApi.get.mockReset().mockResolvedValue([]);
   mockApi.post.mockReset();
   mockApi.patch.mockReset();
   mockApi.delete.mockReset();
+});
+
+it("announces authentication restoration while the session is restoring", () => {
+  authState.status = "RESTORING";
+
+  render(<App />);
+
+  expect(screen.getByRole("status")).toHaveTextContent("로그인 상태 확인 중…");
 });
 
 afterEach(() => {

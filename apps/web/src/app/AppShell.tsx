@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 import { Button } from "../components/ui/Button";
+import { LoadingStatus } from "../components/ui/LoadingStatus";
 import { OrganizationDetailPage } from "../features/admin/OrganizationDetailPage";
 import { OrganizationsPage } from "../features/admin/OrganizationsPage";
 import { UsersPage } from "../features/admin/UsersPage";
@@ -17,6 +18,17 @@ export function AppShell() {
   const { auth, logout } = useAuth();
   const path = usePathname();
   const operator = auth?.session.user.role === "OPERATOR";
+  const [loggingOut, setLoggingOut] = useState(false);
+
+  async function handleLogout() {
+    if (loggingOut) return;
+    setLoggingOut(true);
+    try {
+      await logout();
+    } finally {
+      setLoggingOut(false);
+    }
+  }
   return (
     <div className="er-app-shell">
       <header className="er-app-header">
@@ -26,7 +38,12 @@ export function AppShell() {
         </div>
         <div className="er-user-actions">
           <span>{auth?.session.user.displayName}</span>
-          <Button type="button" onClick={() => void logout()}>
+          <Button
+            type="button"
+            onClick={() => void handleLogout()}
+            loading={loggingOut}
+            loadingText="로그아웃 중…"
+          >
             로그아웃
           </Button>
         </div>
@@ -64,7 +81,13 @@ function route(path: string, operator: boolean) {
   const importMatch = path.match(/^\/projects\/([^/]+)\/import$/);
   if (importMatch?.[1] && operator) {
     return (
-      <Suspense fallback={<p className="er-muted">엑셀 도구 불러오는 중…</p>}>
+      <Suspense
+        fallback={
+          <LoadingStatus className="er-panel-loading">
+            엑셀 도구 불러오는 중…
+          </LoadingStatus>
+        }
+      >
         <ImportWizard projectId={decodeURIComponent(importMatch[1])} />
       </Suspense>
     );

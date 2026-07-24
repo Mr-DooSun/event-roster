@@ -12,10 +12,12 @@ export function RecoveryPage() {
   const [recoveryCode, setRecoveryCode] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmNewPassword, setConfirmNewPassword] = useState("");
+  const [submitting, setSubmitting] = useState(false);
   const [validation, setValidation] = useState<string | null>(null);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
+    if (submitting) return;
     const parsed = PasswordSchema.safeParse(newPassword);
     if (!parsed.success) {
       setValidation(
@@ -27,7 +29,12 @@ export function RecoveryPage() {
       setValidation("새 비밀번호가 일치하지 않습니다.");
       return;
     }
-    await recover({ loginId, recoveryCode, newPassword: parsed.data });
+    setSubmitting(true);
+    try {
+      await recover({ loginId, recoveryCode, newPassword: parsed.data });
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (
@@ -75,7 +82,12 @@ export function RecoveryPage() {
           {validation || error ? (
             <StatusMessage tone="error">{validation ?? error}</StatusMessage>
           ) : null}
-          <Button type="submit" variant="primary">
+          <Button
+            type="submit"
+            variant="primary"
+            loading={submitting}
+            loadingText="비밀번호 재설정 중…"
+          >
             비밀번호 재설정
           </Button>
         </form>

@@ -15,6 +15,7 @@ export function LoginPage() {
 
   async function submit(event: FormEvent) {
     event.preventDefault();
+    if (submitting) return;
     const parsed = LoginRequestSchema.safeParse({ loginId, password });
     if (!parsed.success) {
       setValidation(
@@ -23,8 +24,11 @@ export function LoginPage() {
       return;
     }
     setSubmitting(true);
-    await login(parsed.data.loginId, parsed.data.password);
-    setSubmitting(false);
+    try {
+      await login(parsed.data.loginId, parsed.data.password);
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (
@@ -58,8 +62,13 @@ export function LoginPage() {
           {validation || error ? (
             <StatusMessage tone="error">{validation ?? error}</StatusMessage>
           ) : null}
-          <Button type="submit" variant="primary" disabled={submitting}>
-            {submitting ? "로그인 중…" : "로그인"}
+          <Button
+            type="submit"
+            variant="primary"
+            loading={submitting}
+            loadingText="로그인 중…"
+          >
+            로그인
           </Button>
         </form>
         <a className="er-text-link" href="/recover">

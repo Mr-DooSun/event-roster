@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { LoadingStatus } from "../components/ui/LoadingStatus";
 import { useAuth } from "../features/auth/AuthProvider";
 import { BootstrapHandoffPage } from "../features/auth/BootstrapHandoffPage";
 import { ChangePasswordPage } from "../features/auth/ChangePasswordPage";
@@ -11,8 +12,8 @@ export function AuthBoundary() {
   const path = usePathname();
   if (status === "RESTORING") {
     return (
-      <main className="er-loading" aria-live="polite">
-        로그인 상태 확인 중…
+      <main className="er-loading" aria-busy="true">
+        <LoadingStatus>로그인 상태 확인 중…</LoadingStatus>
       </main>
     );
   }
