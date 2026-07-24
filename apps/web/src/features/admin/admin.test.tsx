@@ -604,9 +604,9 @@ it("keeps organization detail visible while retrying initial audit", async () =>
   await login();
 
   expect(await screen.findByRole("heading", { name: "1팀" })).toBeVisible();
-  expect(screen.getByRole("status")).toHaveTextContent(
-    "변경 이력 불러오는 중…",
-  );
+  const auditLoadingStatus = screen.getByRole("status");
+  expect(auditLoadingStatus).toHaveTextContent("변경 이력 불러오는 중…");
+  expect(auditLoadingStatus.closest("[aria-busy=true]")).not.toBeNull();
   expect(screen.queryByText("아직 기록이 없습니다.")).not.toBeInTheDocument();
 
   initialAudit.resolve(new Response(null, { status: 503 }));
@@ -616,6 +616,110 @@ it("keeps organization detail visible while retrying initial audit", async () =>
   expect(screen.getByRole("heading", { name: "1팀" })).toBeVisible();
   fireEvent.click(screen.getByRole("button", { name: "다시 시도" }));
   expect(await screen.findByText("조직 담당자 지정")).toBeVisible();
+});
+
+it("blocks a captured audit cursor handler across a base refresh", async () => {
+  const refreshedAudit = deferred<Response>();
+  let baseAuditReads = 0;
+  let oldCursorReads = 0;
+  let newCursorReads = 0;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/auth/login")) {
+        return Promise.resolve(Response.json(auth()));
+      }
+      if (url.endsWith("/organizations/org-1") && init?.method === "PATCH") {
+        return Promise.resolve(new Response(null, { status: 204 }));
+      }
+      if (url.endsWith("/organizations/org-1")) {
+        return Promise.resolve(Response.json(organizationDetail()));
+      }
+      if (url.endsWith("/organizations/org-1/audit?limit=50")) {
+        baseAuditReads += 1;
+        return baseAuditReads === 1
+          ? Promise.resolve(
+              Response.json({
+                items: [auditItem("이전 기준")],
+                nextCursor: "old-cursor",
+              }),
+            )
+          : refreshedAudit.promise;
+      }
+      if (url.endsWith("cursor=old-cursor")) {
+        oldCursorReads += 1;
+        return Promise.resolve(
+          Response.json({
+            items: [auditItem("오래된 페이지")],
+            nextCursor: null,
+          }),
+        );
+      }
+      if (url.endsWith("cursor=new-cursor")) {
+        newCursorReads += 1;
+        return Promise.resolve(
+          Response.json({
+            items: [auditItem("새 페이지")],
+            nextCursor: null,
+          }),
+        );
+      }
+      throw new Error(`unexpected request: ${url}`);
+    }),
+  );
+  render(
+    <AuthProvider restoreOnMount={false}>
+      <Gate>
+        <OrganizationDetailPage organizationId="org-1" />
+      </Gate>
+    </AuthProvider>,
+  );
+  await login();
+  expect(await screen.findByText("이전 기준")).toBeVisible();
+  const staleLoadMore = captureReactClickHandler(
+    screen.getByRole("button", { name: "이력 더 보기" }),
+  );
+
+  fireEvent.change(screen.getByLabelText("조직 이름"), {
+    target: { value: "운영팀" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "이름 저장" }));
+  await waitFor(() => expect(baseAuditReads).toBe(2));
+
+  await act(async () => {
+    staleLoadMore();
+    await Promise.resolve();
+  });
+  expect(oldCursorReads).toBe(0);
+  const existingAuditItem = screen.getByText("이전 기준");
+  expect(existingAuditItem.closest("[aria-busy=true]")).not.toBeNull();
+  expect(
+    screen.queryByRole("button", { name: "이력 더 보기" }),
+  ).not.toBeInTheDocument();
+
+  await act(async () => {
+    refreshedAudit.resolve(
+      Response.json({
+        items: [auditItem("새 기준")],
+        nextCursor: "new-cursor",
+      }),
+    );
+    await refreshedAudit.promise;
+  });
+  const newAuditItem = await screen.findByText("새 기준");
+  expect(newAuditItem.closest("[aria-busy=false]")).not.toBeNull();
+  expect(screen.queryByText("오래된 페이지")).not.toBeInTheDocument();
+
+  await act(async () => {
+    staleLoadMore();
+    await Promise.resolve();
+  });
+  expect(oldCursorReads).toBe(0);
+
+  fireEvent.click(screen.getByRole("button", { name: "이력 더 보기" }));
+  expect(newCursorReads).toBe(1);
+  expect(await screen.findByText("새 페이지")).toBeVisible();
 });
 
 it("shows pending labels for organization rename and status changes", async () => {
@@ -1092,6 +1196,18 @@ function deferred<T>() {
     reject = nextReject;
   });
   return { promise, resolve, reject };
+}
+
+function captureReactClickHandler(element: HTMLElement) {
+  const reactPropsKey = Object.getOwnPropertyNames(element).find((key) =>
+    key.startsWith("__reactProps$"),
+  );
+  if (!reactPropsKey) throw new Error("React click props not found");
+  const props = (
+    element as unknown as Record<string, { onClick?: () => void }>
+  )[reactPropsKey];
+  if (!props?.onClick) throw new Error("React click handler not found");
+  return props.onClick;
 }
 
 function auditItem(action: string) {

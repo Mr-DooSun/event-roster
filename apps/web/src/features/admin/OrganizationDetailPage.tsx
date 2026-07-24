@@ -71,7 +71,14 @@ export function OrganizationDetailPage({
   activeOrganizationId.current = organizationId;
   const detailGeneration = useRef(0);
   const auditGeneration = useRef(0);
+  const auditLoadingRef = useRef(true);
+  const auditNextCursorRef = useRef<string | null>(null);
   const auditPaginationRequest = useRef<AuditPaginationRequest | null>(null);
+
+  const updateAuditNextCursor = useCallback((nextCursor: string | null) => {
+    auditNextCursorRef.current = nextCursor;
+    setAuditNextCursor(nextCursor);
+  }, []);
 
   useEffect(() => {
     instanceActive.current = true;
@@ -136,8 +143,9 @@ export function OrganizationDetailPage({
     ) {
       return false;
     }
-    const generation = ++auditGeneration.current;
+    auditLoadingRef.current = true;
     setAuditLoading(true);
+    const generation = ++auditGeneration.current;
     auditPaginationRequest.current = null;
     setAuditLoadingMore(false);
     setAuditPaginationError(null);
@@ -156,7 +164,7 @@ export function OrganizationDetailPage({
         activeOrganizationId.current === requestedOrganizationId
       ) {
         setAudit(page.items);
-        setAuditNextCursor(page.nextCursor);
+        updateAuditNextCursor(page.nextCursor);
         setAuditLoaded(true);
         setAuditError(null);
         return true;
@@ -177,15 +185,17 @@ export function OrganizationDetailPage({
         generation === auditGeneration.current &&
         activeOrganizationId.current === requestedOrganizationId
       ) {
+        auditLoadingRef.current = false;
         setAuditLoading(false);
       }
     }
-  }, [api, organizationId]);
+  }, [api, organizationId, updateAuditNextCursor]);
 
   useEffect(() => {
     setOrganization(null);
     setAudit([]);
-    setAuditNextCursor(null);
+    auditLoadingRef.current = true;
+    updateAuditNextCursor(null);
     setDetailError(null);
     setAuditError(null);
     setAuditPaginationError(null);
@@ -199,7 +209,7 @@ export function OrganizationDetailPage({
     setTemporaryPassword(null);
     void loadDetail();
     void loadInitialAudit();
-  }, [loadDetail, loadInitialAudit]);
+  }, [loadDetail, loadInitialAudit, updateAuditNextCursor]);
 
   async function rename(event: FormEvent) {
     event.preventDefault();
@@ -286,18 +296,24 @@ export function OrganizationDetailPage({
     }
   }
 
-  async function loadMoreAudit() {
+  async function loadMoreAudit(
+    expectedGeneration: number,
+    expectedCursor: string | null,
+  ) {
     const requestedOrganizationId = organizationId;
     if (
       !instanceActive.current ||
       activeOrganizationId.current !== requestedOrganizationId ||
-      !auditNextCursor ||
+      expectedGeneration !== auditGeneration.current ||
+      !expectedCursor ||
+      auditNextCursorRef.current !== expectedCursor ||
+      auditLoadingRef.current ||
       auditPaginationRequest.current
     ) {
       return;
     }
-    const cursor = auditNextCursor;
-    const generation = auditGeneration.current;
+    const cursor = expectedCursor;
+    const generation = expectedGeneration;
     const request = { cursor, generation };
     auditPaginationRequest.current = request;
     setAuditLoadingMore(true);
@@ -320,7 +336,7 @@ export function OrganizationDetailPage({
         return;
       }
       setAudit((current) => [...current, ...page.items]);
-      setAuditNextCursor(page.nextCursor);
+      updateAuditNextCursor(page.nextCursor);
       setAuditPaginationError(null);
     } catch {
       if (
@@ -371,6 +387,9 @@ export function OrganizationDetailPage({
       ...(returnFocus ? { returnFocus } : {}),
     });
   }
+
+  const renderAuditGeneration = auditGeneration.current;
+  const renderAuditCursor = auditNextCursor;
 
   return (
     <div className="er-page-stack">
@@ -510,22 +529,28 @@ export function OrganizationDetailPage({
         <RetryableError
           message={auditPaginationError}
           retrying={auditLoadingMore}
-          onRetry={loadMoreAudit}
+          onRetry={() =>
+            loadMoreAudit(renderAuditGeneration, renderAuditCursor)
+          }
         />
-      ) : null}
-      {auditLoading && auditLoaded ? (
-        <LoadingStatus>변경 이력 새로고침 중…</LoadingStatus>
       ) : null}
       {auditLoading && !auditLoaded && !auditError ? (
-        <OrganizationAuditSkeleton />
+        <OrganizationAuditSkeleton loading={auditLoading} />
       ) : null}
       {auditLoaded ? (
-        <AuditPanel
-          items={audit}
-          nextCursor={auditNextCursor}
-          loadingMore={auditLoadingMore}
-          onLoadMore={loadMoreAudit}
-        />
+        <div className="er-organization-audit-region" aria-busy={auditLoading}>
+          {auditLoading ? (
+            <LoadingStatus>변경 이력 새로고침 중…</LoadingStatus>
+          ) : null}
+          <AuditPanel
+            items={audit}
+            nextCursor={auditLoading ? null : auditNextCursor}
+            loadingMore={auditLoadingMore}
+            onLoadMore={() =>
+              loadMoreAudit(renderAuditGeneration, renderAuditCursor)
+            }
+          />
+        </div>
       ) : null}
       {showStatusConfirmation && organization ? (
         <Dialog
@@ -584,9 +609,12 @@ function OrganizationDetailSkeleton() {
   );
 }
 
-function OrganizationAuditSkeleton() {
+function OrganizationAuditSkeleton({ loading }: { loading: boolean }) {
   return (
-    <Card className="er-panel er-organization-audit-skeleton">
+    <Card
+      className="er-panel er-organization-audit-skeleton"
+      aria-busy={loading}
+    >
       <LoadingStatus visuallyHidden>변경 이력 불러오는 중…</LoadingStatus>
       <Skeleton className="er-skeleton--title" />
       <Skeleton className="er-skeleton--text" />

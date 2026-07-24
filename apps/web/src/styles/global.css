@@ -482,7 +482,8 @@ a {
   pointer-events: none;
 }
 .er-organization-detail-skeleton,
-.er-organization-audit-skeleton {
+.er-organization-audit-skeleton,
+.er-organization-audit-region {
   display: grid;
   gap: var(--er-space-4);
 }
