@@ -474,6 +474,18 @@ a {
   align-content: start;
   pointer-events: none;
 }
+.er-organization-summary-card--skeleton {
+  display: grid;
+  align-content: start;
+  gap: var(--er-space-3);
+  min-height: 12rem;
+  pointer-events: none;
+}
+.er-organization-detail-skeleton,
+.er-organization-audit-skeleton {
+  display: grid;
+  gap: var(--er-space-4);
+}
 .er-skeleton--badge {
   width: 4.75rem;
   min-height: 1.5rem;

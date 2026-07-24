@@ -234,7 +234,135 @@ it("searches and filters organization summaries", async () => {
   );
 });
 
+it("distinguishes organization loading from an empty result", async () => {
+  const organizations = deferred<Response>();
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/auth/login")) {
+        return Promise.resolve(Response.json(auth()));
+      }
+      if (url.includes("/organizations?")) return organizations.promise;
+      throw new Error(`unexpected request: ${url}`);
+    }),
+  );
+  render(
+    <AuthProvider restoreOnMount={false}>
+      <Gate>
+        <OrganizationsPage />
+      </Gate>
+    </AuthProvider>,
+  );
+  await login();
+
+  expect(await screen.findByRole("status")).toHaveTextContent(
+    "조직 불러오는 중…",
+  );
+  expect(
+    screen.queryByText("조건에 맞는 조직이 없습니다."),
+  ).not.toBeInTheDocument();
+
+  organizations.resolve(Response.json([]));
+  expect(await screen.findByText("조건에 맞는 조직이 없습니다.")).toBeVisible();
+});
+
+it("keeps organization results visible while applying filters", async () => {
+  const second = deferred<Response>();
+  let organizationReads = 0;
+  const summary = {
+    id: "org-1",
+    name: "1팀",
+    isActive: true,
+    primaryLeader: null,
+    managerCount: 2,
+    projectCount: 3,
+  };
+  const fetchMock = vi.fn((input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.endsWith("/auth/login")) {
+      return Promise.resolve(Response.json(auth()));
+    }
+    if (url.includes("/organizations?")) {
+      organizationReads += 1;
+      return organizationReads === 1
+        ? Promise.resolve(Response.json([summary]))
+        : second.promise;
+    }
+    throw new Error(`unexpected request: ${url}`);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  render(
+    <AuthProvider restoreOnMount={false}>
+      <Gate>
+        <OrganizationsPage />
+      </Gate>
+    </AuthProvider>,
+  );
+  await login();
+  await screen.findByText("1팀");
+
+  fireEvent.submit(screen.getByRole("form", { name: "조직 검색 및 필터" }));
+  expect(screen.getByText("1팀")).toBeVisible();
+  expect(screen.getByRole("status")).toHaveTextContent("검색 중…");
+  second.resolve(Response.json([]));
+});
+
+it("retries an initial organization list failure without showing empty state", async () => {
+  const retry = deferred<Response>();
+  let organizationReads = 0;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/auth/login")) {
+        return Promise.resolve(Response.json(auth()));
+      }
+      if (url.includes("/organizations?")) {
+        organizationReads += 1;
+        return organizationReads === 1
+          ? Promise.resolve(new Response(null, { status: 503 }))
+          : retry.promise;
+      }
+      throw new Error(`unexpected request: ${url}`);
+    }),
+  );
+  render(
+    <AuthProvider restoreOnMount={false}>
+      <Gate>
+        <OrganizationsPage />
+      </Gate>
+    </AuthProvider>,
+  );
+  await login();
+
+  expect(
+    await screen.findByText("조직 목록을 불러오지 못했습니다."),
+  ).toBeVisible();
+  expect(
+    screen.queryByText("조건에 맞는 조직이 없습니다."),
+  ).not.toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "다시 시도" }));
+  expect(screen.getByRole("button", { name: "다시 시도 중…" })).toBeDisabled();
+
+  retry.resolve(
+    Response.json([
+      {
+        id: "org-retried",
+        name: "재시도 조직",
+        isActive: true,
+        primaryLeader: null,
+        managerCount: 0,
+        projectCount: 0,
+      },
+    ]),
+  );
+  expect(await screen.findByText("재시도 조직")).toBeVisible();
+});
+
 it("keeps a duplicate organization name in its creation dialog", async () => {
+  const creation = deferred<Response>();
   vi.stubGlobal(
     "fetch",
     vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
@@ -246,16 +374,7 @@ it("keeps a duplicate organization name in its creation dialog", async () => {
         return Promise.resolve(Response.json([]));
       }
       if (url.endsWith("/organizations") && init?.method === "POST") {
-        return Promise.resolve(
-          Response.json(
-            {
-              code: "CONFLICT",
-              message: "duplicate",
-              requestId: "request-1",
-            },
-            { status: 409 },
-          ),
-        );
+        return creation.promise;
       }
       throw new Error(`unexpected request: ${url}`);
     }),
@@ -275,6 +394,19 @@ it("keeps a duplicate organization name in its creation dialog", async () => {
   });
   fireEvent.click(within(dialog).getByRole("button", { name: "조직 만들기" }));
 
+  expect(
+    within(dialog).getByRole("button", { name: "조직 만드는 중…" }),
+  ).toBeDisabled();
+  creation.resolve(
+    Response.json(
+      {
+        code: "CONFLICT",
+        message: "duplicate",
+        requestId: "request-1",
+      },
+      { status: 409 },
+    ),
+  );
   expect(
     await within(dialog).findByText("같은 이름의 조직이 이미 있습니다."),
   ).toBeVisible();
@@ -385,6 +517,371 @@ it("groups organization creation actions with close first", async () => {
       (button) => button.textContent,
     ),
   ).toEqual(["닫기", "조직 만들기"]);
+});
+
+it("retries organization detail without hiding independently loaded audit", async () => {
+  const detailRetry = deferred<Response>();
+  let detailReads = 0;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/auth/login")) {
+        return Promise.resolve(Response.json(auth()));
+      }
+      if (url.endsWith("/organizations/org-1")) {
+        detailReads += 1;
+        return detailReads === 1
+          ? Promise.resolve(new Response(null, { status: 503 }))
+          : detailRetry.promise;
+      }
+      if (url.endsWith("/organizations/org-1/audit?limit=50")) {
+        return Promise.resolve(
+          Response.json({
+            items: [auditItem("ORGANIZATION_RENAMED")],
+            nextCursor: null,
+          }),
+        );
+      }
+      throw new Error(`unexpected request: ${url}`);
+    }),
+  );
+  render(
+    <AuthProvider restoreOnMount={false}>
+      <Gate>
+        <OrganizationDetailPage organizationId="org-1" />
+      </Gate>
+    </AuthProvider>,
+  );
+  await login();
+
+  expect(
+    await screen.findByText("조직 정보를 불러오지 못했습니다."),
+  ).toBeVisible();
+  expect(screen.getByText("조직 이름 변경")).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "다시 시도" }));
+  expect(screen.getByRole("button", { name: "다시 시도 중…" })).toBeDisabled();
+
+  detailRetry.resolve(Response.json(organizationDetail()));
+  expect(await screen.findByRole("heading", { name: "1팀" })).toBeVisible();
+  expect(screen.getByText("조직 이름 변경")).toBeVisible();
+});
+
+it("keeps organization detail visible while retrying initial audit", async () => {
+  const initialAudit = deferred<Response>();
+  let auditReads = 0;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/auth/login")) {
+        return Promise.resolve(Response.json(auth()));
+      }
+      if (url.endsWith("/organizations/org-1")) {
+        return Promise.resolve(Response.json(organizationDetail()));
+      }
+      if (url.endsWith("/organizations/org-1/audit?limit=50")) {
+        auditReads += 1;
+        return auditReads === 1
+          ? initialAudit.promise
+          : Promise.resolve(
+              Response.json({
+                items: [auditItem("ORGANIZATION_MANAGER_ASSIGNED")],
+                nextCursor: null,
+              }),
+            );
+      }
+      throw new Error(`unexpected request: ${url}`);
+    }),
+  );
+  render(
+    <AuthProvider restoreOnMount={false}>
+      <Gate>
+        <OrganizationDetailPage organizationId="org-1" />
+      </Gate>
+    </AuthProvider>,
+  );
+  await login();
+
+  expect(await screen.findByRole("heading", { name: "1팀" })).toBeVisible();
+  expect(screen.getByRole("status")).toHaveTextContent(
+    "변경 이력 불러오는 중…",
+  );
+  expect(screen.queryByText("아직 기록이 없습니다.")).not.toBeInTheDocument();
+
+  initialAudit.resolve(new Response(null, { status: 503 }));
+  expect(
+    await screen.findByText("변경 이력을 불러오지 못했습니다."),
+  ).toBeVisible();
+  expect(screen.getByRole("heading", { name: "1팀" })).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "다시 시도" }));
+  expect(await screen.findByText("조직 담당자 지정")).toBeVisible();
+});
+
+it("shows pending labels for organization rename and status changes", async () => {
+  const rename = deferred<Response>();
+  const statusChange = deferred<Response>();
+  let patchCalls = 0;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/auth/login")) {
+        return Promise.resolve(Response.json(auth()));
+      }
+      if (url.endsWith("/organizations/org-1") && init?.method === "PATCH") {
+        patchCalls += 1;
+        return patchCalls === 1 ? rename.promise : statusChange.promise;
+      }
+      if (url.endsWith("/organizations/org-1")) {
+        return Promise.resolve(Response.json(organizationDetail()));
+      }
+      if (url.endsWith("/organizations/org-1/audit?limit=50")) {
+        return Promise.resolve(Response.json({ items: [], nextCursor: null }));
+      }
+      throw new Error(`unexpected request: ${url}`);
+    }),
+  );
+  render(
+    <AuthProvider restoreOnMount={false}>
+      <Gate>
+        <OrganizationDetailPage organizationId="org-1" />
+      </Gate>
+    </AuthProvider>,
+  );
+  await login();
+  fireEvent.change(await screen.findByLabelText("조직 이름"), {
+    target: { value: "운영팀" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "이름 저장" }));
+
+  expect(screen.getByRole("button", { name: "저장 중…" })).toBeDisabled();
+  expect(screen.getByRole("heading", { name: "1팀" })).toBeVisible();
+  rename.resolve(new Response(null, { status: 204 }));
+  expect(
+    await screen.findByRole("button", { name: "조직 사용 중지" }),
+  ).toBeEnabled();
+
+  fireEvent.click(screen.getByRole("button", { name: "조직 사용 중지" }));
+  fireEvent.click(screen.getByRole("button", { name: "상태 변경 확인" }));
+  expect(screen.getByRole("button", { name: "변경 중…" })).toBeDisabled();
+  expect(screen.getByRole("heading", { name: "1팀" })).toBeVisible();
+  statusChange.resolve(new Response(null, { status: 204 }));
+  await waitFor(() =>
+    expect(
+      screen.queryByRole("dialog", { name: "조직 상태 변경" }),
+    ).not.toBeInTheDocument(),
+  );
+});
+
+it("aborts stale candidate searches and only ends the current search loading", async () => {
+  const first = deferred<Response>();
+  const second = deferred<Response>();
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/auth/login")) {
+        return Promise.resolve(Response.json(auth()));
+      }
+      if (url.endsWith("/organizations/org-1")) {
+        return Promise.resolve(Response.json(organizationDetail()));
+      }
+      if (url.endsWith("/organizations/org-1/audit?limit=50")) {
+        return Promise.resolve(Response.json({ items: [], nextCursor: null }));
+      }
+      if (url.endsWith("query=%EC%B2%AB%EB%B2%88%EC%A7%B8")) {
+        return first.promise;
+      }
+      if (url.endsWith("query=%EB%91%90%EB%B2%88%EC%A7%B8")) {
+        return second.promise;
+      }
+      throw new Error(`unexpected request: ${url}`);
+    }),
+  );
+  render(
+    <AuthProvider restoreOnMount={false}>
+      <Gate>
+        <OrganizationDetailPage organizationId="org-1" />
+      </Gate>
+    </AuthProvider>,
+  );
+  await login();
+  fireEvent.click(
+    await screen.findByRole("button", { name: "기존 계정 지정" }),
+  );
+  const search = screen.getByLabelText("계정 검색");
+  fireEvent.change(search, { target: { value: "첫번째" } });
+  fireEvent.click(screen.getByRole("button", { name: "계정 찾기" }));
+  expect(screen.getByRole("button", { name: "계정 찾는 중…" })).toBeDisabled();
+
+  fireEvent.change(search, { target: { value: "두번째" } });
+  fireEvent.click(screen.getByRole("button", { name: "계정 찾기" }));
+  const searchCalls = vi
+    .mocked(fetch)
+    .mock.calls.filter(([input]) => String(input).includes("assignable-users"));
+  expect(searchCalls).toHaveLength(2);
+  expect(searchCalls[0]?.[1]?.signal?.aborted).toBe(true);
+  expect(searchCalls[1]?.[1]?.signal?.aborted).toBe(false);
+
+  second.resolve(
+    Response.json([
+      {
+        userId: "current-user",
+        loginId: "current-01",
+        displayName: "현재 후보",
+        isActive: true,
+      },
+    ]),
+  );
+  expect(
+    await screen.findByRole("option", { name: /현재 후보/ }),
+  ).toBeVisible();
+  expect(screen.getByRole("button", { name: "계정 찾기" })).toBeEnabled();
+
+  first.resolve(
+    Response.json([
+      {
+        userId: "stale-user",
+        loginId: "stale-01",
+        displayName: "오래된 후보",
+        isActive: true,
+      },
+    ]),
+  );
+  await waitFor(() =>
+    expect(
+      screen.queryByRole("option", { name: /오래된 후보/ }),
+    ).not.toBeInTheDocument(),
+  );
+});
+
+it("labels each manager mutation with its specific pending action", async () => {
+  const assignExisting = deferred<Response>();
+  const provision = deferred<Response>();
+  const replacePrimary = deferred<Response>();
+  const removeManager = deferred<Response>();
+  const removePrimary = deferred<Response>();
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/auth/login")) {
+        return Promise.resolve(Response.json(auth()));
+      }
+      if (url.endsWith("/organizations/org-1")) {
+        return Promise.resolve(Response.json(organizationDetailWithManagers()));
+      }
+      if (url.endsWith("/organizations/org-1/audit?limit=50")) {
+        return Promise.resolve(Response.json({ items: [], nextCursor: null }));
+      }
+      if (url.includes("/assignable-users?")) {
+        return Promise.resolve(
+          Response.json([
+            {
+              userId: "candidate-1",
+              loginId: "candidate-01",
+              displayName: "지정 후보",
+              isActive: true,
+            },
+          ]),
+        );
+      }
+      if (url.endsWith("/organizations/org-1/managers")) {
+        const body = JSON.parse(String(init?.body)) as { kind: string };
+        return body.kind === "EXISTING"
+          ? assignExisting.promise
+          : provision.promise;
+      }
+      if (url.endsWith("/organizations/org-1/primary")) {
+        const body = JSON.parse(String(init?.body)) as {
+          userId: string | null;
+        };
+        return body.userId ? replacePrimary.promise : removePrimary.promise;
+      }
+      if (url.endsWith("/organizations/org-1/managers/manager-2")) {
+        return removeManager.promise;
+      }
+      throw new Error(`unexpected request: ${url}`);
+    }),
+  );
+  render(
+    <AuthProvider restoreOnMount={false}>
+      <Gate>
+        <OrganizationDetailPage organizationId="org-1" />
+      </Gate>
+    </AuthProvider>,
+  );
+  await login();
+  await screen.findByRole("heading", { name: "1팀" });
+
+  fireEvent.click(screen.getByRole("button", { name: "기존 계정 지정" }));
+  fireEvent.click(screen.getByRole("button", { name: "계정 찾기" }));
+  fireEvent.change(await screen.findByLabelText("지정할 계정"), {
+    target: { value: "candidate-1" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "담당자로 지정" }));
+  expect(
+    screen.getByRole("button", { name: "담당자로 지정 중…" }),
+  ).toBeDisabled();
+  assignExisting.resolve(Response.json({ manager: { userId: "candidate-1" } }));
+  await waitFor(() =>
+    expect(
+      screen.queryByRole("dialog", { name: "기존 담당자 지정" }),
+    ).not.toBeInTheDocument(),
+  );
+
+  fireEvent.click(screen.getByRole("button", { name: "새 담당자 발급" }));
+  fireEvent.change(screen.getByLabelText("영문 로그인 ID"), {
+    target: { value: "new-manager" },
+  });
+  fireEvent.change(screen.getByLabelText("표시 이름"), {
+    target: { value: "새 담당자" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "계정 발급 및 지정" }));
+  expect(
+    screen.getByRole("button", { name: "계정 발급 및 지정 중…" }),
+  ).toBeDisabled();
+  provision.resolve(Response.json({ manager: { userId: "new-manager" } }));
+  await waitFor(() =>
+    expect(
+      screen.queryByRole("dialog", { name: "새 담당자 발급" }),
+    ).not.toBeInTheDocument(),
+  );
+
+  fireEvent.click(
+    screen.getByRole("button", { name: "추가 관리자 대표로 지정" }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "대표 변경 확인" }));
+  expect(screen.getByRole("button", { name: "대표 변경 중…" })).toBeDisabled();
+  replacePrimary.resolve(new Response(null, { status: 204 }));
+  await waitFor(() =>
+    expect(
+      screen.queryByRole("dialog", { name: "대표 조직장 변경" }),
+    ).not.toBeInTheDocument(),
+  );
+
+  fireEvent.click(
+    screen.getByRole("button", { name: "추가 관리자 담당 해제" }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "담당 해제 확인" }));
+  expect(screen.getByRole("button", { name: "담당 해제 중…" })).toBeDisabled();
+  removeManager.resolve(new Response(null, { status: 204 }));
+  await waitFor(() =>
+    expect(
+      screen.queryByRole("dialog", { name: "담당자 해제" }),
+    ).not.toBeInTheDocument(),
+  );
+
+  fireEvent.click(screen.getByRole("button", { name: "대표 지정 해제" }));
+  fireEvent.click(screen.getByRole("button", { name: "대표 해제 확인" }));
+  expect(screen.getByRole("button", { name: "대표 해제 중…" })).toBeDisabled();
+  removePrimary.resolve(new Response(null, { status: 204 }));
+  await waitFor(() =>
+    expect(
+      screen.queryByRole("dialog", { name: "대표 지정 해제" }),
+    ).not.toBeInTheDocument(),
+  );
 });
 
 it("shows organization audit pagination progress without replacing items", async () => {
@@ -605,5 +1102,51 @@ function auditItem(action: string) {
     entityType: "ORGANIZATION",
     entityId: "org-1",
     occurredAt: "2026-07-22T00:00:00.000Z",
+  };
+}
+
+function organizationDetail() {
+  return {
+    id: "org-1",
+    name: "1팀",
+    isActive: true,
+    primaryLeader: null,
+    managerCount: 0,
+    projectCount: 0,
+    managers: [],
+    projects: [],
+  };
+}
+
+function organizationDetailWithManagers() {
+  return {
+    ...organizationDetail(),
+    primaryLeader: {
+      userId: "leader-1",
+      loginId: "leader-01",
+      displayName: "대표 조직장",
+      isActive: true,
+      assignmentRole: "PRIMARY_LEADER" as const,
+      assignedAt: "2026-07-22T00:00:00.000Z",
+    },
+    managerCount: 1,
+    managers: [
+      {
+        userId: "leader-1",
+        loginId: "leader-01",
+        displayName: "대표 조직장",
+        isActive: true,
+        assignmentRole: "PRIMARY_LEADER" as const,
+        assignedAt: "2026-07-22T00:00:00.000Z",
+      },
+      {
+        userId: "manager-2",
+        loginId: "manager-02",
+        displayName: "추가 관리자",
+        isActive: true,
+        assignmentRole: "MANAGER" as const,
+        assignedAt: "2026-07-22T00:00:00.000Z",
+      },
+    ],
   };
 }

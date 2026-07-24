@@ -9,6 +9,9 @@ import {
 import { Button } from "../../components/ui/Button";
 import { Card } from "../../components/ui/Card";
 import { Dialog } from "../../components/ui/Dialog";
+import { LoadingStatus } from "../../components/ui/LoadingStatus";
+import { RetryableError } from "../../components/ui/RetryableError";
+import { Skeleton } from "../../components/ui/Skeleton";
 import { StatusMessage } from "../../components/ui/StatusMessage";
 import { TextInput } from "../../components/ui/TextInput";
 import { ApiError } from "../../lib/api";
@@ -16,6 +19,12 @@ import { useAuth } from "../auth/AuthProvider";
 
 type OrganizationStatus = "ALL" | "ACTIVE" | "INACTIVE";
 type LeaderStatus = "ALL" | "ASSIGNED" | "UNASSIGNED";
+type ListLoadState = "INITIAL" | "REFRESHING" | null;
+
+const organizationSkeletonKeys = Array.from(
+  { length: 6 },
+  (_, index) => `organization-skeleton-${index}`,
+);
 
 export function OrganizationsPage() {
   const { api } = useAuth();
@@ -28,11 +37,14 @@ export function OrganizationsPage() {
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [createError, setCreateError] = useState<string | null>(null);
+  const [loadState, setLoadState] = useState<ListLoadState>("INITIAL");
+  const [creating, setCreating] = useState(false);
+  const hasLoaded = useRef(false);
   const loadGeneration = useRef(0);
 
   const load = useCallback(async () => {
     const generation = ++loadGeneration.current;
-    setError(null);
+    setLoadState(hasLoaded.current ? "REFRESHING" : "INITIAL");
     const search = `query=${encodeURIComponent(
       submittedQuery,
     )}&status=${status}&leaderStatus=${leaderStatus}`;
@@ -42,23 +54,37 @@ export function OrganizationsPage() {
       );
       if (generation !== loadGeneration.current) return;
       setOrganizations(next);
+      hasLoaded.current = true;
       setError(null);
     } catch {
       if (generation !== loadGeneration.current) return;
       setError("조직 목록을 불러오지 못했습니다.");
+    } finally {
+      if (generation === loadGeneration.current) setLoadState(null);
     }
   }, [api, leaderStatus, status, submittedQuery]);
 
-  useEffect(() => void load(), [load]);
+  useEffect(() => {
+    void load();
+    return () => {
+      loadGeneration.current += 1;
+    };
+  }, [load]);
 
   function search(event: FormEvent) {
     event.preventDefault();
-    setSubmittedQuery(query.trim());
+    const nextQuery = query.trim();
+    if (nextQuery === submittedQuery) {
+      void load();
+      return;
+    }
+    setSubmittedQuery(nextQuery);
   }
 
   async function create(event: FormEvent) {
     event.preventDefault();
     setCreateError(null);
+    setCreating(true);
     try {
       await api.post("/organizations", { name: name.trim() });
       setName("");
@@ -70,6 +96,8 @@ export function OrganizationsPage() {
           ? "같은 이름의 조직이 이미 있습니다."
           : "조직을 만들지 못했습니다.",
       );
+    } finally {
+      setCreating(false);
     }
   }
 
@@ -91,11 +119,18 @@ export function OrganizationsPage() {
           새 조직
         </Button>
       </header>
-      {error ? <StatusMessage tone="error">{error}</StatusMessage> : null}
+      {error ? (
+        <RetryableError
+          message={error}
+          retrying={loadState !== null}
+          onRetry={load}
+        />
+      ) : null}
       <Card className="er-panel">
         <form
           className="er-organization-filters"
           aria-label="조직 검색 및 필터"
+          aria-busy={loadState === "REFRESHING" || undefined}
           onSubmit={search}
         >
           <TextInput
@@ -134,11 +169,30 @@ export function OrganizationsPage() {
           <Button type="submit" variant="primary">
             검색
           </Button>
+          {loadState === "REFRESHING" ? (
+            <LoadingStatus>검색 중…</LoadingStatus>
+          ) : null}
         </form>
       </Card>
       <section aria-labelledby="organization-list-title">
         <h2 id="organization-list-title">조직 목록</h2>
-        {organizations.length === 0 ? (
+        {loadState === "INITIAL" && !hasLoaded.current ? (
+          <div data-testid="organization-grid-skeleton" aria-busy="true">
+            <LoadingStatus visuallyHidden>조직 불러오는 중…</LoadingStatus>
+            <ul className="er-organization-summary-grid">
+              {organizationSkeletonKeys.map((key) => (
+                <li key={key}>
+                  <Card className="er-organization-summary-card er-organization-summary-card--skeleton">
+                    <Skeleton className="er-skeleton--badge" />
+                    <Skeleton className="er-skeleton--title" />
+                    <Skeleton className="er-skeleton--text" />
+                    <Skeleton className="er-skeleton--text er-skeleton--short" />
+                  </Card>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : organizations.length === 0 && hasLoaded.current ? (
           <Card className="er-panel">
             <p className="er-muted">조건에 맞는 조직이 없습니다.</p>
           </Card>
@@ -213,7 +267,13 @@ export function OrganizationsPage() {
               <Button type="button" onClick={() => setShowCreate(false)}>
                 닫기
               </Button>
-              <Button type="submit" variant="primary" disabled={!name.trim()}>
+              <Button
+                type="submit"
+                variant="primary"
+                disabled={!name.trim()}
+                loading={creating}
+                loadingText="조직 만드는 중…"
+              >
                 조직 만들기
               </Button>
             </div>

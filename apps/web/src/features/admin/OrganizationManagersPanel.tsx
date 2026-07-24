@@ -49,6 +49,7 @@ export function OrganizationManagersPanel({
   const [removePrimary, setRemovePrimary] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [isMutating, setIsMutating] = useState(false);
+  const [searchingCandidates, setSearchingCandidates] = useState(false);
   const newManagerTrigger = useRef<HTMLButtonElement | null>(null);
   const candidateSearchGeneration = useRef(0);
   const candidateSearchController = useRef<AbortController | null>(null);
@@ -68,6 +69,7 @@ export function OrganizationManagersPanel({
     candidateSearchController.current?.abort();
     const controller = new AbortController();
     candidateSearchController.current = controller;
+    setSearchingCandidates(true);
     setMessage(null);
     try {
       const next = await api.get<AssignableManager[]>(
@@ -96,8 +98,17 @@ export function OrganizationManagersPanel({
         if (candidateSearchController.current === controller) {
           candidateSearchController.current = null;
         }
+        setSearchingCandidates(false);
       }
     }
+  }
+
+  function changeCandidateQuery(nextQuery: string) {
+    candidateSearchGeneration.current += 1;
+    candidateSearchController.current?.abort();
+    candidateSearchController.current = null;
+    setSearchingCandidates(false);
+    setQuery(nextQuery);
   }
 
   async function assignExisting(event: FormEvent) {
@@ -306,9 +317,16 @@ export function OrganizationManagersPanel({
             <TextInput
               label="계정 검색"
               value={query}
-              onChange={(event) => setQuery(event.currentTarget.value)}
+              onChange={(event) =>
+                changeCandidateQuery(event.currentTarget.value)
+              }
             />
-            <Button type="submit" disabled={isMutating}>
+            <Button
+              type="submit"
+              loading={searchingCandidates}
+              loadingText="계정 찾는 중…"
+              disabled={isMutating}
+            >
               계정 찾기
             </Button>
           </form>
@@ -338,6 +356,8 @@ export function OrganizationManagersPanel({
               type="submit"
               variant="primary"
               disabled={isMutating || !selectedUserId}
+              loading={isMutating}
+              loadingText="담당자로 지정 중…"
             >
               담당자로 지정
             </Button>
@@ -367,6 +387,8 @@ export function OrganizationManagersPanel({
               type="submit"
               variant="primary"
               disabled={isMutating || !loginId.trim() || !displayName.trim()}
+              loading={isMutating}
+              loadingText="계정 발급 및 지정 중…"
             >
               계정 발급 및 지정
             </Button>
@@ -395,6 +417,8 @@ export function OrganizationManagersPanel({
             type="button"
             variant="primary"
             disabled={isMutating}
+            loading={isMutating}
+            loadingText="대표 변경 중…"
             onClick={replacePrimary}
           >
             대표 변경 확인
@@ -408,6 +432,8 @@ export function OrganizationManagersPanel({
             type="button"
             variant="danger"
             disabled={isMutating}
+            loading={isMutating}
+            loadingText="담당 해제 중…"
             onClick={removeManagerAssignment}
           >
             담당 해제 확인
@@ -421,6 +447,8 @@ export function OrganizationManagersPanel({
             type="button"
             variant="danger"
             disabled={isMutating}
+            loading={isMutating}
+            loadingText="대표 해제 중…"
             onClick={removePrimaryAssignment}
           >
             대표 해제 확인

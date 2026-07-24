@@ -12,7 +12,9 @@ import {
 import { Button } from "../../components/ui/Button";
 import { Card } from "../../components/ui/Card";
 import { Dialog } from "../../components/ui/Dialog";
+import { LoadingStatus } from "../../components/ui/LoadingStatus";
 import { RetryableError } from "../../components/ui/RetryableError";
+import { Skeleton } from "../../components/ui/Skeleton";
 import { StatusMessage } from "../../components/ui/StatusMessage";
 import { TextInput } from "../../components/ui/TextInput";
 import { ApiError } from "../../lib/api";
@@ -53,7 +55,11 @@ export function OrganizationDetailPage({
   const [auditPaginationError, setAuditPaginationError] = useState<
     string | null
   >(null);
+  const [detailLoading, setDetailLoading] = useState(true);
+  const [auditLoading, setAuditLoading] = useState(true);
+  const [auditLoaded, setAuditLoaded] = useState(false);
   const [auditLoadingMore, setAuditLoadingMore] = useState(false);
+  const [mutating, setMutating] = useState<"RENAME" | "STATUS" | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [showStatusConfirmation, setShowStatusConfirmation] = useState(false);
   const [temporaryPassword, setTemporaryPassword] = useState<{
@@ -86,6 +92,7 @@ export function OrganizationDetailPage({
       return false;
     }
     const generation = ++detailGeneration.current;
+    setDetailLoading(true);
     try {
       const next = await api.get<OrganizationDetail>(
         `/organizations/${encodeURIComponent(requestedOrganizationId)}`,
@@ -110,6 +117,14 @@ export function OrganizationDetailPage({
         setDetailError("조직 정보를 불러오지 못했습니다.");
       }
       return false;
+    } finally {
+      if (
+        instanceActive.current &&
+        generation === detailGeneration.current &&
+        activeOrganizationId.current === requestedOrganizationId
+      ) {
+        setDetailLoading(false);
+      }
     }
   }, [api, organizationId]);
 
@@ -122,6 +137,7 @@ export function OrganizationDetailPage({
       return false;
     }
     const generation = ++auditGeneration.current;
+    setAuditLoading(true);
     auditPaginationRequest.current = null;
     setAuditLoadingMore(false);
     setAuditPaginationError(null);
@@ -141,9 +157,11 @@ export function OrganizationDetailPage({
       ) {
         setAudit(page.items);
         setAuditNextCursor(page.nextCursor);
+        setAuditLoaded(true);
         setAuditError(null);
+        return true;
       }
-      return true;
+      return false;
     } catch {
       if (
         instanceActive.current &&
@@ -153,6 +171,14 @@ export function OrganizationDetailPage({
         setAuditError("변경 이력을 불러오지 못했습니다.");
       }
       return false;
+    } finally {
+      if (
+        instanceActive.current &&
+        generation === auditGeneration.current &&
+        activeOrganizationId.current === requestedOrganizationId
+      ) {
+        setAuditLoading(false);
+      }
     }
   }, [api, organizationId]);
 
@@ -163,7 +189,11 @@ export function OrganizationDetailPage({
     setDetailError(null);
     setAuditError(null);
     setAuditPaginationError(null);
+    setDetailLoading(true);
+    setAuditLoading(true);
+    setAuditLoaded(false);
     setAuditLoadingMore(false);
+    setMutating(null);
     setMessage(null);
     setShowStatusConfirmation(false);
     setTemporaryPassword(null);
@@ -174,20 +204,31 @@ export function OrganizationDetailPage({
   async function rename(event: FormEvent) {
     event.preventDefault();
     if (!organization) return;
-    await mutateOrganization({ name: name.trim() });
+    await mutateOrganization("RENAME", { name: name.trim() });
   }
 
   async function changeStatus() {
     if (!organization) return;
-    setShowStatusConfirmation(false);
-    await mutateOrganization({ isActive: !organization.isActive });
+    await mutateOrganization("STATUS", {
+      isActive: !organization.isActive,
+    });
+    if (
+      instanceActive.current &&
+      activeOrganizationId.current === organizationId
+    ) {
+      setShowStatusConfirmation(false);
+    }
   }
 
-  async function mutateOrganization(input: {
-    name?: string;
-    isActive?: boolean;
-  }) {
+  async function mutateOrganization(
+    kind: "RENAME" | "STATUS",
+    input: {
+      name?: string;
+      isActive?: boolean;
+    },
+  ) {
     const requestedOrganizationId = organizationId;
+    setMutating(kind);
     setMessage(null);
     try {
       await api.patch(`/organizations/${requestedOrganizationId}`, input);
@@ -234,6 +275,13 @@ export function OrganizationDetailPage({
         );
       } else {
         setMessage("조직 정보를 변경하지 못했습니다.");
+      }
+    } finally {
+      if (
+        instanceActive.current &&
+        activeOrganizationId.current === requestedOrganizationId
+      ) {
+        setMutating(null);
       }
     }
   }
@@ -324,17 +372,17 @@ export function OrganizationDetailPage({
     });
   }
 
-  if (!organization && !detailError) {
-    return <p className="er-muted">조직 불러오는 중…</p>;
-  }
-
   return (
     <div className="er-page-stack">
       <a className="er-text-link" href="/organizations">
         조직 목록으로
       </a>
       {detailError ? (
-        <StatusMessage tone="error">{detailError}</StatusMessage>
+        <RetryableError
+          message={detailError}
+          retrying={detailLoading}
+          onRetry={loadDetail}
+        />
       ) : null}
       {message ? (
         <StatusMessage
@@ -343,8 +391,14 @@ export function OrganizationDetailPage({
           {message}
         </StatusMessage>
       ) : null}
+      {!organization && detailLoading && !detailError ? (
+        <OrganizationDetailSkeleton />
+      ) : null}
       {organization ? (
         <>
+          {detailLoading ? (
+            <LoadingStatus>조직 정보 새로고침 중…</LoadingStatus>
+          ) : null}
           <header className="er-page-heading">
             <div>
               <p className="er-eyebrow">ORGANIZATION</p>
@@ -379,6 +433,7 @@ export function OrganizationDetailPage({
               <Button
                 type="button"
                 variant={organization.isActive ? "danger" : "primary"}
+                disabled={mutating !== null}
                 onClick={() => setShowStatusConfirmation(true)}
               >
                 {organization.isActive ? "조직 사용 중지" : "조직 다시 사용"}
@@ -395,7 +450,13 @@ export function OrganizationDetailPage({
               <Button
                 type="submit"
                 variant="primary"
-                disabled={!name.trim() || name.trim() === organization.name}
+                disabled={
+                  mutating !== null ||
+                  !name.trim() ||
+                  name.trim() === organization.name
+                }
+                loading={mutating === "RENAME"}
+                loadingText="저장 중…"
               >
                 이름 저장
               </Button>
@@ -439,7 +500,11 @@ export function OrganizationDetailPage({
         </>
       ) : null}
       {auditError ? (
-        <StatusMessage tone="error">{auditError}</StatusMessage>
+        <RetryableError
+          message={auditError}
+          retrying={auditLoading}
+          onRetry={loadInitialAudit}
+        />
       ) : null}
       {auditPaginationError ? (
         <RetryableError
@@ -448,12 +513,20 @@ export function OrganizationDetailPage({
           onRetry={loadMoreAudit}
         />
       ) : null}
-      <AuditPanel
-        items={audit}
-        nextCursor={auditNextCursor}
-        loadingMore={auditLoadingMore}
-        onLoadMore={loadMoreAudit}
-      />
+      {auditLoading && auditLoaded ? (
+        <LoadingStatus>변경 이력 새로고침 중…</LoadingStatus>
+      ) : null}
+      {auditLoading && !auditLoaded && !auditError ? (
+        <OrganizationAuditSkeleton />
+      ) : null}
+      {auditLoaded ? (
+        <AuditPanel
+          items={audit}
+          nextCursor={auditNextCursor}
+          loadingMore={auditLoadingMore}
+          onLoadMore={loadMoreAudit}
+        />
+      ) : null}
       {showStatusConfirmation && organization ? (
         <Dialog
           title="조직 상태 변경"
@@ -467,6 +540,8 @@ export function OrganizationDetailPage({
           <Button
             type="button"
             variant={organization.isActive ? "danger" : "primary"}
+            loading={mutating === "STATUS"}
+            loadingText="변경 중…"
             onClick={changeStatus}
           >
             상태 변경 확인
@@ -486,5 +561,36 @@ export function OrganizationDetailPage({
         />
       ) : null}
     </div>
+  );
+}
+
+function OrganizationDetailSkeleton() {
+  return (
+    <div className="er-organization-detail-skeleton" aria-busy="true">
+      <LoadingStatus visuallyHidden>조직 불러오는 중…</LoadingStatus>
+      <header className="er-page-heading">
+        <div>
+          <Skeleton className="er-skeleton--badge" />
+          <Skeleton className="er-skeleton--title" />
+          <Skeleton className="er-skeleton--text" />
+        </div>
+      </header>
+      <Card className="er-panel">
+        <Skeleton className="er-skeleton--title" />
+        <Skeleton className="er-skeleton--text" />
+        <Skeleton className="er-skeleton--text er-skeleton--short" />
+      </Card>
+    </div>
+  );
+}
+
+function OrganizationAuditSkeleton() {
+  return (
+    <Card className="er-panel er-organization-audit-skeleton">
+      <LoadingStatus visuallyHidden>변경 이력 불러오는 중…</LoadingStatus>
+      <Skeleton className="er-skeleton--title" />
+      <Skeleton className="er-skeleton--text" />
+      <Skeleton className="er-skeleton--text er-skeleton--short" />
+    </Card>
   );
 }
