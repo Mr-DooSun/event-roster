@@ -5,6 +5,7 @@ import {
   fireEvent,
   render,
   screen,
+  waitFor,
 } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, expect, it, vi } from "vitest";
@@ -13,6 +14,7 @@ import { LoginPage } from "../auth/LoginPage";
 import { ProjectDetailPage } from "../projects/ProjectDetailPage";
 import { ParticipantDialog } from "./ParticipantDialog";
 import { ParticipantEditDialog } from "./ParticipantEditDialog";
+import { ProjectRosterPage } from "./ProjectRosterPage";
 import { RosterTable, type RosterView } from "./RosterTable";
 
 afterEach(() => {
@@ -124,6 +126,111 @@ it("shows the pending roster row without removing the table", async () => {
     pendingStatus.resolve(undefined);
     await pendingStatus.promise;
   });
+});
+
+it("tracks concurrent production roster rows without replaying the same row", async () => {
+  const firstPatch = deferred<Response>();
+  const secondPatch = deferred<Response>();
+  const first = entry("ACTIVE");
+  const second: RosterView = {
+    ...entry("ACTIVE"),
+    id: "entry-2",
+    participantId: "person-2",
+    participantName: "다른 참가자",
+    participantNumber: "P-002",
+  };
+  const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.endsWith("/auth/login")) {
+      return Promise.resolve(Response.json(auth()));
+    }
+    if (
+      url.endsWith("/projects/project-1/roster/entry-1") &&
+      init?.method === "PATCH"
+    ) {
+      return firstPatch.promise;
+    }
+    if (
+      url.endsWith("/projects/project-1/roster/entry-2") &&
+      init?.method === "PATCH"
+    ) {
+      return secondPatch.promise;
+    }
+    throw new Error(`unexpected request: ${url}`);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  const onChanged = vi.fn().mockResolvedValue(undefined);
+  render(
+    <AuthProvider restoreOnMount={false}>
+      <Gate>
+        <ProjectRosterPage
+          project={project()}
+          rows={[first, second]}
+          participants={[]}
+          organizations={[{ id: "org-1", name: "1팀", isActive: true }]}
+          canMutate
+          onChanged={onChanged}
+        />
+      </Gate>
+    </AuthProvider>,
+  );
+  await login();
+  const firstButton = await screen.findByRole("button", {
+    name: "박민수 취소",
+  });
+  const clickFirst = captureReactClickHandler(firstButton);
+
+  act(() => {
+    clickFirst();
+    clickFirst();
+  });
+
+  await waitFor(() =>
+    expect(
+      fetchMock.mock.calls.filter(([input, init]) => {
+        return (
+          String(input).endsWith("/projects/project-1/roster/entry-1") &&
+          init?.method === "PATCH"
+        );
+      }),
+    ).toHaveLength(1),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "다른 참가자 취소" }));
+  await waitFor(() =>
+    expect(screen.getAllByRole("button", { name: "변경 중…" })).toHaveLength(2),
+  );
+  for (const button of screen.getAllByRole("button", { name: "변경 중…" })) {
+    expect(button).toBeDisabled();
+  }
+
+  await act(async () => {
+    secondPatch.resolve(Response.json({ id: "entry-2" }));
+    await secondPatch.promise;
+  });
+
+  await waitFor(() =>
+    expect(screen.getAllByRole("button", { name: "변경 중…" })).toHaveLength(1),
+  );
+  expect(screen.getByRole("button", { name: "변경 중…" })).toBeDisabled();
+  expect(
+    screen.getByRole("button", { name: "다른 참가자 취소" }),
+  ).toBeEnabled();
+
+  await act(async () => {
+    firstPatch.resolve(Response.json({ id: "entry-1" }));
+    await firstPatch.promise;
+  });
+
+  await waitFor(() =>
+    expect(
+      screen.queryByRole("button", { name: "변경 중…" }),
+    ).not.toBeInTheDocument(),
+  );
+  expect(screen.getByRole("button", { name: "박민수 취소" })).toBeEnabled();
+  expect(
+    screen.getByRole("button", { name: "다른 참가자 취소" }),
+  ).toBeEnabled();
+  expect(onChanged).toHaveBeenCalledTimes(2);
 });
 
 it("keeps an existing-participant dialog pending without submitting twice", async () => {
@@ -1148,7 +1255,7 @@ function project() {
     name: "상반기 프로젝트",
     startDate: "2029-05-01",
     endDate: "2029-05-02",
-    status: "IN_PROGRESS",
+    status: "IN_PROGRESS" as const,
     revision: 2,
     createdAt: "2029-01-01T00:00:00.000Z",
     createdBy: "user-1",
@@ -1204,4 +1311,16 @@ function deferred<T>() {
     reject = nextReject;
   });
   return { promise, resolve, reject };
+}
+
+function captureReactClickHandler(element: HTMLElement) {
+  const reactPropsKey = Object.getOwnPropertyNames(element).find((key) =>
+    key.startsWith("__reactProps$"),
+  );
+  if (!reactPropsKey) throw new Error("React click props not found");
+  const props = (
+    element as unknown as Record<string, { onClick?: () => void }>
+  )[reactPropsKey];
+  if (!props?.onClick) throw new Error("React click handler not found");
+  return props.onClick;
 }

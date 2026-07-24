@@ -457,6 +457,104 @@ it("shows organization audit pagination progress without replacing items", async
   expect(await screen.findByText("추가 이력")).toBeVisible();
 });
 
+it("retries failed organization audit pagination with the same cursor", async () => {
+  const failedPage = deferred<Response>();
+  const nextCursorPage = deferred<Response>();
+  let cursorOneReads = 0;
+  let cursorTwoReads = 0;
+  const cursorOnePath = "/organizations/org-1/audit?limit=50&cursor=cursor-one";
+  const fetchMock = vi.fn((input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.endsWith("/auth/login")) {
+      return Promise.resolve(Response.json(auth()));
+    }
+    if (url.endsWith("/organizations/org-1")) {
+      return Promise.resolve(
+        Response.json({
+          id: "org-1",
+          name: "1팀",
+          isActive: true,
+          primaryLeader: null,
+          managerCount: 0,
+          projectCount: 0,
+          managers: [],
+          projects: [],
+        }),
+      );
+    }
+    if (url.endsWith("/organizations/org-1/audit?limit=50")) {
+      return Promise.resolve(
+        Response.json({
+          items: [auditItem("기존 이력")],
+          nextCursor: "cursor-one",
+        }),
+      );
+    }
+    if (url.endsWith(cursorOnePath)) {
+      cursorOneReads += 1;
+      if (cursorOneReads === 1) return failedPage.promise;
+      return Promise.resolve(
+        Response.json({
+          items: [auditItem("재시도 이력")],
+          nextCursor: "cursor-two",
+        }),
+      );
+    }
+    if (url.endsWith("cursor=cursor-two")) {
+      cursorTwoReads += 1;
+      return nextCursorPage.promise;
+    }
+    throw new Error(`unexpected request: ${url}`);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  render(
+    <AuthProvider restoreOnMount={false}>
+      <Gate>
+        <OrganizationDetailPage organizationId="org-1" />
+      </Gate>
+    </AuthProvider>,
+  );
+  await login();
+  expect(await screen.findByText("기존 이력")).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "이력 더 보기" }));
+
+  await act(async () => {
+    failedPage.reject(new Error("pagination unavailable"));
+    await failedPage.promise.catch(() => undefined);
+  });
+
+  expect(
+    await screen.findByText("변경 이력을 더 불러오지 못했습니다."),
+  ).toBeVisible();
+  expect(screen.getByText("기존 이력")).toBeVisible();
+  expect(screen.getByRole("button", { name: "다시 시도" })).toBeEnabled();
+
+  fireEvent.click(screen.getByRole("button", { name: "다시 시도" }));
+
+  expect(await screen.findByText("재시도 이력")).toBeVisible();
+  expect(screen.getByText("기존 이력")).toBeVisible();
+  expect(cursorOneReads).toBe(2);
+  expect(
+    fetchMock.mock.calls.filter(([input]) =>
+      String(input).endsWith(cursorOnePath),
+    ),
+  ).toHaveLength(2);
+
+  fireEvent.click(screen.getByRole("button", { name: "이력 더 보기" }));
+  expect(cursorTwoReads).toBe(1);
+  expect(screen.getByText("기존 이력")).toBeVisible();
+  expect(screen.getByText("재시도 이력")).toBeVisible();
+
+  await act(async () =>
+    nextCursorPage.resolve(
+      Response.json({
+        items: [],
+        nextCursor: null,
+      }),
+    ),
+  );
+});
+
 function Gate({ children }: { children: React.ReactNode }) {
   return useAuth().auth ? children : <LoginPage />;
 }
@@ -491,10 +589,12 @@ function auth() {
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((next) => {
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((next, nextReject) => {
     resolve = next;
+    reject = nextReject;
   });
-  return { promise, resolve };
+  return { promise, resolve, reject };
 }
 
 function auditItem(action: string) {
