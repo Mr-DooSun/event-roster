@@ -414,7 +414,7 @@ export function OrganizationDetailPage({
         <OrganizationDetailSkeleton />
       ) : null}
       {organization ? (
-        <>
+        <div className="er-page-stack" aria-busy={detailLoading}>
           {detailLoading ? (
             <LoadingStatus>조직 정보 새로고침 중…</LoadingStatus>
           ) : null}
@@ -516,7 +516,7 @@ export function OrganizationDetailPage({
               </ul>
             )}
           </Card>
-        </>
+        </div>
       ) : null}
       {auditError ? (
         <RetryableError

@@ -778,6 +778,70 @@ it("shows pending labels for organization rename and status changes", async () =
   );
 });
 
+it("marks preserved organization content busy during a detail refresh", async () => {
+  const detailRefresh = deferred<Response>();
+  let detailReads = 0;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/auth/login")) {
+        return Promise.resolve(Response.json(auth()));
+      }
+      if (url.endsWith("/organizations/org-1") && init?.method === "PATCH") {
+        return Promise.resolve(new Response(null, { status: 204 }));
+      }
+      if (url.endsWith("/organizations/org-1")) {
+        detailReads += 1;
+        return detailReads === 1
+          ? Promise.resolve(Response.json(organizationDetail()))
+          : detailRefresh.promise;
+      }
+      if (url.endsWith("/organizations/org-1/audit?limit=50")) {
+        return Promise.resolve(Response.json({ items: [], nextCursor: null }));
+      }
+      throw new Error(`unexpected request: ${url}`);
+    }),
+  );
+  render(
+    <AuthProvider restoreOnMount={false}>
+      <Gate>
+        <OrganizationDetailPage organizationId="org-1" />
+      </Gate>
+    </AuthProvider>,
+  );
+  await login();
+  fireEvent.change(await screen.findByLabelText("조직 이름"), {
+    target: { value: "운영팀" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "이름 저장" }));
+  await waitFor(() => expect(detailReads).toBe(2));
+
+  const preservedHeading = screen.getByRole("heading", { name: "1팀" });
+  const detailRegion = preservedHeading.closest("[aria-busy=true]");
+  expect(detailRegion).not.toBeNull();
+  expect(
+    within(detailRegion as HTMLElement).getByText("조직 정보"),
+  ).toBeVisible();
+  expect(
+    within(detailRegion as HTMLElement).getByText("조직 담당자"),
+  ).toBeVisible();
+  expect(
+    within(detailRegion as HTMLElement).getByText("연결 프로젝트"),
+  ).toBeVisible();
+  expect(detailRegion as HTMLElement).not.toContainElement(
+    screen.getByRole("heading", { name: "변경 이력" }),
+  );
+
+  detailRefresh.resolve(
+    Response.json({ ...organizationDetail(), name: "운영팀" }),
+  );
+  const refreshedHeading = await screen.findByRole("heading", {
+    name: "운영팀",
+  });
+  expect(refreshedHeading.closest("[aria-busy=false]")).not.toBeNull();
+});
+
 it("aborts stale candidate searches and only ends the current search loading", async () => {
   const first = deferred<Response>();
   const second = deferred<Response>();
