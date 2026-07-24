@@ -230,11 +230,15 @@ export function OrganizationsPage() {
                   <dl className="er-organization-facts">
                     <div>
                       <dt>대표 조직장</dt>
-                      <dd>{organization.primaryLeader?.displayName ?? "미지정"}</dd>
+                      <dd>
+                        {organization.primaryLeader?.displayName ?? "미지정"}
+                      </dd>
                     </div>
                     <div>
                       <dt>담당자</dt>
-                      <dd>{getTotalOrganizationManagerCount(organization)}명</dd>
+                      <dd>
+                        {getTotalOrganizationManagerCount(organization)}명
+                      </dd>
                     </div>
                     <div>
                       <dt>프로젝트</dt>

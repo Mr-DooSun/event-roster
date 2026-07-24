@@ -139,17 +139,14 @@ export function OrganizationManagersPanel({
     event.preventDefault();
     if (!selectedUserId) return;
     setExistingAssignmentError(null);
-    await mutate(
-      async () => {
-        await api.post(`/organizations/${organization.id}/managers`, {
-          kind: "EXISTING",
-          userId: selectedUserId,
-          assignmentRole,
-        });
-        closeExistingAssignment();
-      },
-      setExistingAssignmentError,
-    );
+    await mutate(async () => {
+      await api.post(`/organizations/${organization.id}/managers`, {
+        kind: "EXISTING",
+        userId: selectedUserId,
+        assignmentRole,
+      });
+      closeExistingAssignment();
+    }, setExistingAssignmentError);
   }
 
   async function provision(event: FormEvent) {

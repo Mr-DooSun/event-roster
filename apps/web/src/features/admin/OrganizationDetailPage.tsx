@@ -434,7 +434,8 @@ export function OrganizationDetailPage({
                   {organization.isActive ? "사용 중" : "사용 중지"}
                 </span>
                 <span>
-                  대표 조직장 {organization.primaryLeader?.displayName ?? "미지정"}
+                  대표 조직장{" "}
+                  {organization.primaryLeader?.displayName ?? "미지정"}
                 </span>
                 <span>
                   담당자 {getTotalOrganizationManagerCount(organization)}명

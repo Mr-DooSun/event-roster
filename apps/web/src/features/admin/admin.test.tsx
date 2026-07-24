@@ -1356,9 +1356,7 @@ it("gates existing assignment until candidate search succeeds", async () => {
       if (url.endsWith("/organizations/org-1"))
         return Promise.resolve(Response.json(organizationDetail()));
       if (url.endsWith("/organizations/org-1/audit?limit=50"))
-        return Promise.resolve(
-          Response.json({ items: [], nextCursor: null }),
-        );
+        return Promise.resolve(Response.json({ items: [], nextCursor: null }));
       if (url.includes("/assignable-users?"))
         return Promise.resolve(Response.json([]));
       throw new Error(`unexpected request: ${url}`);
@@ -1377,21 +1375,13 @@ it("gates existing assignment until candidate search succeeds", async () => {
     await screen.findByRole("button", { name: "기존 계정 지정" }),
   );
 
-  expect(
-    screen.getByRole("combobox", { name: "지정할 계정" }),
-  ).toBeDisabled();
-  expect(
-    screen.getByRole("button", { name: "담당자로 지정" }),
-  ).toBeDisabled();
+  expect(screen.getByRole("combobox", { name: "지정할 계정" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "담당자로 지정" })).toBeDisabled();
 
   fireEvent.click(screen.getByRole("button", { name: "검색" }));
 
-  expect(
-    await screen.findByText("검색된 계정이 없습니다."),
-  ).toBeVisible();
-  expect(
-    screen.getByRole("combobox", { name: "지정할 계정" }),
-  ).toBeDisabled();
+  expect(await screen.findByText("검색된 계정이 없습니다.")).toBeVisible();
+  expect(screen.getByRole("combobox", { name: "지정할 계정" })).toBeDisabled();
 });
 
 it("keeps existing assignment choices after mutation failure", async () => {
@@ -1404,9 +1394,7 @@ it("keeps existing assignment choices after mutation failure", async () => {
       if (url.endsWith("/organizations/org-1"))
         return Promise.resolve(Response.json(organizationDetail()));
       if (url.endsWith("/organizations/org-1/audit?limit=50"))
-        return Promise.resolve(
-          Response.json({ items: [], nextCursor: null }),
-        );
+        return Promise.resolve(Response.json({ items: [], nextCursor: null }));
       if (url.includes("/assignable-users?"))
         return Promise.resolve(
           Response.json([
@@ -1463,15 +1451,13 @@ it("keeps existing assignment choices after mutation failure", async () => {
   expect(
     within(dialog).getByText("담당자 변경을 반영하지 못했습니다."),
   ).toBeVisible();
-  expect(
-    within(dialog).getByLabelText("로그인 ID 또는 표시 이름"),
-  ).toHaveValue("지정");
+  expect(within(dialog).getByLabelText("로그인 ID 또는 표시 이름")).toHaveValue(
+    "지정",
+  );
   expect(within(dialog).getByLabelText("지정할 계정")).toHaveValue(
     "candidate-1",
   );
-  expect(within(dialog).getByLabelText("조직별 역할")).toHaveValue(
-    "MANAGER",
-  );
+  expect(within(dialog).getByLabelText("조직별 역할")).toHaveValue("MANAGER");
 });
 
 it("preserves existing assignment choices when a repeated candidate search fails", async () => {
@@ -1485,9 +1471,7 @@ it("preserves existing assignment choices when a repeated candidate search fails
       if (url.endsWith("/organizations/org-1"))
         return Promise.resolve(Response.json(organizationDetail()));
       if (url.endsWith("/organizations/org-1/audit?limit=50"))
-        return Promise.resolve(
-          Response.json({ items: [], nextCursor: null }),
-        );
+        return Promise.resolve(Response.json({ items: [], nextCursor: null }));
       if (url.includes("/assignable-users?")) {
         candidateSearches += 1;
         return candidateSearches === 1
@@ -1543,17 +1527,13 @@ it("preserves existing assignment choices when a repeated candidate search fails
   expect(
     within(dialog).getByText("지정 가능한 계정을 찾지 못했습니다."),
   ).toBeVisible();
-  expect(
-    within(dialog).getByLabelText("로그인 ID 또는 표시 이름"),
-  ).toHaveValue("지정");
-  expect(
-    within(dialog).getByLabelText("지정할 계정")).toHaveValue(
+  expect(within(dialog).getByLabelText("로그인 ID 또는 표시 이름")).toHaveValue(
+    "지정",
+  );
+  expect(within(dialog).getByLabelText("지정할 계정")).toHaveValue(
     "candidate-1",
   );
-  expect(
-    within(dialog).getByLabelText("조직별 역할")).toHaveValue(
-    "MANAGER",
-  );
+  expect(within(dialog).getByLabelText("조직별 역할")).toHaveValue("MANAGER");
   expect(
     within(dialog).getByRole("option", {
       name: "지정 후보 · candidate-01",
