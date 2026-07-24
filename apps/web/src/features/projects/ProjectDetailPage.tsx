@@ -444,9 +444,19 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
     }
   }
 
-  async function loadMoreAudit() {
-    if (!auditNextCursor || auditPaginationRequest.current) return;
-    const context = { projectId, generation: loadGeneration.current };
+  async function loadMoreAudit(
+    expectedGeneration: number,
+    expectedCursor: string | null,
+  ) {
+    const context = { projectId, generation: expectedGeneration };
+    if (
+      !expectedCursor ||
+      !isCurrent(context) ||
+      auditNextCursor !== expectedCursor ||
+      auditPaginationRequest.current
+    ) {
+      return;
+    }
     auditPaginationRequest.current = context;
     setAuditPaginationError(null);
     try {
@@ -455,14 +465,16 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
         nextCursor: string | null;
       }>(
         `/projects/${context.projectId}/audit?limit=50&cursor=${encodeURIComponent(
-          auditNextCursor,
+          expectedCursor,
         )}`,
       );
-      if (!isCurrent(context)) return;
+      if (!isCurrent(context) || auditPaginationRequest.current !== context) {
+        return;
+      }
       setAudit((current) => [...current, ...page.items]);
       setAuditNextCursor(page.nextCursor);
     } catch {
-      if (isCurrent(context)) {
+      if (isCurrent(context) && auditPaginationRequest.current === context) {
         setAuditPaginationError("변경 이력을 더 불러오지 못했습니다.");
       }
     } finally {
@@ -521,7 +533,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
   const selectedTabLoaded = TAB_RESOURCES[selectedTab].every(
     (resource) => resourceLoaded[resource],
   );
-  const selectedTabErrorGeneration = loadGeneration.current;
+  const renderGeneration = loadGeneration.current;
   const showRefreshingContent = selectedTabLoaded && selectedTabLoading;
   const showTabContent = selectedTabLoaded;
   const tabLoadingState = TAB_LOADING_STATE[selectedTab];
@@ -620,7 +632,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
         {selectedTabErrors.length > 0 ? (
           <RetryableError
             message={selectedTabErrors.join(" ")}
-            onRetry={() => retryTab(selectedTab, selectedTabErrorGeneration)}
+            onRetry={() => retryTab(selectedTab, renderGeneration)}
           />
         ) : null}
         {showTabContent && selectedTab === "overview" ? (
@@ -658,7 +670,9 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
             <AuditPanel
               items={audit}
               nextCursor={auditNextCursor}
-              onLoadMore={loadMoreAudit}
+              onLoadMore={() =>
+                loadMoreAudit(renderGeneration, auditNextCursor)
+              }
             />
           </div>
         ) : null}

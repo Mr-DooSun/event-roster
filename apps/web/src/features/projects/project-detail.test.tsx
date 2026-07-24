@@ -1163,6 +1163,73 @@ it("lets only the latest same-generation resource request update state", async (
   expect(screen.queryByText("늦게 끝난 이전 요청")).not.toBeInTheDocument();
 });
 
+it("ignores an audit pagination handler captured before a newer full load", async () => {
+  const reloadedAudit = deferred<{
+    items: ReturnType<typeof auditItem>[];
+    nextCursor: string | null;
+  }>();
+  let initialAuditReads = 0;
+  let oldCursorReads = 0;
+  let newCursorReads = 0;
+  mockApi.get.mockImplementation((path: string) => {
+    if (path === "/projects/project-1/audit?limit=50") {
+      initialAuditReads += 1;
+      return initialAuditReads === 1
+        ? {
+            items: [auditItem("이전 기준")],
+            nextCursor: "old-cursor",
+          }
+        : reloadedAudit.promise;
+    }
+    if (path.endsWith("cursor=old-cursor")) {
+      oldCursorReads += 1;
+      return {
+        items: [auditItem("오래된 페이지")],
+        nextCursor: null,
+      };
+    }
+    if (path.endsWith("cursor=new-cursor")) {
+      newCursorReads += 1;
+      return {
+        items: [auditItem("새 페이지")],
+        nextCursor: null,
+      };
+    }
+    return defaultGet(path);
+  });
+
+  render(<ProjectDetailPage projectId="project-1" />);
+  fireEvent.click(await screen.findByRole("tab", { name: "변경 이력" }));
+  expect(await screen.findByText("이전 기준")).toBeVisible();
+  const staleLoadMore = captureReactClickHandler(
+    screen.getByRole("button", { name: "이력 더 보기" }),
+  );
+
+  fireEvent.click(screen.getByRole("button", { name: "진행 시작" }));
+  fireEvent.click(screen.getByRole("button", { name: "변경 확인" }));
+  await waitFor(() => expect(initialAuditReads).toBe(2));
+  await act(async () => {
+    reloadedAudit.resolve({
+      items: [auditItem("새 기준")],
+      nextCursor: "new-cursor",
+    });
+    await reloadedAudit.promise;
+  });
+  expect(screen.getByText("새 기준")).toBeVisible();
+
+  await act(async () => {
+    staleLoadMore();
+    await Promise.resolve();
+  });
+
+  expect(oldCursorReads).toBe(0);
+  expect(screen.queryByText("오래된 페이지")).not.toBeInTheDocument();
+  expect(screen.getByText("새 기준")).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "이력 더 보기" }));
+  expect(newCursorReads).toBe(1);
+  expect(await screen.findByText("새 페이지")).toBeVisible();
+});
+
 it("invalidates the audit cursor and preserves a newer request lock across a full reload", async () => {
   const oldPage = deferred<{
     items: ReturnType<typeof auditItem>[];
