@@ -1,5 +1,9 @@
 # CI Deployment Credentials and Stability Design
 
+> **Superseded in part:** 비동기 조직 목록 테스트 안정화 결정은 유효하다.
+> GitHub Actions 기반 Cloudflare 배포와 자격 증명 설계는
+> `2026-07-25-manual-cloudflare-release-design.md`로 대체되었다.
+
 ## Goal
 
 `main` push에서 별도의 `CI`와 `Deploy production` 워크플로가 모두
