@@ -177,12 +177,27 @@ it("updates an existing account role and active state without assignments", asyn
 
 it("searches and filters organization summaries", async () => {
   const organizations = deferred<Response>();
+  let organizationReads = 0;
   const fetchMock = vi.fn((input: RequestInfo | URL) => {
     const url = String(input);
     if (url.endsWith("/auth/login"))
       return Promise.resolve(Response.json(auth()));
     if (url.includes("/organizations?")) {
-      return organizations.promise;
+      organizationReads += 1;
+      return organizationReads === 1
+        ? organizations.promise
+        : Promise.resolve(
+            Response.json([
+              {
+                id: "org-operations",
+                name: "운영 팀",
+                isActive: false,
+                primaryLeader: null,
+                managerCount: 0,
+                projectCount: 0,
+              },
+            ]),
+          );
     }
     throw new Error(`unexpected request: ${url}`);
   });
@@ -261,6 +276,12 @@ it("searches and filters organization summaries", async () => {
       expect.objectContaining({ method: "GET" }),
     ),
   );
+  expect(
+    await screen.findByRole("link", { name: "운영 팀 상세 관리" }),
+  ).toBeVisible();
+  expect(
+    screen.queryByText("조직 목록을 불러오지 못했습니다."),
+  ).not.toBeInTheDocument();
 });
 
 it("distinguishes organization loading from an empty result", async () => {

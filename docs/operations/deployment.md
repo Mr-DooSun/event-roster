@@ -260,7 +260,7 @@ corepack pnpm@10.28.1 --filter @event-roster/web build
 corepack pnpm@10.28.1 --filter @event-roster/worker exec wrangler deploy
 curl --fail --silent --show-error \
   https://event-roster.event-roster.workers.dev/api/v1/health | \
-  jq -e '.status == "ok"' >/dev/null
+  node -e 'let input = ""; process.stdin.on("data", chunk => input += chunk).on("end", () => { try { const payload = JSON.parse(input); if (payload === null || Array.isArray(payload) || typeof payload !== "object" || payload.status !== "ok") process.exitCode = 1; } catch { process.exitCode = 1; } });'
 curl --fail --silent --show-error --head \
   https://event-roster.event-roster.workers.dev/
 ```
