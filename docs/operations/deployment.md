@@ -197,6 +197,7 @@ GitHub Actions에는 Cloudflare API Token과 Account ID를 등록하지 않는�
 ### 7.1 대상 커밋과 계정 확인
 
 ```bash
+set -euo pipefail
 test "$(git branch --show-current)" = "main"
 test -z "$(git status --porcelain)"
 git fetch origin main
@@ -211,6 +212,7 @@ corepack pnpm@10.28.1 --filter @event-roster/worker exec wrangler whoami
 ### 7.2 로컬 검증
 
 ```bash
+set -euo pipefail
 corepack pnpm@10.28.1 install --frozen-lockfile
 corepack pnpm@10.28.1 test
 corepack pnpm@10.28.1 check
@@ -224,6 +226,7 @@ corepack pnpm@10.28.1 --filter @event-roster/worker exec wrangler deploy --dry-r
 ### 7.3 pending D1 migration 판단
 
 ```bash
+set -euo pipefail
 corepack pnpm@10.28.1 --filter @event-roster/worker exec \
   wrangler d1 migrations list event-roster --remote
 ```
@@ -237,6 +240,7 @@ migration의 승인된 사전·사후 검증 절차가 문서화되어 있어야
 승인과 백업이 모두 확인된 경우에만 적용한다.
 
 ```bash
+set -euo pipefail
 corepack pnpm@10.28.1 --filter @event-roster/worker exec \
   wrangler d1 migrations apply event-roster --remote
 corepack pnpm@10.28.1 --filter @event-roster/worker exec \
@@ -251,10 +255,12 @@ foreign key 검사는 행을 반환하지 않아야 한다. migration별 사후 
 ### 7.4 Worker 배포와 확인
 
 ```bash
+set -euo pipefail
 corepack pnpm@10.28.1 --filter @event-roster/web build
 corepack pnpm@10.28.1 --filter @event-roster/worker exec wrangler deploy
 curl --fail --silent --show-error \
-  https://event-roster.event-roster.workers.dev/api/v1/health
+  https://event-roster.event-roster.workers.dev/api/v1/health | \
+  jq -e '.status == "ok"' >/dev/null
 curl --fail --silent --show-error --head \
   https://event-roster.event-roster.workers.dev/
 ```
