@@ -187,3 +187,98 @@ corepack pnpm@10.28.1 --filter @event-roster/worker run smoke:remote
 Wrangler 4.112.0의 dry-run 요약이 Cron을 별도로 출력하지 않는 경우에는 exit 0과 `apps/worker/wrangler.jsonc`의 `triggers.crons`가 `["0 15 * * *"]` 하나인지를 함께 대조한다. 실제 원격 Trigger 존재 여부는 2번에서 확정한다.
 
 마지막으로 Cloudflare 대시보드에서 Workers 오류, CPU 시간, D1 오류·사용량을 확인하고 배포 시각·커밋 SHA·정확한 URL·smoke 결과만 배포 기록에 남긴다.
+
+## 7. 반복 수동 release
+
+운영 변경은 자동 배포하지 않는다. 아래 절차는 저장소의 깨끗한 `main`
+checkout과 `wrangler login`으로 인증된 운영자 로컬 환경에서만 실행한다.
+GitHub Actions에는 Cloudflare API Token과 Account ID를 등록하지 않는다.
+
+### 7.1 대상 커밋과 계정 확인
+
+```bash
+set -euo pipefail
+test "$(git branch --show-current)" = "main"
+test -z "$(git status --porcelain)"
+git fetch origin main
+test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
+git rev-parse HEAD
+corepack pnpm@10.28.1 --filter @event-roster/worker exec wrangler whoami
+```
+
+현재 SHA와 Wrangler가 표시한 Cloudflare 계정이 배포 대상인지 확인한다.
+하나라도 다르거나 작업 트리가 깨끗하지 않으면 중단한다.
+
+### 7.2 로컬 검증
+
+```bash
+set -euo pipefail
+corepack pnpm@10.28.1 install --frozen-lockfile
+corepack pnpm@10.28.1 test
+corepack pnpm@10.28.1 check
+corepack pnpm@10.28.1 format:check
+corepack pnpm@10.28.1 --filter @event-roster/web build
+corepack pnpm@10.28.1 --filter @event-roster/worker exec wrangler deploy --dry-run
+```
+
+모든 명령이 exit 0일 때만 다음 단계로 진행한다.
+
+### 7.3 pending D1 migration 판단
+
+```bash
+set -euo pipefail
+corepack pnpm@10.28.1 --filter @event-roster/worker exec \
+  wrangler d1 migrations list event-roster --remote
+```
+
+pending migration이 없으면 7.4로 이동한다. pending migration이 있으면 해당
+migration의 승인된 사전·사후 검증 절차가 문서화되어 있어야 한다. 기존
+데이터가 있는 D1은 2절의 저장소 밖 export·checksum 검증을 먼저 수행한다.
+승인된 검증 절차나 확인된 백업 중 하나라도 없으면 migration과 배포를
+중단한다.
+
+승인과 백업이 모두 확인된 경우에만 적용한다.
+
+```bash
+set -euo pipefail
+corepack pnpm@10.28.1 --filter @event-roster/worker exec \
+  wrangler d1 migrations apply event-roster --remote
+corepack pnpm@10.28.1 --filter @event-roster/worker exec \
+  wrangler d1 execute event-roster --remote --command \
+  "PRAGMA foreign_key_check"
+```
+
+foreign key 검사는 행을 반환하지 않아야 한다. migration별 사후 검증도 모두
+통과해야 한다. 실패하면 Worker를 배포하지 말고
+[복구 절차](recovery.md)의 격리 복원을 따른다.
+
+### 7.4 Worker 배포와 확인
+
+```bash
+set -euo pipefail
+corepack pnpm@10.28.1 --filter @event-roster/web build
+corepack pnpm@10.28.1 --filter @event-roster/worker exec wrangler deploy
+curl --fail --silent --show-error \
+  https://event-roster.event-roster.workers.dev/api/v1/health | \
+  node -e 'let input = ""; process.stdin.on("data", chunk => input += chunk).on("end", () => { try { const payload = JSON.parse(input); if (payload === null || Array.isArray(payload) || typeof payload !== "object" || payload.status !== "ok") process.exitCode = 1; } catch { process.exitCode = 1; } });'
+curl --fail --silent --show-error --head \
+  https://event-roster.event-roster.workers.dev/
+```
+
+health 응답은 `{"status":"ok"}`이고 SPA 요청은 HTTP 200이어야 한다. 이어
+6절의 `smoke:remote`를 한 번 실행한다. 하나라도 실패하면 성공으로 기록하지
+않고 Worker 로그와 Wrangler 배포 이력을 확인한다.
+
+### 7.5 운영 기록
+
+다음 항목만 접근 제한된 운영 기록에 남긴다.
+
+- `git rev-parse HEAD`의 전체 40자 SHA
+- 배포 시작·종료 시각
+- `https://event-roster.event-roster.workers.dev`
+- migration 적용 여부와 검증 결과
+- health, SPA와 smoke 결과
+- 실패한 경우 중단 단계와 복구 여부
+
+OAuth token, runtime Secret, 로그인 비밀번호, JWT, refresh token과 D1
+백업 내용은 기록하지 않는다.

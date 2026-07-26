@@ -1,5 +1,9 @@
 # CI Deployment Credentials and Stability Implementation Plan
 
+> **Superseded in part:** Task 1의 비동기 조직 목록 테스트 안정화는
+> 완료되었다. GitHub Actions 자격 증명과 자동 배포 관련 Task 2·3은
+> `2026-07-25-manual-cloudflare-release-design.md`에 따라 대체된다.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** `main` push에서 CI와 Cloudflare 운영 배포가 안정적으로 성공하도록 비동기 조직 테스트를 고치고 GitHub `production` Environment의 Secret/Variable 경계를 올바르게 구성한다.
