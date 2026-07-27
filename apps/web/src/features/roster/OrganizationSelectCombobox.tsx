@@ -126,7 +126,7 @@ export function OrganizationSelectCombobox({
           }}
           onChange={(event) => {
             setQuery(event.currentTarget.value);
-            committedValueRef.current = "";
+            committedValueRef.current = null;
             onChange("");
             setOpen(true);
             setActiveIndex(-1);

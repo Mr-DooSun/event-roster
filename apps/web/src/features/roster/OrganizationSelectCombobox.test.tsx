@@ -1,5 +1,6 @@
 import "@testing-library/jest-dom/vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { useState } from "react";
 import { afterEach, expect, it, vi } from "vitest";
 import { OrganizationSelectCombobox } from "./OrganizationSelectCombobox";
 
@@ -213,4 +214,34 @@ it("reports the committed selection separately from keyboard navigation", () => 
   expect(selected).toHaveAttribute("aria-selected", "true");
   expect(active).toHaveAttribute("aria-selected", "false");
   expect(active).toHaveAttribute("data-active", "true");
+});
+
+it("preserves the first free-query character after a controlled parent clears selection", () => {
+  const onChange = vi.fn();
+
+  function ControlledCombobox() {
+    const [value, setValue] = useState("org-1");
+
+    return (
+      <OrganizationSelectCombobox
+        label="확정 소속 조직"
+        organizations={organizations}
+        value={value}
+        onChange={(organizationId) => {
+          onChange(organizationId);
+          setValue(organizationId);
+        }}
+      />
+    );
+  }
+
+  render(<ControlledCombobox />);
+
+  const input = screen.getByRole("combobox", {
+    name: "확정 소속 조직",
+  });
+  fireEvent.change(input, { target: { value: "직" } });
+
+  expect(onChange).toHaveBeenLastCalledWith("");
+  expect(input).toHaveValue("직");
 });
