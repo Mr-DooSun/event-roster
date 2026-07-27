@@ -116,9 +116,209 @@ pending으로 표시되는 경우다. 이는 `0001`~`0003`이 적용 기록에 �
 
 `0003`과 `0004`가 함께 보이거나 `0001`~`0003` 중 하나, 또는 다른
 migration이 `0004`와 함께 pending이면 여기서 중단한다. 신규 빈 D1에서
-`0001`~`0004`가 모두 보이는 경우도 같다. 일반 apply로 한꺼번에 적용하지
-말고 [복구 절차](recovery.md)의 격리 D1에서 단계별 초기화·복원 절차를 별도
-승인하고, `0001`~`0003` 적용 완료 후 다시 목록을 확인한다.
+`0001`~`0004`가 정확히 모두 보이는 경우에만 아래
+[신규 빈 D1 단계 초기화](#fresh-empty-d1-staged-initialization)를 사용한다.
+기존 데이터가 있거나 export를 import한 D1에는 이 초기화를 사용하지 않는다.
+그 외 조합은 모두 중단하고 [복구 절차](recovery.md)의 데이터베이스 유형별
+경로를 따른다.
+
+<a id="fresh-empty-d1-staged-initialization"></a>
+
+### 2.1 신규 빈 D1 단계 초기화: `0001`~`0003`
+
+이 절차는 방금 생성했고 아직 Worker binding 연결, bootstrap, import, 수동
+schema 변경을 한 적이 없는 **신규 빈 `event-roster` D1** 전용이다. 기본
+config의 remote pending 목록이 정확히 `0001`~`0004` 네 개이고, 아래
+application table 수가 0일 때만 실행한다. 기존 운영 D1, export를 import한
+복원 D1, pending 조합이 다른 D1에는 사용하지 않는다. 조건이 하나라도
+다르면 중단한다.
+
+Wrangler 4.112.0의 `d1 migrations apply`에는 특정 migration 파일만 고르는
+옵션이 없다. 따라서 저장소 밖 mode 0700 임시 디렉터리에 `0001`~`0003`
+세 파일만 복사하고, 기본 config의 정확한 `DB` binding, database name,
+`database_id`를 읽어 `migrations_dir`만 제한한 최소 config를 생성한다.
+생성기는 기본 `wrangler.jsonc`를 strict JSON으로도 해석할 수 없거나 대상
+binding이 정확히 하나가 아니면 실패한다. 이 경우 값을 손으로 복사한 config를
+만들지 말고 문서와 생성 절차를 다시 검토한다.
+
+```bash
+set -euo pipefail
+umask 077
+
+EVENT_ROSTER_REPO_ROOT="$(git rev-parse --show-toplevel)"
+EVENT_ROSTER_BASE_CONFIG="${EVENT_ROSTER_REPO_ROOT}/apps/worker/wrangler.jsonc"
+
+EVENT_ROSTER_PENDING_BEFORE="$(
+  corepack pnpm@10.28.1 --filter @event-roster/worker exec \
+    wrangler d1 migrations list event-roster --remote
+)"
+printf '%s\n' "$EVENT_ROSTER_PENDING_BEFORE"
+test "$(printf '%s\n' "$EVENT_ROSTER_PENDING_BEFORE" | grep -c '0001_initial.sql')" -eq 1
+test "$(printf '%s\n' "$EVENT_ROSTER_PENDING_BEFORE" | grep -c '0002_project_model.sql')" -eq 1
+test "$(printf '%s\n' "$EVENT_ROSTER_PENDING_BEFORE" | grep -c '0003_organization_leadership.sql')" -eq 1
+test "$(printf '%s\n' "$EVENT_ROSTER_PENDING_BEFORE" | grep -c '0004_automatic_project_preregistration.sql')" -eq 1
+test "$(printf '%s\n' "$EVENT_ROSTER_PENDING_BEFORE" | grep -Ec '[0-9]{4}_[[:alnum:]_]+\.sql')" -eq 4
+
+corepack pnpm@10.28.1 --filter @event-roster/worker exec \
+  wrangler d1 execute event-roster --remote --json --command \
+  "SELECT COUNT(*) AS application_table_count
+   FROM sqlite_schema
+   WHERE type='table'
+     AND name IN (
+       'organizations', 'users', 'user_organizations', 'projects',
+       'project_organizations', 'participants', 'project_roster_entries',
+       'audit_logs'
+     )" |
+  node -e '
+    let input = "";
+    process.stdin.setEncoding("utf8");
+    process.stdin.on("data", (chunk) => { input += chunk; });
+    process.stdin.on("end", () => {
+      const payload = JSON.parse(input);
+      const count = payload?.[0]?.results?.[0]?.application_table_count;
+      if (count !== 0) {
+        console.error(`fresh empty D1 required; application_table_count=${String(count)}`);
+        process.exit(1);
+      }
+    });
+  '
+
+EVENT_ROSTER_STAGE_DIR="$(mktemp -d /private/tmp/event-roster-d1-base.XXXXXX)"
+chmod 700 "$EVENT_ROSTER_STAGE_DIR"
+EVENT_ROSTER_STAGE_DIR="$(cd "$EVENT_ROSTER_STAGE_DIR" && pwd -P)"
+case "$EVENT_ROSTER_STAGE_DIR" in
+  /private/tmp/event-roster-d1-base.*) ;;
+  *) echo "예상하지 못한 임시 경로입니다." >&2; exit 1 ;;
+esac
+
+EVENT_ROSTER_STAGE_MIGRATIONS="${EVENT_ROSTER_STAGE_DIR}/migrations-0001-0003"
+EVENT_ROSTER_STAGE_CONFIG="${EVENT_ROSTER_STAGE_DIR}/wrangler.0001-0003.json"
+cleanup_event_roster_stage() {
+  rm -f -- \
+    "$EVENT_ROSTER_STAGE_CONFIG" \
+    "$EVENT_ROSTER_STAGE_MIGRATIONS/0001_initial.sql" \
+    "$EVENT_ROSTER_STAGE_MIGRATIONS/0002_project_model.sql" \
+    "$EVENT_ROSTER_STAGE_MIGRATIONS/0003_organization_leadership.sql"
+  rmdir -- "$EVENT_ROSTER_STAGE_MIGRATIONS" 2>/dev/null || true
+  rmdir -- "$EVENT_ROSTER_STAGE_DIR" 2>/dev/null || true
+}
+trap cleanup_event_roster_stage EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+EVENT_ROSTER_WORKTREE_LIST="$(git -c core.quotePath=false worktree list --porcelain)"
+while IFS= read -r EVENT_ROSTER_WORKTREE_LINE; do
+  case "$EVENT_ROSTER_WORKTREE_LINE" in
+    "worktree "*)
+      EVENT_ROSTER_WORKTREE="${EVENT_ROSTER_WORKTREE_LINE#worktree }"
+      EVENT_ROSTER_WORKTREE="$(cd "$EVENT_ROSTER_WORKTREE" && pwd -P)"
+      case "${EVENT_ROSTER_STAGE_DIR}/" in
+        "${EVENT_ROSTER_WORKTREE}/"*)
+          echo "임시 migration 디렉터리는 모든 Git worktree 밖이어야 합니다." >&2
+          exit 1
+          ;;
+      esac
+      ;;
+  esac
+done <<EOF
+$EVENT_ROSTER_WORKTREE_LIST
+EOF
+
+mkdir -- "$EVENT_ROSTER_STAGE_MIGRATIONS"
+chmod 700 "$EVENT_ROSTER_STAGE_MIGRATIONS"
+install -m 600 \
+  "${EVENT_ROSTER_REPO_ROOT}/apps/worker/migrations/0001_initial.sql" \
+  "${EVENT_ROSTER_REPO_ROOT}/apps/worker/migrations/0002_project_model.sql" \
+  "${EVENT_ROSTER_REPO_ROOT}/apps/worker/migrations/0003_organization_leadership.sql" \
+  "$EVENT_ROSTER_STAGE_MIGRATIONS/"
+
+node - "$EVENT_ROSTER_BASE_CONFIG" "$EVENT_ROSTER_STAGE_MIGRATIONS" \
+  "$EVENT_ROSTER_STAGE_CONFIG" <<'NODE'
+const fs = require("node:fs");
+const [basePath, migrationsDir, outputPath] = process.argv.slice(2);
+const base = JSON.parse(fs.readFileSync(basePath, "utf8"));
+const matches = (base.d1_databases ?? []).filter(
+  (entry) =>
+    entry.binding === "DB" && entry.database_name === "event-roster",
+);
+if (matches.length !== 1) {
+  throw new Error("expected exactly one event-roster DB binding");
+}
+const database = matches[0];
+if (
+  typeof database.database_id !== "string" ||
+  database.database_id.length === 0
+) {
+  throw new Error("event-roster database_id is missing");
+}
+const staged = {
+  name: `${base.name}-base-migrations`,
+  compatibility_date: base.compatibility_date,
+  d1_databases: [
+    {
+      binding: database.binding,
+      database_name: database.database_name,
+      database_id: database.database_id,
+      migrations_dir: migrationsDir,
+    },
+  ],
+};
+fs.writeFileSync(outputPath, `${JSON.stringify(staged, null, 2)}\n`, {
+  encoding: "utf8",
+  mode: 0o600,
+  flag: "wx",
+});
+NODE
+chmod 600 "$EVENT_ROSTER_STAGE_CONFIG"
+
+EVENT_ROSTER_STAGE_DIR_MODE="$(stat -c '%a' "$EVENT_ROSTER_STAGE_DIR" 2>/dev/null || stat -f '%Lp' "$EVENT_ROSTER_STAGE_DIR")"
+EVENT_ROSTER_STAGE_MIGRATIONS_MODE="$(stat -c '%a' "$EVENT_ROSTER_STAGE_MIGRATIONS" 2>/dev/null || stat -f '%Lp' "$EVENT_ROSTER_STAGE_MIGRATIONS")"
+EVENT_ROSTER_STAGE_CONFIG_MODE="$(stat -c '%a' "$EVENT_ROSTER_STAGE_CONFIG" 2>/dev/null || stat -f '%Lp' "$EVENT_ROSTER_STAGE_CONFIG")"
+test "$EVENT_ROSTER_STAGE_DIR_MODE" = "700"
+test "$EVENT_ROSTER_STAGE_MIGRATIONS_MODE" = "700"
+test "$EVENT_ROSTER_STAGE_CONFIG_MODE" = "600"
+for EVENT_ROSTER_STAGE_MIGRATION in "$EVENT_ROSTER_STAGE_MIGRATIONS"/*.sql; do
+  EVENT_ROSTER_STAGE_MIGRATION_MODE="$(stat -c '%a' "$EVENT_ROSTER_STAGE_MIGRATION" 2>/dev/null || stat -f '%Lp' "$EVENT_ROSTER_STAGE_MIGRATION")"
+  test "$EVENT_ROSTER_STAGE_MIGRATION_MODE" = "600"
+done
+
+EVENT_ROSTER_STAGE_PENDING="$(
+  corepack pnpm@10.28.1 --filter @event-roster/worker exec \
+    wrangler d1 migrations list event-roster --remote \
+    --config "$EVENT_ROSTER_STAGE_CONFIG"
+)"
+printf '%s\n' "$EVENT_ROSTER_STAGE_PENDING"
+test "$(printf '%s\n' "$EVENT_ROSTER_STAGE_PENDING" | grep -c '0001_initial.sql')" -eq 1
+test "$(printf '%s\n' "$EVENT_ROSTER_STAGE_PENDING" | grep -c '0002_project_model.sql')" -eq 1
+test "$(printf '%s\n' "$EVENT_ROSTER_STAGE_PENDING" | grep -c '0003_organization_leadership.sql')" -eq 1
+test "$(printf '%s\n' "$EVENT_ROSTER_STAGE_PENDING" | grep -Ec '[0-9]{4}_[[:alnum:]_]+\.sql')" -eq 3
+
+corepack pnpm@10.28.1 --filter @event-roster/worker exec \
+  wrangler d1 migrations apply event-roster --remote \
+  --config "$EVENT_ROSTER_STAGE_CONFIG"
+
+EVENT_ROSTER_PENDING_AFTER="$(
+  corepack pnpm@10.28.1 --filter @event-roster/worker exec \
+    wrangler d1 migrations list event-roster --remote
+)"
+printf '%s\n' "$EVENT_ROSTER_PENDING_AFTER"
+test "$(printf '%s\n' "$EVENT_ROSTER_PENDING_AFTER" | grep -c '0004_automatic_project_preregistration.sql')" -eq 1
+test "$(printf '%s\n' "$EVENT_ROSTER_PENDING_AFTER" | grep -Ec '[0-9]{4}_[[:alnum:]_]+\.sql')" -eq 1
+```
+
+마지막 두 검사가 통과하면 `0001`~`0003`의 적용 기록이 만들어졌고 기본
+config에서 `0004`만 pending이다. 임시 config에는 secret이 없지만
+`database_id`가 있으므로 mode 0600을 유지하고, migration 사본과 함께 trap이
+정확한 파일명만 삭제하게 둔다. 이 디렉터리는 백업이나 배포 산출물이 아니므로
+보관·압축·업로드하지 않는다. 중단으로 trap cleanup이 끝나지 않았다면 경로와
+mode가 위 패턴과 일치하는지 확인한 뒤 같은 세 파일과 config만 삭제하고 빈
+디렉터리를 제거한다. 감사 기록에는 config가 아니라 pending 목록, 적용 결과,
+대상 database ID와 시각만 남긴다.
+
+이제 기존 [7.3.1 `0004` 전용 게이트](#automatic-preregistration-0004-gate)로
+이동한다. `0004` 적용 전 backup과 pre/post count, audit count,
+foreign-key 검증은 신규 D1에서도 생략하지 않는다.
 
 허용된 migration gate를 완료했거나 pending migration이 없을 때만 아래
 검증을 실행한다.
@@ -276,8 +476,11 @@ migration의 승인된 사전·사후 검증 절차가 문서화되어 있어야
 `0001`~`0003`은 목록에 없어야 하고, 다른 pending migration도 없어야 한다.
 즉 `0004` 하나만 pending인 출력이 `0001`~`0003` applied와 `0004` only
 pending을 확인하는 gate다. `0003`+`0004`, `0001`~`0004`, 또는
-`0004`+다른 migration 조합이면 중단하고 [복구 절차](recovery.md)의 격리
-D1에서 별도 단계 적용 절차를 승인한다.
+`0004`+다른 migration 조합이면 중단한다. 단, 방금 생성한 미사용 빈 D1에서
+정확히 `0001`~`0004`가 pending이면
+[신규 빈 D1 단계 초기화](#fresh-empty-d1-staged-initialization)를 완료한 뒤
+목록을 다시 확인한다. 기존 또는 복원 D1은 이 초기화를 사용하지 않고
+[복구 절차](recovery.md)의 데이터베이스 유형별 경로를 따른다.
 
 `0004`가 pending인 동안에는 아래 일반 `migrations apply`를 실행하지 않는다.
 반드시 [7.3.1 전용 게이트](#automatic-preregistration-0004-gate)를

@@ -25,12 +25,58 @@
 2. 원격 변경 전 [배포 절차](deployment.md)의 보안 백업 명령으로 D1 export를 생성한다. symbolic link 구성요소가 전혀 없는, main checkout과 모든 linked worktree 밖의 명시적 절대 경로만 사용한다. mode 0700 실행별 디렉터리 안의 export와 체크섬 파일이 각각 mode 0600인지 확인한다. 저장소의 `backups/`와 `event-roster-d1-*/`는 운영 백업 위치로 사용하지 않는다.
 3. export가 `users`, `organizations`, `user_organizations`, `projects`, `project_organizations`를 포함하고 각 행 수가 예상과 일치하는지 확인한다.
 4. 복원은 운영 DB에 바로 덮어쓰지 않고 별도 격리 D1에 import한다. 운영 Worker는 이 단계에서 격리 D1을 바라보지 않는다.
-5. `0003` 적용 전 export를 복원할 때는 격리 D1에 복원한 다음 별도 승인된 단계 적용으로 `0001`~`0003_organization_leadership.sql`까지만 완료한다. 현재 checkout에 `0004`도 있으면 일반 apply를 사용하지 않는다. migration 완료 전 운영 binding을 전환하지 않는다.
-6. `0004` 전 export를 복원할 때도 pre-0004 export는 격리된 대체 D1 데이터베이스에서만 복원한다. 현재 checkout에서 `0003`과 `0004`를 일반 apply로 함께 적용하지 않는다. 별도 승인된 단계 적용으로 `0001`~`0003`을 먼저 완료하고 `migrations list`에 `0004`만 pending인지 확인한 뒤 [0004 전용 적용 게이트](deployment.md#automatic-preregistration-0004-gate)를 따른다. 조건이 다르면 중단한다. 운영 D1의 행을 수동으로 되돌리거나 역방향 migration으로 복구하지 않는다.
-7. 격리 D1에서 `PRAGMA foreign_key_check`가 0행인지 확인하고, `user_organizations.assignment_role`별 수량 합계가 복원 전 배정 수와 같은지 확인한다. 조직별 `PRIMARY_LEADER`가 둘 이상인 조회도 0행이어야 한다.
-8. 조직, 계정, 전역 역할, 조직별 역할, 프로젝트 revision/status, 프로젝트 조직, 참가자, 명단, snapshot, 감사, session 폐기 상태를 표본 검증한다.
-9. 운영자·대표 조직장·추가 관리자·미배정 조직 담당자 표본으로 [월간 점검](monthly-check.md)의 권한 matrix를 검증한다.
-10. 사용자 승인과 점검 결과를 확보한 뒤에만 Worker의 D1 binding을 검증 D1 또는 승인된 복원 D1으로 전환하고 배포한다.
+5. **import하지 않을 신규 빈 배포 D1**은 복원 대상으로 취급하지 않는다. 이
+   경우에만 [신규 빈 D1 단계 초기화](deployment.md#fresh-empty-d1-staged-initialization)로
+   `0001`~`0003`을 적용한다. 앞으로 export를 import할 D1에는 이 초기화를
+   먼저 실행하지 않는다.
+6. export를 격리 D1에 import한 직후에는 export에 포함된 migration ledger와
+   현재 checkout의 pending 목록을 기록한다. 격리 D1을 가리키는 검토된
+   recovery config를 사용하고 운영 config를 재사용하지 않는다.
+
+   ```bash
+   set -euo pipefail
+   test -n "${EVENT_ROSTER_RECOVERY_CONFIG:?격리 D1 recovery config가 필요합니다}"
+   test -f "$EVENT_ROSTER_RECOVERY_CONFIG"
+   test ! -L "$EVENT_ROSTER_RECOVERY_CONFIG"
+   EVENT_ROSTER_RECOVERY_CONFIG_MODE="$(stat -c '%a' "$EVENT_ROSTER_RECOVERY_CONFIG" 2>/dev/null || stat -f '%Lp' "$EVENT_ROSTER_RECOVERY_CONFIG")"
+   test "$EVENT_ROSTER_RECOVERY_CONFIG_MODE" = "600"
+   corepack pnpm@10.28.1 --filter @event-roster/worker exec \
+     wrangler d1 migrations list DB --remote \
+     --config "$EVENT_ROSTER_RECOVERY_CONFIG"
+   corepack pnpm@10.28.1 --filter @event-roster/worker exec \
+     wrangler d1 execute DB --remote --config "$EVENT_ROSTER_RECOVERY_CONFIG" \
+     --command "SELECT id, name, applied_at FROM d1_migrations ORDER BY id"
+   ```
+
+   config의 `DB` binding과 `database_id`가 격리 D1인지 Cloudflare Dashboard와
+   대조한 뒤 명령을 실행한다. migration ledger가 없거나 export 시점의
+   배포 기록과 다르면 import가 완전하지 않은 것이므로 중단한다.
+7. **`0003` 적용 이후, `0004` 적용 이전 export**는 복원 후 ledger에
+   `0001`~`0003`이 있고 pending 목록에는
+   `0004_automatic_project_preregistration.sql`만 있어야 한다. 이 유형은
+   fresh-D1 초기화를 사용하지 않고, 격리 D1을 대상으로 backup/count 조건을
+   유지한 [0004 전용 적용 게이트](deployment.md#automatic-preregistration-0004-gate)로
+   이동한다. 격리 복원 검증 중에는 게이트의 각 D1 명령 대상을 운영
+   `event-roster`가 아니라 `DB --config "$EVENT_ROSTER_RECOVERY_CONFIG"`로
+   바꾸고, export도 격리 D1에서 만든다. 운영 config로 게이트 block을 그대로
+   실행하지 않는다.
+8. **`0003` 적용 이전 export**는 fresh-D1 초기화나 현재 checkout의 일반
+   `migrations apply`를 사용하지 않는다. export의 migration ledger와 정확히
+   일치하는 서명·보관된 release checkout에서 시작해, migration 최댓값이
+   `0003_organization_leadership.sql`인 복구 artifact와 격리 D1 전용 mode
+   0600 config를 사용한다. 적용 전 목록에는 export 이후부터 `0003`까지만,
+   적용 후에는 현재 checkout 기준 `0004`만 pending이어야 한다. 해당 release
+   artifact, 격리 config, export 시점 ledger 중 하나라도 없으면 이 유형의
+   복원은 **BLOCKED**이며 운영 binding을 전환하지 않는다. 임의 SQL로 ledger를
+   만들거나 현재 checkout에서 `0003`과 `0004`를 함께 적용하지 않는다.
+9. 운영 D1의 행을 수동으로 되돌리거나 역방향 migration으로 복구하지 않는다.
+   격리 D1에서 `PRAGMA foreign_key_check`가 0행인지 확인하고,
+   `user_organizations.assignment_role`별 수량 합계가 복원 전 배정 수와
+   같은지 확인한다. 조직별 `PRIMARY_LEADER`가 둘 이상인 조회도 0행이어야
+   한다.
+10. 조직, 계정, 전역 역할, 조직별 역할, 프로젝트 revision/status, 프로젝트 조직, 참가자, 명단, snapshot, 감사, session 폐기 상태를 표본 검증한다.
+11. 운영자·대표 조직장·추가 관리자·미배정 조직 담당자 표본으로 [월간 점검](monthly-check.md)의 권한 matrix를 검증한다.
+12. 사용자 승인과 점검 결과를 확보한 뒤에만 Worker의 D1 binding을 검증 D1 또는 승인된 복원 D1으로 전환하고 배포한다.
 
 `0003` 전 export 복원 후 사용하는 검증 조회:
 
