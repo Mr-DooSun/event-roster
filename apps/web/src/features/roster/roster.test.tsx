@@ -151,8 +151,8 @@ it("uses dedicated responsive spacing for roster actions and filters", async () 
     "er-action-row--wrap",
   );
 
-  const filterGrid = screen.getByLabelText("명단 검색").parentElement
-    ?.parentElement;
+  const filterGrid =
+    screen.getByLabelText("명단 검색").parentElement?.parentElement;
   expect(filterGrid).toHaveClass("er-roster-filters");
   expect(
     within(filterGrid as HTMLElement).getByLabelText("조직 필터"),

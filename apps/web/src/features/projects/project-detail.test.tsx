@@ -828,9 +828,7 @@ it("clears a stale exclusion and uses refreshed history when reopened", async ()
     />,
   );
 
-  fireEvent.click(
-    screen.getByRole("button", { name: "프로젝트에서 제외" }),
-  );
+  fireEvent.click(screen.getByRole("button", { name: "프로젝트에서 제외" }));
   expect(
     screen.getByText(
       "기존 명단과 집계를 보존하기 위해 사용 중지 상태로 전환됩니다.",
@@ -847,9 +845,7 @@ it("clears a stale exclusion and uses refreshed history when reopened", async ()
     screen.queryByRole("dialog", { name: "프로젝트 조직 제외" }),
   ).not.toBeInTheDocument();
 
-  fireEvent.click(
-    screen.getByRole("button", { name: "프로젝트에서 제외" }),
-  );
+  fireEvent.click(screen.getByRole("button", { name: "프로젝트에서 제외" }));
   expect(
     screen.getByText(
       "이 조직을 프로젝트에서 제외할까요? 다시 추가할 수 있습니다.",

@@ -185,9 +185,7 @@ export function ParticipantDialog({
               required
               value={confirmedName}
               disabled={busy !== null}
-              onChange={(event) =>
-                setConfirmedName(event.currentTarget.value)
-              }
+              onChange={(event) => setConfirmedName(event.currentTarget.value)}
             />
             {allowExistingOrganizationChange ? (
               <OrganizationSelectCombobox
