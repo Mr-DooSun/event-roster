@@ -100,14 +100,37 @@ test "$EVENT_ROSTER_CHECKSUM_FILE_MODE" = "600"
 shasum -a 256 -c "$EVENT_ROSTER_CHECKSUM_FILE"
 ```
 
-절대 백업 파일 경로, 생성 시각, database ID, 체크섬을 접근 제한된 배포 기록에 남긴다. export가 비어 있지 않고 `users`, `organizations`, `user_organizations`, `projects`, `project_organizations`, `participants`, `project_roster_entries`, `audit_logs`의 schema/data를 포함하는지 확인한 뒤에만 migration을 적용한다. 신규 빈 D1은 생성 사실과 pending migration 목록을 기록하고 같은 검증 순서를 따른다.
+절대 백업 파일 경로, 생성 시각, database ID, 체크섬을 접근 제한된 배포 기록에 남긴다. export가 비어 있지 않고 `users`, `organizations`, `user_organizations`, `projects`, `project_organizations`, `participants`, `project_roster_entries`, `audit_logs`의 schema/data를 포함하는지 확인한다. 신규 빈 D1도 생성 사실과 pending migration 목록을 기록한다.
 
 ```bash
-corepack pnpm@10.28.1 --filter @event-roster/worker exec wrangler d1 migrations apply event-roster --remote
-corepack pnpm@10.28.1 --filter @event-roster/worker exec wrangler d1 execute event-roster --remote --command "PRAGMA foreign_key_check"
+corepack pnpm@10.28.1 --filter @event-roster/worker exec \
+  wrangler d1 migrations list event-roster --remote
 ```
 
-`PRAGMA foreign_key_check`는 행을 반환하지 않아야 한다. 이어 아래 두 조회를 원격 D1에서 실행한다.
+현재 checkout에 `0001`부터 `0004`까지 있을 때 `0004`를 적용할 수 있는 유일한
+허용 상태는 목록에 `0004_automatic_project_preregistration.sql` 하나만
+pending으로 표시되는 경우다. 이는 `0001`~`0003`이 적용 기록에 있다는
+뜻이다. 이 경우에도 일반 `migrations apply`를 실행하지 말고
+[7.3.1 전용 게이트](#automatic-preregistration-0004-gate)로
+이동한다.
+
+`0003`과 `0004`가 함께 보이거나 `0001`~`0003` 중 하나, 또는 다른
+migration이 `0004`와 함께 pending이면 여기서 중단한다. 신규 빈 D1에서
+`0001`~`0004`가 모두 보이는 경우도 같다. 일반 apply로 한꺼번에 적용하지
+말고 [복구 절차](recovery.md)의 격리 D1에서 단계별 초기화·복원 절차를 별도
+승인하고, `0001`~`0003` 적용 완료 후 다시 목록을 확인한다.
+
+허용된 migration gate를 완료했거나 pending migration이 없을 때만 아래
+검증을 실행한다.
+
+```bash
+corepack pnpm@10.28.1 --filter @event-roster/worker exec \
+  wrangler d1 execute event-roster --remote --command \
+  "PRAGMA foreign_key_check"
+```
+
+`PRAGMA foreign_key_check`는 행을 반환하지 않아야 한다. 이어 아래 두 조회를
+원격 D1에서 실행한다.
 
 ```sql
 SELECT assignment_role, COUNT(*)
@@ -143,6 +166,18 @@ corepack pnpm@10.28.1 --filter @event-roster/worker exec wrangler deploy
 ```
 
 Wrangler가 출력한 정확한 `https://<worker>.<account>.workers.dev` URL을 복사한다. `APP_ORIGIN`을 그 URL과 완전히 동일하게 `wrangler.jsonc`의 `vars`에 설정한 뒤 다시 배포한다. 경로와 마지막 `/`는 넣지 않는다.
+
+최종 Worker 배포 직후 구버전 Worker와의 migration 경계가 닫혔는지 다시
+확인한다.
+
+```bash
+corepack pnpm@10.28.1 --filter @event-roster/worker exec \
+  wrangler d1 execute event-roster --remote --command \
+  "SELECT COUNT(*) AS preparing_count FROM projects WHERE status='PREPARING'"
+```
+
+`preparing_count`는 반드시 0이어야 한다. 0이 아니면 bootstrap이나 다음
+배포 단계로 진행하지 말고 [복구 절차](recovery.md)의 격리 복원을 따른다.
 
 ## 5. bootstrap 인계
 
@@ -237,17 +272,39 @@ migration의 승인된 사전·사후 검증 절차가 문서화되어 있어야
 승인된 검증 절차나 확인된 백업 중 하나라도 없으면 migration과 배포를
 중단한다.
 
-승인과 백업이 모두 확인된 경우에만 적용한다.
+`0004_automatic_project_preregistration.sql`이 목록에 있으면
+`0001`~`0003`은 목록에 없어야 하고, 다른 pending migration도 없어야 한다.
+즉 `0004` 하나만 pending인 출력이 `0001`~`0003` applied와 `0004` only
+pending을 확인하는 gate다. `0003`+`0004`, `0001`~`0004`, 또는
+`0004`+다른 migration 조합이면 중단하고 [복구 절차](recovery.md)의 격리
+D1에서 별도 단계 적용 절차를 승인한다.
+
+`0004`가 pending인 동안에는 아래 일반 `migrations apply`를 실행하지 않는다.
+반드시 [7.3.1 전용 게이트](#automatic-preregistration-0004-gate)를
+사용한다. 승인과 백업이 모두 확인된 경우에만 적용한다.
+
+<a id="automatic-preregistration-0004-gate"></a>
 
 ### 7.3.1 `0004_automatic_project_preregistration.sql` 적용 게이트
 
-`0004_automatic_project_preregistration.sql`이 pending이면 아래 절차를 일반
-반복 release migration 명령보다 먼저 수행한다. export와 체크섬은 실행별
-전용 디렉터리에만 보관한다. migration 전 `preparing_count`와 `audit_count`를
-배포 기록에 남긴다. post-migration `preparing_count`는 반드시 0이어야 하고,
-사후 `audit_count`는 사전 `audit_count + preparing_count`와 같아야 하며,
-foreign-key 검사는 행을 반환하지 않아야 한다. 하나라도 충족하지 않으면
-Worker를 배포하지 말고 [복구 절차](recovery.md)의 격리 복원을 따른다.
+먼저 pending 목록을 다시 확인한다.
+
+```bash
+set -euo pipefail
+corepack pnpm@10.28.1 --filter @event-roster/worker exec \
+  wrangler d1 migrations list event-roster --remote
+```
+
+출력에는 `0004_automatic_project_preregistration.sql`만 있어야 한다.
+`0001`~`0003` 또는 다른 migration이 함께 있으면 아래 apply를 실행하지 않고
+[복구 절차](recovery.md)의 격리 D1로 이동한다. 정확한 조건을 통과하면 아래
+절차를 수행한다. export와 체크섬은 실행별 전용 디렉터리에만 보관한다.
+migration 전 `preparing_count`와 `audit_count`를 배포 기록에 남긴다.
+post-migration `preparing_count`는 반드시 0이어야 하고, 사후 `audit_count`는
+사전 `audit_count + preparing_count`와 같아야 하며, foreign-key 검사는 행을
+반환하지 않아야 한다. 하나라도 충족하지 않으면 Worker를 배포하지 말고
+[복구 절차](recovery.md)의 격리 복원을 따른다. migration 끝에 생성되는 D1
+trigger가 구버전 Worker의 새 `PREPARING` INSERT/UPDATE를 차단한다.
 
 ```bash
 set -euo pipefail
@@ -282,8 +339,9 @@ corepack pnpm@10.28.1 --filter @event-roster/worker exec \
   "PRAGMA foreign_key_check"
 ```
 
-`0004`가 pending인 경우에는 위 전용 block만 실행한다. 그 밖의 pending
-migration에는 아래 일반 block을 실행한다.
+`0004`가 pending인 경우에는 위 전용 block만 실행한다. 아래 일반 block은
+`migrations list`에 `0004`가 없고, 표시된 모든 pending migration에 각각
+승인된 검증 절차가 있을 때만 실행한다.
 
 ```bash
 set -euo pipefail
@@ -304,6 +362,9 @@ foreign key 검사는 행을 반환하지 않아야 한다. migration별 사후 
 set -euo pipefail
 corepack pnpm@10.28.1 --filter @event-roster/web build
 corepack pnpm@10.28.1 --filter @event-roster/worker exec wrangler deploy
+corepack pnpm@10.28.1 --filter @event-roster/worker exec \
+  wrangler d1 execute event-roster --remote --command \
+  "SELECT COUNT(*) AS preparing_count FROM projects WHERE status='PREPARING'"
 curl --fail --silent --show-error \
   https://event-roster.event-roster.workers.dev/api/v1/health | \
   node -e 'let input = ""; process.stdin.on("data", chunk => input += chunk).on("end", () => { try { const payload = JSON.parse(input); if (payload === null || Array.isArray(payload) || typeof payload !== "object" || payload.status !== "ok") process.exitCode = 1; } catch { process.exitCode = 1; } });'
@@ -311,9 +372,11 @@ curl --fail --silent --show-error --head \
   https://event-roster.event-roster.workers.dev/
 ```
 
-health 응답은 `{"status":"ok"}`이고 SPA 요청은 HTTP 200이어야 한다. 이어
-6절의 `smoke:remote`를 한 번 실행한다. 하나라도 실패하면 성공으로 기록하지
-않고 Worker 로그와 Wrangler 배포 이력을 확인한다.
+Worker 배포 후 `preparing_count`는 반드시 0이어야 한다. health 응답은
+`{"status":"ok"}`이고 SPA 요청은 HTTP 200이어야 한다. 이어 6절의
+`smoke:remote`를 한 번 실행한다. 하나라도 실패하면 성공으로 기록하지 않고
+Worker 로그와 Wrangler 배포 이력을 확인하며, D1 불변식 실패는
+[복구 절차](recovery.md)의 격리 복원으로 보낸다.
 
 ### 7.5 운영 기록
 

@@ -25,8 +25,8 @@
 2. 원격 변경 전 [배포 절차](deployment.md)의 보안 백업 명령으로 D1 export를 생성한다. symbolic link 구성요소가 전혀 없는, main checkout과 모든 linked worktree 밖의 명시적 절대 경로만 사용한다. mode 0700 실행별 디렉터리 안의 export와 체크섬 파일이 각각 mode 0600인지 확인한다. 저장소의 `backups/`와 `event-roster-d1-*/`는 운영 백업 위치로 사용하지 않는다.
 3. export가 `users`, `organizations`, `user_organizations`, `projects`, `project_organizations`를 포함하고 각 행 수가 예상과 일치하는지 확인한다.
 4. 복원은 운영 DB에 바로 덮어쓰지 않고 별도 격리 D1에 import한다. 운영 Worker는 이 단계에서 격리 D1을 바라보지 않는다.
-5. `0003` 적용 전 export를 복원할 때는 격리 D1에 복원한 다음 저장소의 모든 migration을 다시 적용해 `0003_organization_leadership.sql`까지 완료한다. migration 완료 전 운영 binding을 전환하지 않는다.
-6. `0004` 전 export를 복원할 때도 pre-0004 export는 격리된 대체 D1 데이터베이스에서만 복원하고, 같은 애플리케이션 migration을 다시 적용한다. 운영 D1의 행을 수동으로 되돌리거나 역방향 migration으로 복구하지 않는다.
+5. `0003` 적용 전 export를 복원할 때는 격리 D1에 복원한 다음 별도 승인된 단계 적용으로 `0001`~`0003_organization_leadership.sql`까지만 완료한다. 현재 checkout에 `0004`도 있으면 일반 apply를 사용하지 않는다. migration 완료 전 운영 binding을 전환하지 않는다.
+6. `0004` 전 export를 복원할 때도 pre-0004 export는 격리된 대체 D1 데이터베이스에서만 복원한다. 현재 checkout에서 `0003`과 `0004`를 일반 apply로 함께 적용하지 않는다. 별도 승인된 단계 적용으로 `0001`~`0003`을 먼저 완료하고 `migrations list`에 `0004`만 pending인지 확인한 뒤 [0004 전용 적용 게이트](deployment.md#automatic-preregistration-0004-gate)를 따른다. 조건이 다르면 중단한다. 운영 D1의 행을 수동으로 되돌리거나 역방향 migration으로 복구하지 않는다.
 7. 격리 D1에서 `PRAGMA foreign_key_check`가 0행인지 확인하고, `user_organizations.assignment_role`별 수량 합계가 복원 전 배정 수와 같은지 확인한다. 조직별 `PRIMARY_LEADER`가 둘 이상인 조회도 0행이어야 한다.
 8. 조직, 계정, 전역 역할, 조직별 역할, 프로젝트 revision/status, 프로젝트 조직, 참가자, 명단, snapshot, 감사, session 폐기 상태를 표본 검증한다.
 9. 운영자·대표 조직장·추가 관리자·미배정 조직 담당자 표본으로 [월간 점검](monthly-check.md)의 권한 matrix를 검증한다.

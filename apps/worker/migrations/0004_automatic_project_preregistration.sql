@@ -22,4 +22,18 @@ SET status = 'PRE_REGISTRATION',
     updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
 WHERE status = 'PREPARING';
 
+CREATE TRIGGER IF NOT EXISTS projects_no_preparing_insert
+BEFORE INSERT ON projects
+WHEN NEW.status = 'PREPARING'
+BEGIN
+  SELECT RAISE(ABORT, 'PREPARING_STATUS_DISABLED');
+END;
+
+CREATE TRIGGER IF NOT EXISTS projects_no_preparing_update
+BEFORE UPDATE ON projects
+WHEN NEW.status = 'PREPARING'
+BEGIN
+  SELECT RAISE(ABORT, 'PREPARING_STATUS_DISABLED');
+END;
+
 PRAGMA foreign_key_check;

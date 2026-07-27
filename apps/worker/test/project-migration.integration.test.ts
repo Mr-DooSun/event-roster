@@ -84,14 +84,24 @@ it("preserves legacy project, roster, snapshot, import, audit, and organization 
     projectModel,
     organizationLeadership,
   ]);
-  await env.MIGRATION_DB.prepare(
-    `INSERT INTO projects
-     (id, name, start_date, end_date, status, revision, created_by,
-      created_at, updated_at, closed_at, closed_by, close_reason)
-     VALUES ('legacy-preparing', '준비 중 프로젝트', NULL, NULL, 'PREPARING', 5,
-      'migration-user', '2026-01-01T00:00:00.000Z',
-      '2026-05-01T00:00:00.000Z', NULL, NULL, NULL)`,
-  ).run();
+  await env.MIGRATION_DB.batch([
+    env.MIGRATION_DB.prepare(
+      `INSERT INTO projects
+       (id, name, start_date, end_date, status, revision, created_by,
+        created_at, updated_at, closed_at, closed_by, close_reason)
+       VALUES ('legacy-preparing', '준비 중 프로젝트', NULL, NULL, 'PREPARING', 5,
+        'migration-user', '2026-01-01T00:00:00.000Z',
+        '2026-05-01T00:00:00.000Z', NULL, NULL, NULL)`,
+    ),
+    env.MIGRATION_DB.prepare(
+      `INSERT INTO projects
+       (id, name, start_date, end_date, status, revision, created_by,
+        created_at, updated_at, closed_at, closed_by, close_reason)
+       VALUES ('legacy-preparing-2', '두 번째 준비 중 프로젝트', NULL, NULL,
+        'PREPARING', 9, 'migration-user', '2026-02-01T00:00:00.000Z',
+        '2026-06-01T00:00:00.000Z', NULL, NULL, NULL)`,
+    ),
+  ]);
   await applyD1Migrations(env.MIGRATION_DB, [automaticPreregistration]);
 
   expect(
@@ -141,6 +151,75 @@ it("preserves legacy project, roster, snapshot, import, audit, and organization 
     to_status: "PRE_REGISTRATION",
   });
   expect(
+    (
+      await env.MIGRATION_DB.prepare(
+        `SELECT entity_id, COUNT(*) AS audit_count
+         FROM audit_logs
+         WHERE action = 'PROJECT_AUTO_PREREGISTERED'
+         GROUP BY entity_id
+         ORDER BY entity_id`,
+      ).all()
+    ).results,
+  ).toEqual([
+    { entity_id: "legacy-preparing", audit_count: 1 },
+    { entity_id: "legacy-preparing-2", audit_count: 1 },
+  ]);
+  await env.MIGRATION_DB.batch(
+    automaticPreregistration.queries.map((query) =>
+      env.MIGRATION_DB.prepare(query),
+    ),
+  );
+  expect(
+    (
+      await env.MIGRATION_DB.prepare(
+        `SELECT id, status, revision
+         FROM projects
+         WHERE id IN ('legacy-preparing', 'legacy-preparing-2')
+         ORDER BY id`,
+      ).all()
+    ).results,
+  ).toEqual([
+    {
+      id: "legacy-preparing",
+      status: "PRE_REGISTRATION",
+      revision: 6,
+    },
+    {
+      id: "legacy-preparing-2",
+      status: "PRE_REGISTRATION",
+      revision: 10,
+    },
+  ]);
+  expect(
+    (
+      await env.MIGRATION_DB.prepare(
+        `SELECT entity_id, COUNT(*) AS audit_count
+         FROM audit_logs
+         WHERE action = 'PROJECT_AUTO_PREREGISTERED'
+         GROUP BY entity_id
+         ORDER BY entity_id`,
+      ).all()
+    ).results,
+  ).toEqual([
+    { entity_id: "legacy-preparing", audit_count: 1 },
+    { entity_id: "legacy-preparing-2", audit_count: 1 },
+  ]);
+  await expect(
+    env.MIGRATION_DB.prepare(
+      `INSERT INTO projects
+       (id, name, start_date, end_date, status, revision, created_by,
+        created_at, updated_at, closed_at, closed_by, close_reason)
+       VALUES ('late-preparing', '구버전 Worker 생성', NULL, NULL, 'PREPARING', 0,
+        'migration-user', '2026-07-27T00:00:00.000Z',
+        '2026-07-27T00:00:00.000Z', NULL, NULL, NULL)`,
+    ).run(),
+  ).rejects.toThrow(/PREPARING_STATUS_DISABLED/);
+  await expect(
+    env.MIGRATION_DB.prepare(
+      "UPDATE projects SET status = 'PREPARING' WHERE id = 'legacy-project'",
+    ).run(),
+  ).rejects.toThrow(/PREPARING_STATUS_DISABLED/);
+  expect(
     await env.MIGRATION_DB.prepare(
       "SELECT COUNT(*) AS count FROM projects WHERE status = 'PREPARING'",
     ).first(),
@@ -167,7 +246,7 @@ it("preserves legacy project, roster, snapshot, import, audit, and organization 
       "SELECT COUNT(*) AS count FROM project_import_runs",
     ).first(),
   ).toEqual({ count: legacyCounts.imports });
-  expect(await countMigrationRows("projects")).toBe(legacyCounts.projects + 1);
+  expect(await countMigrationRows("projects")).toBe(legacyCounts.projects + 2);
   expect(await countMigrationRows("project_roster_entries")).toBe(
     legacyCounts.roster,
   );

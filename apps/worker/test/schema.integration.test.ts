@@ -42,7 +42,8 @@ describe("initial D1 schema", () => {
         `INSERT INTO projects
          (id, name, start_date, end_date, status, revision, created_by,
           created_at, updated_at)
-         VALUES (?, '같은 이름', '2026-05-22', '2026-05-23', 'PREPARING', 0, ?, ?, ?)`,
+         VALUES (?, '같은 이름', '2026-05-22', '2026-05-23',
+                 'PRE_REGISTRATION', 0, ?, ?, ?)`,
       )
         .bind(id, IDS.user, "2026-07-21", "2026-07-21")
         .run();
@@ -53,7 +54,7 @@ describe("initial D1 schema", () => {
          (id, name, start_date, end_date, status, revision, created_by,
           created_at, updated_at)
          VALUES ('project-invalid', '역전', '2026-05-24', '2026-05-23',
-                 'PREPARING', 0, ?, ?, ?)`,
+                 'PRE_REGISTRATION', 0, ?, ?, ?)`,
       )
         .bind(IDS.user, "2026-07-21", "2026-07-21")
         .run(),
