@@ -978,9 +978,6 @@ th {
   .er-organization-summary-grid {
     grid-template-columns: 1fr;
   }
-}
-
-@media (max-width: 54rem) {
   .er-roster-filters {
     grid-template-columns: 1fr;
   }
