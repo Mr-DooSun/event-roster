@@ -91,9 +91,7 @@ it("shows project status, dates, and automatic closing in the header", async () 
     await screen.findByRole("heading", { name: "리더십 캠프" }),
   ).toBeVisible();
   expect(await screen.findByText("사전 등록")).toBeVisible();
-  expect(
-    screen.getByRole("button", { name: "진행 시작" }),
-  ).toBeEnabled();
+  expect(screen.getByRole("button", { name: "진행 시작" })).toBeEnabled();
   expect(
     screen.queryByRole("button", { name: "사전 등록 시작" }),
   ).not.toBeInTheDocument();
