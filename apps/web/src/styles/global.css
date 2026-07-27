@@ -595,6 +595,15 @@ a {
   background: var(--er-color-surface);
   box-shadow: var(--er-shadow-card);
 }
+.er-selection-combobox {
+  position: relative;
+  min-width: 0;
+}
+.er-combobox-empty {
+  margin: 0;
+  padding: var(--er-space-3);
+  color: var(--er-color-muted);
+}
 .er-combobox-option {
   width: 100%;
   border: 0;
