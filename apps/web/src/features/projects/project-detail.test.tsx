@@ -757,6 +757,80 @@ it("explains preservation when excluding an organization with business history",
   ).toBeVisible();
 });
 
+it("keeps the selected history-preserving exclusion dialog open after a patch failure", async () => {
+  mockApi.patch.mockRejectedValueOnce(new Error("patch failed"));
+  render(
+    <ProjectOrganizationsPanel
+      projectId="project-1"
+      projectRevision={7}
+      memberships={[
+        organizationMembership({
+          name: "기록 보존 조직",
+          hasBusinessHistory: true,
+        }),
+      ]}
+      allOrganizations={[]}
+      canMutateMemberships
+      canManageOrganizations
+      onChanged={vi.fn().mockResolvedValue(undefined)}
+    />,
+  );
+
+  fireEvent.click(
+    screen.getByRole("button", { name: "프로젝트에서 제외" }),
+  );
+  const dialog = screen.getByRole("dialog", { name: "프로젝트 조직 제외" });
+  fireEvent.click(within(dialog).getByRole("button", { name: "제외하기" }));
+
+  await waitFor(() => expect(mockApi.patch).toHaveBeenCalledTimes(1));
+  expect(
+    screen.getByRole("dialog", { name: "프로젝트 조직 제외" }),
+  ).toBeVisible();
+  expect(
+    screen.getByText(
+      "기존 명단과 집계를 보존하기 위해 사용 중지 상태로 전환됩니다.",
+    ),
+  ).toBeVisible();
+  expect(screen.getByText("기록 보존 조직")).toBeVisible();
+});
+
+it("keeps the exclusion dialog open when cancel or close is attempted during mutation", () => {
+  const pendingMutation = deferred<{
+    organization: ProjectOrganization;
+    projectRevision: number;
+  }>();
+  mockApi.patch.mockReturnValue(pendingMutation.promise);
+  render(
+    <ProjectOrganizationsPanel
+      projectId="project-1"
+      projectRevision={7}
+      memberships={[organizationMembership({ hasBusinessHistory: false })]}
+      allOrganizations={[]}
+      canMutateMemberships
+      canManageOrganizations
+      onChanged={vi.fn().mockResolvedValue(undefined)}
+    />,
+  );
+
+  fireEvent.click(
+    screen.getByRole("button", { name: "프로젝트에서 제외" }),
+  );
+  const dialog = screen.getByRole("dialog", { name: "프로젝트 조직 제외" });
+  fireEvent.click(within(dialog).getByRole("button", { name: "제외하기" }));
+
+  fireEvent.click(within(dialog).getByRole("button", { name: "취소" }));
+  fireEvent.keyDown(dialog, { key: "Escape" });
+
+  expect(
+    screen.getByRole("dialog", { name: "프로젝트 조직 제외" }),
+  ).toBeVisible();
+  expect(
+    screen.getByText(
+      "이 조직을 프로젝트에서 제외할까요? 다시 추가할 수 있습니다.",
+    ),
+  ).toBeVisible();
+});
+
 it("shows progress only on the membership being changed", async () => {
   const pendingMutation = deferred<{
     organization: ProjectOrganization;
