@@ -240,6 +240,65 @@ it("preserves an edited participant name and clears a removed organization candi
   expect(screen.getByRole("button", { name: "명단에 추가" })).toBeDisabled();
 });
 
+it("synchronizes a manager confirmation to the participant's refreshed read-only organization", async () => {
+  const onAdd = vi.fn().mockResolvedValue(undefined);
+  const commonProps = {
+    allowExistingOrganizationChange: false,
+    organizations: [
+      { id: "org-1", name: "1팀", isActive: true },
+      { id: "org-2", name: "2팀", isActive: true },
+    ],
+    onAdd,
+    onCreateAndAdd: vi.fn().mockResolvedValue(undefined),
+    onClose: vi.fn(),
+  };
+  const { rerender } = render(
+    <ParticipantDialog
+      participants={[
+        {
+          id: "person-1",
+          participantId: "P-001",
+          name: "서버 이름",
+          organizationId: "org-1",
+          revision: 3,
+        },
+      ]}
+      {...commonProps}
+    />,
+  );
+
+  fireEvent.change(screen.getByLabelText("확정 이름"), {
+    target: { value: "조직장 확인 이름" },
+  });
+  rerender(
+    <ParticipantDialog
+      participants={[
+        {
+          id: "person-1",
+          participantId: "P-001",
+          name: "갱신된 서버 이름",
+          organizationId: "org-2",
+          revision: 4,
+        },
+      ]}
+      {...commonProps}
+    />,
+  );
+
+  expect(screen.getByLabelText("확정 이름")).toHaveValue("조직장 확인 이름");
+  expect(screen.getByLabelText("확정 소속 조직")).toHaveValue("2팀");
+  fireEvent.click(screen.getByRole("button", { name: "명단에 추가" }));
+
+  await waitFor(() =>
+    expect(onAdd).toHaveBeenCalledWith({
+      participantId: "person-1",
+      name: "조직장 확인 이름",
+      organizationId: "org-2",
+      expectedParticipantRevision: 4,
+    }),
+  );
+});
+
 it("closes the organization listbox before a second Escape closes the participant dialog", () => {
   const onClose = vi.fn();
   render(

@@ -93,6 +93,11 @@ export function ParticipantDialog({
     organizations,
     participants,
   };
+  const selectedParticipant = participants.find(
+    (participant) => participant.id === participantId,
+  );
+  const selectedParticipantOrganizationId =
+    selectedParticipant?.organizationId ?? "";
   useEffect(() => {
     if (initialParticipantId) {
       const context = initializationContextRef.current;
@@ -127,6 +132,20 @@ export function ParticipantDialog({
 
   useEffect(() => {
     if (
+      !allowExistingOrganizationChange &&
+      selectedParticipantOrganizationId &&
+      confirmedOrganizationId !== selectedParticipantOrganizationId
+    ) {
+      setConfirmedOrganizationId(selectedParticipantOrganizationId);
+    }
+  }, [
+    allowExistingOrganizationChange,
+    confirmedOrganizationId,
+    selectedParticipantOrganizationId,
+  ]);
+
+  useEffect(() => {
+    if (
       organizationId &&
       !organizations.some(
         (organization) =>
@@ -136,10 +155,6 @@ export function ParticipantDialog({
       setOrganizationId("");
     }
   }, [organizationId, organizations]);
-
-  const selectedParticipant = participants.find(
-    (participant) => participant.id === participantId,
-  );
 
   function selectParticipant(nextParticipantId: string) {
     const participant = participants.find(
