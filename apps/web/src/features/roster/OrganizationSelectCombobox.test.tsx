@@ -2,6 +2,7 @@ import "@testing-library/jest-dom/vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, expect, it, vi } from "vitest";
+import { Dialog } from "../../components/ui/Dialog";
 import { OrganizationSelectCombobox } from "./OrganizationSelectCombobox";
 
 const organizations = [
@@ -16,7 +17,260 @@ const renamedOrganizations = [
   { id: "org-inactive", name: "비활성 조직", isActive: false },
 ];
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
+
+it("renders the listbox under document.body above the modal", () => {
+  render(
+    <OrganizationSelectCombobox
+      label="소속 조직"
+      organizations={organizations}
+      value=""
+      onChange={vi.fn()}
+    />,
+  );
+
+  fireEvent.focus(screen.getByRole("combobox", { name: "소속 조직" }));
+
+  const listbox = screen.getByRole("listbox");
+  expect(listbox.parentElement).toBe(document.body);
+  expect(listbox).toHaveAttribute("data-placement", "bottom");
+  expect(screen.getByRole("combobox")).toHaveAttribute(
+    "aria-controls",
+    listbox.id,
+  );
+  expect(listbox).toHaveStyle({
+    position: "fixed",
+    top: "4px",
+  });
+});
+
+it("recalculates placement on captured scroll and viewport resize", () => {
+  vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+    callback(0);
+    return 1;
+  });
+  vi.stubGlobal("cancelAnimationFrame", vi.fn());
+  const rect = vi
+    .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+    .mockReturnValue({
+      top: 700,
+      right: 220,
+      bottom: 744,
+      left: 20,
+      width: 200,
+      height: 44,
+      x: 20,
+      y: 700,
+      toJSON: () => ({}),
+    });
+  const { container } = render(
+    <div data-testid="scroll-container">
+      <OrganizationSelectCombobox
+        label="소속 조직"
+        organizations={organizations}
+        value=""
+        onChange={vi.fn()}
+      />
+    </div>,
+  );
+  fireEvent.focus(screen.getByRole("combobox"));
+  expect(screen.getByRole("listbox")).toHaveAttribute("data-placement", "top");
+
+  rect.mockReturnValue({
+    top: 20,
+    right: 220,
+    bottom: 64,
+    left: 20,
+    width: 200,
+    height: 44,
+    x: 20,
+    y: 20,
+    toJSON: () => ({}),
+  });
+  fireEvent.scroll(container.firstElementChild as HTMLElement);
+  expect(screen.getByRole("listbox")).toHaveAttribute(
+    "data-placement",
+    "bottom",
+  );
+
+  rect.mockReturnValue({
+    top: 700,
+    right: 220,
+    bottom: 744,
+    left: 20,
+    width: 200,
+    height: 44,
+    x: 20,
+    y: 700,
+    toJSON: () => ({}),
+  });
+  fireEvent(window, new Event("resize"));
+
+  expect(screen.getByRole("listbox")).toHaveAttribute("data-placement", "top");
+});
+
+it("coalesces repeated scroll measurements and cancels a pending frame on close", () => {
+  const callbacks: FrameRequestCallback[] = [];
+  vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+    callbacks.push(callback);
+    return callbacks.length;
+  });
+  const cancelAnimationFrame = vi.fn();
+  vi.stubGlobal("cancelAnimationFrame", cancelAnimationFrame);
+  const rect = vi
+    .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+    .mockReturnValue({
+      top: 20,
+      right: 220,
+      bottom: 64,
+      left: 20,
+      width: 200,
+      height: 44,
+      x: 20,
+      y: 20,
+      toJSON: () => ({}),
+    });
+  render(
+    <OrganizationSelectCombobox
+      label="소속 조직"
+      organizations={organizations}
+      value=""
+      onChange={vi.fn()}
+    />,
+  );
+  const input = screen.getByRole("combobox");
+  fireEvent.focus(input);
+  const initialMeasurements = rect.mock.calls.length;
+
+  fireEvent.scroll(window);
+  fireEvent.scroll(window);
+  fireEvent.scroll(window);
+
+  expect(callbacks).toHaveLength(1);
+  callbacks[0]?.(0);
+  expect(rect).toHaveBeenCalledTimes(initialMeasurements + 1);
+
+  fireEvent.scroll(window);
+  fireEvent.keyDown(input, { key: "Escape" });
+  expect(cancelAnimationFrame).toHaveBeenCalledWith(2);
+  const measurementsAfterClose = rect.mock.calls.length;
+  fireEvent(window, new Event("resize"));
+  expect(rect).toHaveBeenCalledTimes(measurementsAfterClose);
+});
+
+it("falls back to a constrained below placement when measurement fails", () => {
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
+    () => {
+      throw new DOMException("measurement failed");
+    },
+  );
+  render(
+    <OrganizationSelectCombobox
+      label="소속 조직"
+      organizations={organizations}
+      value=""
+      onChange={vi.fn()}
+    />,
+  );
+
+  fireEvent.focus(screen.getByRole("combobox"));
+
+  const listbox = screen.getByRole("listbox");
+  expect(listbox).toHaveAttribute("data-placement", "bottom");
+  expect(listbox).toHaveStyle({ position: "fixed" });
+  expect(Number.parseFloat(listbox.style.maxHeight)).toBeLessThanOrEqual(
+    window.innerHeight,
+  );
+});
+
+it("closes for outside pointers but keeps listbox pointers internal", () => {
+  render(
+    <>
+      <OrganizationSelectCombobox
+        label="소속 조직"
+        organizations={organizations}
+        value=""
+        onChange={vi.fn()}
+      />
+      <button type="button">외부 버튼</button>
+    </>,
+  );
+  const input = screen.getByRole("combobox");
+  fireEvent.focus(input);
+
+  fireEvent.pointerDown(screen.getByRole("option", { name: "성룡사" }));
+  expect(input).toHaveAttribute("aria-expanded", "true");
+
+  fireEvent.pointerDown(screen.getByRole("button", { name: "외부 버튼" }));
+  expect(input).toHaveAttribute("aria-expanded", "false");
+});
+
+it("closes when an update finds the anchor disconnected", () => {
+  render(
+    <OrganizationSelectCombobox
+      label="소속 조직"
+      organizations={organizations}
+      value=""
+      onChange={vi.fn()}
+    />,
+  );
+  const input = screen.getByRole("combobox");
+  fireEvent.focus(input);
+  vi.spyOn(input, "isConnected", "get").mockReturnValue(false);
+
+  fireEvent(window, new Event("resize"));
+
+  expect(input).toHaveAttribute("aria-expanded", "false");
+});
+
+it("orders filtered options by recent organization IDs", () => {
+  render(
+    <OrganizationSelectCombobox
+      label="소속 조직"
+      organizations={organizations}
+      value=""
+      recentOrganizationIds={["org-2"]}
+      onChange={vi.fn()}
+    />,
+  );
+
+  fireEvent.focus(screen.getByRole("combobox"));
+
+  expect(
+    screen.getAllByRole("option").map((option) => option.textContent),
+  ).toEqual(["황룡사", "성룡사"]);
+});
+
+it("clears stale keyboard activation when candidates shrink", () => {
+  const { rerender } = render(
+    <OrganizationSelectCombobox
+      label="소속 조직"
+      organizations={organizations}
+      value=""
+      onChange={vi.fn()}
+    />,
+  );
+  const input = screen.getByRole("combobox");
+  fireEvent.focus(input);
+  fireEvent.keyDown(input, { key: "ArrowDown" });
+  fireEvent.keyDown(input, { key: "ArrowDown" });
+
+  rerender(
+    <OrganizationSelectCombobox
+      label="소속 조직"
+      organizations={organizations.slice(0, 1)}
+      value=""
+      onChange={vi.fn()}
+    />,
+  );
+
+  expect(input).not.toHaveAttribute("aria-activedescendant");
+  fireEvent.keyDown(input, { key: "Enter" });
+});
 
 it("filters active organizations and requires an explicit selection", () => {
   const onChange = vi.fn();
@@ -89,6 +343,33 @@ it("shows a non-error empty result and closes with Escape", () => {
   expect(
     screen.queryByText("일치하는 조직이 없습니다."),
   ).not.toBeInTheDocument();
+});
+
+it("uses the first Escape for the listbox and the second for its dialog", () => {
+  function DialogWithCombobox() {
+    const [dialogOpen, setDialogOpen] = useState(true);
+    return dialogOpen ? (
+      <Dialog title="참가자 추가" onClose={() => setDialogOpen(false)}>
+        <OrganizationSelectCombobox
+          label="소속 조직"
+          organizations={organizations}
+          value=""
+          onChange={vi.fn()}
+        />
+      </Dialog>
+    ) : null;
+  }
+
+  render(<DialogWithCombobox />);
+  const input = screen.getByRole("combobox", { name: "소속 조직" });
+  fireEvent.focus(input);
+
+  fireEvent.keyDown(input, { key: "Escape" });
+  expect(screen.getByRole("dialog", { name: "참가자 추가" })).toBeVisible();
+  expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+
+  fireEvent.keyDown(input, { key: "Escape" });
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 });
 
 it("closes when focus leaves the combobox", () => {

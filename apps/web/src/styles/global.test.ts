@@ -16,3 +16,14 @@ it("stacks roster filters at the existing medium-screen breakpoint", () => {
   );
   expect(stylesheet).not.toContain("@media (max-width: 54rem)");
 });
+
+it("stacks the portal organization listbox above dialogs", () => {
+  const stylesheet = readFileSync(
+    resolve(process.cwd(), "src/styles/global.css"),
+    "utf8",
+  );
+
+  expect(stylesheet).toMatch(
+    /\.er-combobox-list--portal\s*\{[^}]*z-index:\s*110;/s,
+  );
+});
