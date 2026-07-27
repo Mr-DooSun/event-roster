@@ -118,9 +118,7 @@ it("hides inactive zero-count organizations but preserves inactive history", () 
         masterIsActive: false,
       }),
     ],
-    expectedSnapshots: [
-      { organizationId: "org-history", expectedCount: 2 },
-    ],
+    expectedSnapshots: [{ organizationId: "org-history", expectedCount: 2 }],
     rosterEntries: [],
   });
 

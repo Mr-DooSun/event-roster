@@ -68,9 +68,7 @@ export function calculateProjectSummary(
         (entry) =>
           entry.source === "PRE_REGISTRATION" && entry.status === "CANCELLED",
       ).length;
-      const final = entries.filter(
-        (entry) => entry.status === "ACTIVE",
-      ).length;
+      const final = entries.filter((entry) => entry.status === "ACTIVE").length;
 
       return {
         ...organization,

@@ -360,7 +360,10 @@ it("creates and links a new organization atomically, then deletes a no-history l
 
 it("removes an audit-only membership and can add and remove it again", async () => {
   const operator = await seedOperator();
-  const organization = await seedOrganization("org-audit-only", "감사 전용 조직");
+  const organization = await seedOrganization(
+    "org-audit-only",
+    "감사 전용 조직",
+  );
   const project = await seedProject(operator);
   const linked = await linkProjectOrganization(
     operator,
@@ -374,10 +377,12 @@ it("removes an audit-only membership and can add and remove it again", async () 
       operator,
       `/api/v1/projects/${project.id}/organizations`,
     )
-  ).json<Array<{
-    organizationId: string;
-    hasBusinessHistory: boolean;
-  }>>();
+  ).json<
+    Array<{
+      organizationId: string;
+      hasBusinessHistory: boolean;
+    }>
+  >();
   expect(listed).toEqual([
     expect.objectContaining({
       organizationId: organization.id,

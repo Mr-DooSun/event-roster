@@ -695,9 +695,7 @@ it("confirms a project exclusion before chaining its revision to reactivation", 
     />,
   );
 
-  fireEvent.click(
-    screen.getByRole("button", { name: "프로젝트에서 제외" }),
-  );
+  fireEvent.click(screen.getByRole("button", { name: "프로젝트에서 제외" }));
   const dialog = screen.getByRole("dialog", { name: "프로젝트 조직 제외" });
   expect(
     within(dialog).getByText(
@@ -747,9 +745,7 @@ it("explains preservation when excluding an organization with business history",
     />,
   );
 
-  fireEvent.click(
-    screen.getByRole("button", { name: "프로젝트에서 제외" }),
-  );
+  fireEvent.click(screen.getByRole("button", { name: "프로젝트에서 제외" }));
   expect(
     screen.getByText(
       "기존 명단과 집계를 보존하기 위해 사용 중지 상태로 전환됩니다.",
@@ -776,9 +772,7 @@ it("keeps the selected history-preserving exclusion dialog open after a patch fa
     />,
   );
 
-  fireEvent.click(
-    screen.getByRole("button", { name: "프로젝트에서 제외" }),
-  );
+  fireEvent.click(screen.getByRole("button", { name: "프로젝트에서 제외" }));
   const dialog = screen.getByRole("dialog", { name: "프로젝트 조직 제외" });
   fireEvent.click(within(dialog).getByRole("button", { name: "제외하기" }));
 
@@ -812,9 +806,7 @@ it("keeps the exclusion dialog open when cancel or close is attempted during mut
     />,
   );
 
-  fireEvent.click(
-    screen.getByRole("button", { name: "프로젝트에서 제외" }),
-  );
+  fireEvent.click(screen.getByRole("button", { name: "프로젝트에서 제외" }));
   const dialog = screen.getByRole("dialog", { name: "프로젝트 조직 제외" });
   fireEvent.click(within(dialog).getByRole("button", { name: "제외하기" }));
 
@@ -856,7 +848,9 @@ it("shows progress only on the membership being changed", async () => {
   );
 
   fireEvent.click(
-    screen.getAllByRole("button", { name: "프로젝트에서 제외" })[0] as HTMLElement,
+    screen.getAllByRole("button", {
+      name: "프로젝트에서 제외",
+    })[0] as HTMLElement,
   );
   fireEvent.click(screen.getByRole("button", { name: "제외하기" }));
 
