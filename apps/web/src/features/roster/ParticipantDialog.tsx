@@ -1,5 +1,5 @@
 import type { Organization } from "@event-roster/contracts";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "../../components/ui/Button";
 import { Dialog } from "../../components/ui/Dialog";
 import { TextInput } from "../../components/ui/TextInput";
@@ -18,6 +18,26 @@ export interface ExistingParticipantConfirmation {
   name: string;
   organizationId: string;
   expectedParticipantRevision: number;
+}
+
+function initialConfirmedOrganizationId(
+  participant: ParticipantView | undefined,
+  organizations: Organization[],
+  allowExistingOrganizationChange: boolean,
+) {
+  if (!allowExistingOrganizationChange && participant) {
+    return participant.organizationId;
+  }
+  if (
+    participant &&
+    organizations.some(
+      (organization) =>
+        organization.isActive && organization.id === participant.organizationId,
+    )
+  ) {
+    return participant.organizationId;
+  }
+  return organizations.find((organization) => organization.isActive)?.id ?? "";
 }
 
 export function ParticipantDialog({
@@ -54,52 +74,87 @@ export function ParticipantDialog({
     initialParticipant?.name ?? "",
   );
   const [confirmedOrganizationId, setConfirmedOrganizationId] = useState(
-    !allowExistingOrganizationChange && initialParticipant
-      ? initialParticipant.organizationId
-      : organizations.some(
-            (organization) =>
-              organization.isActive &&
-              organization.id === initialParticipant?.organizationId,
-          )
-        ? (initialParticipant?.organizationId ?? "")
-        : (organizations.find((organization) => organization.isActive)?.id ??
-          ""),
+    initialConfirmedOrganizationId(
+      initialParticipant,
+      organizations,
+      allowExistingOrganizationChange,
+    ),
   );
   const [organizationId, setOrganizationId] = useState(
     organizations.find((organization) => organization.isActive)?.id ?? "",
   );
+  const initializationContextRef = useRef({
+    allowExistingOrganizationChange,
+    organizations,
+    participants,
+  });
+  initializationContextRef.current = {
+    allowExistingOrganizationChange,
+    organizations,
+    participants,
+  };
   useEffect(() => {
     if (initialParticipantId) {
+      const context = initializationContextRef.current;
+      const participant = context.participants.find(
+        (item) => item.id === initialParticipantId,
+      );
       setParticipantId(initialParticipantId);
+      setConfirmedName(participant?.name ?? "");
+      setConfirmedOrganizationId(
+        initialConfirmedOrganizationId(
+          participant,
+          context.organizations,
+          context.allowExistingOrganizationChange,
+        ),
+      );
       setMode("EXISTING");
     }
   }, [initialParticipantId]);
 
   useEffect(() => {
-    const participant = participants.find((item) => item.id === participantId);
-    setConfirmedName(participant?.name ?? "");
-    setConfirmedOrganizationId(
-      !allowExistingOrganizationChange && participant
-        ? participant.organizationId
-        : organizations.some(
-              (organization) =>
-                organization.isActive &&
-                organization.id === participant?.organizationId,
-            )
-          ? (participant?.organizationId ?? "")
-          : (organizations.find((organization) => organization.isActive)?.id ??
-            ""),
-    );
-  }, [
-    allowExistingOrganizationChange,
-    organizations,
-    participantId,
-    participants,
-  ]);
+    if (
+      allowExistingOrganizationChange &&
+      confirmedOrganizationId &&
+      !organizations.some(
+        (organization) =>
+          organization.isActive && organization.id === confirmedOrganizationId,
+      )
+    ) {
+      setConfirmedOrganizationId("");
+    }
+  }, [allowExistingOrganizationChange, confirmedOrganizationId, organizations]);
+
+  useEffect(() => {
+    if (
+      organizationId &&
+      !organizations.some(
+        (organization) =>
+          organization.isActive && organization.id === organizationId,
+      )
+    ) {
+      setOrganizationId("");
+    }
+  }, [organizationId, organizations]);
 
   const selectedParticipant = participants.find(
     (participant) => participant.id === participantId,
   );
+
+  function selectParticipant(nextParticipantId: string) {
+    const participant = participants.find(
+      (item) => item.id === nextParticipantId,
+    );
+    setParticipantId(nextParticipantId);
+    setConfirmedName(participant?.name ?? "");
+    setConfirmedOrganizationId(
+      initialConfirmedOrganizationId(
+        participant,
+        organizations,
+        allowExistingOrganizationChange,
+      ),
+    );
+  }
 
   async function addExisting() {
     if (busy || !selectedParticipant) return;
@@ -170,7 +225,7 @@ export function ParticipantDialog({
                 value={participantId}
                 disabled={busy !== null}
                 onChange={(event) =>
-                  setParticipantId(event.currentTarget.value)
+                  selectParticipant(event.currentTarget.value)
                 }
               >
                 {participants.map((participant) => (

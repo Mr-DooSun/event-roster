@@ -194,6 +194,52 @@ it("clears a selected organization when its search text changes", () => {
   expect(screen.getByRole("button", { name: "명단에 추가" })).toBeEnabled();
 });
 
+it("preserves an edited participant name and clears a removed organization candidate", async () => {
+  const participant = {
+    id: "person-1",
+    participantId: "P-001",
+    name: "박민수",
+    organizationId: "org-1",
+    revision: 3,
+  };
+  const commonProps = {
+    onAdd: vi.fn().mockResolvedValue(undefined),
+    onCreateAndAdd: vi.fn().mockResolvedValue(undefined),
+    onClose: vi.fn(),
+  };
+  const { rerender } = render(
+    <ParticipantDialog
+      participants={[participant]}
+      organizations={[
+        { id: "org-1", name: "성룡사", isActive: true },
+        { id: "org-2", name: "황룡사", isActive: true },
+      ]}
+      {...commonProps}
+    />,
+  );
+
+  fireEvent.change(screen.getByLabelText("확정 이름"), {
+    target: { value: "작성 중인 이름" },
+  });
+  const organization = screen.getByRole("combobox", {
+    name: "확정 소속 조직",
+  });
+  fireEvent.change(organization, { target: { value: "황" } });
+  fireEvent.click(screen.getByRole("option", { name: "황룡사" }));
+
+  rerender(
+    <ParticipantDialog
+      participants={[{ ...participant, name: "새 서버 이름", revision: 4 }]}
+      organizations={[{ id: "org-1", name: "성룡사", isActive: true }]}
+      {...commonProps}
+    />,
+  );
+
+  await waitFor(() => expect(organization).toHaveValue(""));
+  expect(screen.getByLabelText("확정 이름")).toHaveValue("작성 중인 이름");
+  expect(screen.getByRole("button", { name: "명단에 추가" })).toBeDisabled();
+});
+
 it("closes the organization listbox before a second Escape closes the participant dialog", () => {
   const onClose = vi.fn();
   render(
@@ -681,6 +727,117 @@ it("reloads a stale roster without replaying the mutation", async () => {
         String(url).endsWith("/roster/entry-1") && init?.method === "PATCH",
     ),
   ).toHaveLength(1);
+});
+
+it("preserves an existing-participant draft after a stale add reload", async () => {
+  let projectReads = 0;
+  let participantReads = 0;
+  const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.endsWith("/auth/login")) {
+      return Promise.resolve(Response.json(auth()));
+    }
+    if (url.endsWith("/projects/project-1")) {
+      projectReads += 1;
+      return Promise.resolve(
+        Response.json({ ...project(), revision: projectReads === 1 ? 2 : 3 }),
+      );
+    }
+    if (url.endsWith("/summary")) {
+      return Promise.resolve(Response.json(summary(0)));
+    }
+    if (url.endsWith("/roster") && init?.method === "POST") {
+      return Promise.resolve(
+        Response.json(
+          {
+            code: "STALE_REVISION",
+            message: "stale",
+            requestId: "request-stale-add",
+          },
+          { status: 409 },
+        ),
+      );
+    }
+    if (url.endsWith("/roster") && (!init?.method || init.method === "GET")) {
+      return Promise.resolve(Response.json([]));
+    }
+    if (url.endsWith("/participants")) {
+      participantReads += 1;
+      return Promise.resolve(
+        Response.json([
+          {
+            id: "person-1",
+            participantId: "P-001",
+            name: participantReads === 1 ? "서버 이름" : "갱신된 서버 이름",
+            organizationId: "org-1",
+            revision: participantReads === 1 ? 7 : 8,
+          },
+        ]),
+      );
+    }
+    if (url.endsWith("/projects/project-1/organizations")) {
+      return Promise.resolve(
+        Response.json([
+          {
+            organizationId: "org-1",
+            name: "1팀",
+            isActive: true,
+            masterIsActive: true,
+            activeProjectCount: 1,
+            hasBusinessHistory: false,
+          },
+          {
+            organizationId: "org-2",
+            name: "2팀",
+            isActive: true,
+            masterIsActive: true,
+            activeProjectCount: 1,
+            hasBusinessHistory: false,
+          },
+        ]),
+      );
+    }
+    if (url.endsWith("/organizations")) {
+      return Promise.resolve(Response.json([]));
+    }
+    if (url.includes("/audit")) {
+      return Promise.resolve(Response.json({ items: [], nextCursor: null }));
+    }
+    throw new Error(`unexpected request: ${url}`);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  render(
+    <AuthProvider restoreOnMount={false}>
+      <Gate>
+        <ProjectDetailPage projectId="project-1" />
+      </Gate>
+    </AuthProvider>,
+  );
+
+  await login();
+  await openRosterTab();
+  fireEvent.click(await screen.findByRole("button", { name: "참가자 추가" }));
+  fireEvent.change(screen.getByLabelText("확정 이름"), {
+    target: { value: "작성 중인 확정 이름" },
+  });
+  const organization = screen.getByRole("combobox", {
+    name: "확정 소속 조직",
+  });
+  fireEvent.change(organization, { target: { value: "2팀" } });
+  fireEvent.click(screen.getByRole("option", { name: "2팀" }));
+  fireEvent.click(screen.getByRole("button", { name: "명단에 추가" }));
+
+  expect(
+    await screen.findByText(
+      "다른 변경이 먼저 반영되어 최신 명단을 다시 불러왔습니다.",
+    ),
+  ).toBeVisible();
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "명단에 추가" })).toBeEnabled(),
+  );
+  expect(screen.getByRole("dialog", { name: "참가자 추가" })).toBeVisible();
+  expect(screen.getByLabelText("확정 이름")).toHaveValue("작성 중인 확정 이름");
+  expect(organization).toHaveValue("2팀");
 });
 
 it("creates and adds a participant with one atomic roster request", async () => {
