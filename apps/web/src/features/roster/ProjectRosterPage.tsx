@@ -29,6 +29,23 @@ export interface ProjectRosterPageProps {
   onChanged(): Promise<void>;
 }
 
+interface RecentOrganizationContext {
+  generation: number;
+  userId: string;
+  projectId: string;
+  validOrganizationIds: ReadonlySet<string>;
+}
+
+function hasSameOrganizationIds(
+  left: ReadonlySet<string>,
+  right: ReadonlySet<string>,
+) {
+  return (
+    left.size === right.size &&
+    Array.from(left).every((organizationId) => right.has(organizationId))
+  );
+}
+
 export function ProjectRosterPage({
   project,
   rows,
@@ -59,6 +76,29 @@ export function ProjectRosterPage({
       ),
     [organizations],
   );
+  const recentOrganizationContextRef = useRef<RecentOrganizationContext>({
+    generation: 0,
+    userId: authenticatedUserId,
+    projectId: project.id,
+    validOrganizationIds,
+  });
+  const previousRecentOrganizationContext =
+    recentOrganizationContextRef.current;
+  const recentOrganizationContextChanged =
+    previousRecentOrganizationContext.userId !== authenticatedUserId ||
+    previousRecentOrganizationContext.projectId !== project.id ||
+    !hasSameOrganizationIds(
+      previousRecentOrganizationContext.validOrganizationIds,
+      validOrganizationIds,
+    );
+  recentOrganizationContextRef.current = {
+    generation:
+      previousRecentOrganizationContext.generation +
+      (recentOrganizationContextChanged ? 1 : 0),
+    userId: authenticatedUserId,
+    projectId: project.id,
+    validOrganizationIds,
+  };
   const [recentOrganizationIds, setRecentOrganizationIds] = useState<string[]>(
     () =>
       authenticatedUserId
@@ -98,15 +138,19 @@ export function ProjectRosterPage({
     [auth?.session.user.role, participants, rows, validOrganizationIds],
   );
 
-  function rememberOrganization(organizationId: string) {
-    if (!authenticatedUserId) return;
+  function rememberOrganization(
+    organizationId: string,
+    expectedGeneration: number,
+  ) {
+    const context = recentOrganizationContextRef.current;
+    if (context.generation !== expectedGeneration || !context.userId) return;
     setRecentOrganizationIds(
       recordRecentOrganizationId({
         storage: getBrowserOrganizationStorage(),
-        userId: authenticatedUserId,
-        projectId: project.id,
+        userId: context.userId,
+        projectId: context.projectId,
         organizationId,
-        validOrganizationIds,
+        validOrganizationIds: context.validOrganizationIds,
       }),
     );
   }
@@ -188,6 +232,8 @@ export function ProjectRosterPage({
   }
 
   async function add(input: ExistingParticipantConfirmation) {
+    const recentOrganizationGeneration =
+      recentOrganizationContextRef.current.generation;
     const {
       participantId,
       expectedParticipantRevision,
@@ -202,12 +248,14 @@ export function ProjectRosterPage({
       }),
     );
     if (completed) {
-      rememberOrganization(input.organizationId);
+      rememberOrganization(input.organizationId, recentOrganizationGeneration);
       setShowAdd(false);
     }
   }
 
   async function createAndAdd(input: { name: string; organizationId: string }) {
+    const recentOrganizationGeneration =
+      recentOrganizationContextRef.current.generation;
     const completed = await handleMutation(() =>
       api.post(`/projects/${project.id}/roster`, {
         newParticipant: input,
@@ -215,7 +263,7 @@ export function ProjectRosterPage({
       }),
     );
     if (completed) {
-      rememberOrganization(input.organizationId);
+      rememberOrganization(input.organizationId, recentOrganizationGeneration);
       setShowAdd(false);
     }
   }

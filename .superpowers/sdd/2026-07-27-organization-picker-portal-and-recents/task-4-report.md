@@ -26,3 +26,18 @@
 - Web TypeScript check 통과
 - repository Biome check: 248 files, 오류 없음
 - `git diff --check` 통과
+
+## Fix round 1: stale recency context guard
+
+- RED: reload가 대기 중인 상태에서 프로젝트가 바뀌거나 선택 조직이
+  비활성화되도록 rerender한 뒤 완료시키는 테스트 2개를 추가했다. 기존
+  구현은 두 경우 모두 오래된 `org-2`를 localStorage에 기록하여
+  `roster.test.tsx` 34개 중 신규 2개가 실패했다.
+- GREEN: 인증 사용자, 프로젝트, 활성 조직 ID 집합의 의미적 변경을 render
+  시점에 generation으로 기록했다. 각 추가 mutation은 시작 generation을
+  캡처하고, reload 완료 직전 최신 generation과 다르면 recency 저장과 상태
+  갱신만 건너뛴다. mutation 성공 후 모달 닫힘은 그대로 유지한다.
+- focused: 최근 조직 유틸리티 + 콤보박스 + roster, 3 files / 56 tests 통과
+- full Web: 19 files / 264 tests 통과
+- Web TypeScript check 통과
+- repository Biome check: 248 files, 오류 없음
