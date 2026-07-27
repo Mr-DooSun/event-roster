@@ -680,9 +680,9 @@ it("separates disabled membership mutations from operator organization managemen
   ).not.toBeInTheDocument();
 });
 
-it("chains project revisions for deactivation and reactivation", async () => {
+it("confirms a project exclusion before chaining its revision to reactivation", async () => {
   const onChanged = vi.fn().mockResolvedValue(undefined);
-  const membership = organizationMembership();
+  const membership = organizationMembership({ hasBusinessHistory: false });
   const view = render(
     <ProjectOrganizationsPanel
       projectId="project-1"
@@ -695,7 +695,18 @@ it("chains project revisions for deactivation and reactivation", async () => {
     />,
   );
 
-  fireEvent.click(screen.getByRole("button", { name: "사용 중지" }));
+  fireEvent.click(
+    screen.getByRole("button", { name: "프로젝트에서 제외" }),
+  );
+  const dialog = screen.getByRole("dialog", { name: "프로젝트 조직 제외" });
+  expect(
+    within(dialog).getByText(
+      "이 조직을 프로젝트에서 제외할까요? 다시 추가할 수 있습니다.",
+    ),
+  ).toBeVisible();
+  expect(mockApi.patch).not.toHaveBeenCalled();
+
+  fireEvent.click(within(dialog).getByRole("button", { name: "제외하기" }));
   await waitFor(() =>
     expect(mockApi.patch).toHaveBeenCalledWith(
       "/projects/project-1/organizations/org-1",
@@ -723,6 +734,29 @@ it("chains project revisions for deactivation and reactivation", async () => {
   );
 });
 
+it("explains preservation when excluding an organization with business history", () => {
+  render(
+    <ProjectOrganizationsPanel
+      projectId="project-1"
+      projectRevision={7}
+      memberships={[organizationMembership({ hasBusinessHistory: true })]}
+      allOrganizations={[]}
+      canMutateMemberships
+      canManageOrganizations
+      onChanged={vi.fn().mockResolvedValue(undefined)}
+    />,
+  );
+
+  fireEvent.click(
+    screen.getByRole("button", { name: "프로젝트에서 제외" }),
+  );
+  expect(
+    screen.getByText(
+      "기존 명단과 집계를 보존하기 위해 사용 중지 상태로 전환됩니다.",
+    ),
+  ).toBeVisible();
+});
+
 it("shows progress only on the membership being changed", async () => {
   const pendingMutation = deferred<{
     organization: ProjectOrganization;
@@ -748,11 +782,16 @@ it("shows progress only on the membership being changed", async () => {
   );
 
   fireEvent.click(
-    screen.getAllByRole("button", { name: "사용 중지" })[0] as HTMLElement,
+    screen.getAllByRole("button", { name: "프로젝트에서 제외" })[0] as HTMLElement,
   );
+  fireEvent.click(screen.getByRole("button", { name: "제외하기" }));
 
-  expect(screen.getByRole("button", { name: "변경 중…" })).toBeDisabled();
-  expect(screen.getByRole("button", { name: "사용 중지" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "제외 중…" })).toBeDisabled();
+  for (const button of screen.getAllByRole("button", {
+    name: "프로젝트에서 제외",
+  })) {
+    expect(button).toBeDisabled();
+  }
   expect(screen.getByText("Ｅ２Ｅ 1팀")).toBeVisible();
   expect(screen.getByText("2팀")).toBeVisible();
 

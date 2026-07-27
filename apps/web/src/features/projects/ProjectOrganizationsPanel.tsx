@@ -61,6 +61,8 @@ export function ProjectOrganizationsPanel({
     kind: "NEW";
     name: string;
   } | null>(null);
+  const [pendingExclusion, setPendingExclusion] =
+    useState<ProjectOrganization | null>(null);
   const [busy, setBusy] = useState(false);
   const [busyAction, setBusyAction] = useState<OrganizationAction>(null);
   const [message, setMessage] = useState<PanelMessage | null>(null);
@@ -174,7 +176,7 @@ export function ProjectOrganizationsPanel({
   }
 
   async function setActive(membership: ProjectOrganization, active: boolean) {
-    await mutate(`TOGGLE:${membership.organizationId}`, () =>
+    return mutate(`TOGGLE:${membership.organizationId}`, () =>
       api.patch<ProjectOrganizationMutationResult>(
         `/projects/${projectId}/organizations/${membership.organizationId}`,
         {
@@ -183,6 +185,12 @@ export function ProjectOrganizationsPanel({
         },
       ),
     );
+  }
+
+  async function confirmExclusion() {
+    if (!pendingExclusion) return;
+    const changed = await setActive(pendingExclusion, false);
+    if (changed) setPendingExclusion(null);
   }
 
   return (
@@ -237,7 +245,8 @@ export function ProjectOrganizationsPanel({
                 canManageOrganizations={canManageOrganizations}
                 busy={busy}
                 loading={busyAction === `TOGGLE:${membership.organizationId}`}
-                onSetActive={(active) => setActive(membership, active)}
+                onExclude={() => setPendingExclusion(membership)}
+                onReactivate={() => setActive(membership, true)}
               />
             ))}
           </ul>
@@ -264,6 +273,42 @@ export function ProjectOrganizationsPanel({
           </Button>
         </Dialog>
       ) : null}
+      {canMutateMemberships && pendingExclusion ? (
+        <Dialog
+          title="프로젝트 조직 제외"
+          hideDefaultCloseAction
+          onClose={() => {
+            if (!busy) setPendingExclusion(null);
+          }}
+        >
+          <p>
+            {pendingExclusion.hasBusinessHistory
+              ? "기존 명단과 집계를 보존하기 위해 사용 중지 상태로 전환됩니다."
+              : "이 조직을 프로젝트에서 제외할까요? 다시 추가할 수 있습니다."}
+          </p>
+          <div className="er-dialog-actions">
+            <Button
+              type="button"
+              disabled={busy}
+              onClick={() => setPendingExclusion(null)}
+            >
+              취소
+            </Button>
+            <Button
+              type="button"
+              variant="danger"
+              loading={
+                busyAction === `TOGGLE:${pendingExclusion.organizationId}`
+              }
+              loadingText="제외 중…"
+              disabled={busy}
+              onClick={() => void confirmExclusion()}
+            >
+              제외하기
+            </Button>
+          </div>
+        </Dialog>
+      ) : null}
     </div>
   );
 }
@@ -274,14 +319,16 @@ function OrganizationMembershipRow({
   canManageOrganizations,
   busy,
   loading,
-  onSetActive,
+  onExclude,
+  onReactivate,
 }: {
   membership: ProjectOrganization;
   canMutateMemberships: boolean;
   canManageOrganizations: boolean;
   busy: boolean;
   loading: boolean;
-  onSetActive: (active: boolean) => Promise<void>;
+  onExclude: () => void;
+  onReactivate: () => Promise<boolean>;
 }) {
   return (
     <li>
@@ -310,18 +357,27 @@ function OrganizationMembershipRow({
       </div>
       {canMutateMemberships ? (
         <div className="er-action-row">
-          <Button
-            type="button"
-            variant={membership.isActive ? "danger" : "secondary"}
-            loading={loading}
-            loadingText="변경 중…"
-            disabled={
-              busy || (!membership.isActive && !membership.masterIsActive)
-            }
-            onClick={() => void onSetActive(!membership.isActive)}
-          >
-            {membership.isActive ? "사용 중지" : "다시 사용"}
-          </Button>
+          {membership.isActive ? (
+            <Button
+              type="button"
+              variant="danger"
+              disabled={busy}
+              onClick={onExclude}
+            >
+              프로젝트에서 제외
+            </Button>
+          ) : (
+            <Button
+              type="button"
+              variant="secondary"
+              loading={loading}
+              loadingText="변경 중…"
+              disabled={busy || !membership.masterIsActive}
+              onClick={() => void onReactivate()}
+            >
+              다시 사용
+            </Button>
+          )}
         </div>
       ) : null}
     </li>
