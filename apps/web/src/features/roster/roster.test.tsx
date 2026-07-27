@@ -145,7 +145,7 @@ it("clears a selected organization when its search text changes", () => {
   expect(screen.getByRole("button", { name: "명단에 추가" })).toBeEnabled();
 });
 
-it("keeps the participant dialog open when Escape closes an organization listbox", () => {
+it("closes the organization listbox before a second Escape closes the participant dialog", () => {
   const onClose = vi.fn();
   render(
     <ParticipantDialog
@@ -183,6 +183,9 @@ it("keeps the participant dialog open when Escape closes an organization listbox
   expect(screen.getByRole("dialog", { name: "참가자 추가" })).toBeVisible();
   expect(screen.getByLabelText("확정 이름")).toHaveValue("수정 중인 이름");
   expect(onClose).not.toHaveBeenCalled();
+
+  fireEvent.keyDown(organization, { key: "Escape" });
+  expect(onClose).toHaveBeenCalledTimes(1);
 });
 
 it("shows the pending roster row without removing the table", async () => {
