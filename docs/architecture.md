@@ -23,7 +23,10 @@ React/Vite 정적 자산과 Hono API를 Cloudflare Worker 하나가 동일 origi
 
 ## 프로젝트와 명단
 
-`projects`는 `PREPARING → PRE_REGISTRATION → IN_PROGRESS → CLOSED` 상태와 revision을 가진다. `project_organizations`는 전역 조직과 프로젝트의 연결을 보존한다.
+프로젝트는 생성 즉시 PRE_REGISTRATION이며
+PRE_REGISTRATION → IN_PROGRESS → CLOSED 상태와 revision을 가진다.
+종료된 프로젝트는 유효한 미래/미정 종료일로 수정한 뒤 IN_PROGRESS로 재개한다.
+`project_organizations`는 전역 조직과 프로젝트의 연결을 보존한다.
 
 - 조직 담당자 mutation은 활성 사용자, 활성 조직, 현재 배정, 활성 프로젝트 연결, `PRE_REGISTRATION`을 모두 요구한다.
 - 운영자는 전체 프로젝트를 관리하며 기존 이력 정정은 프로젝트 조직이나 조직 마스터가 비활성화된 뒤에도 보존한다.
