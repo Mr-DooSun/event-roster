@@ -615,7 +615,8 @@ a {
   cursor: pointer;
 }
 .er-combobox-option:hover,
-.er-combobox-option[aria-selected="true"] {
+.er-combobox-option[aria-selected="true"],
+.er-combobox-option[data-active="true"] {
   color: var(--er-color-primary);
   background: var(--er-color-info-soft);
 }

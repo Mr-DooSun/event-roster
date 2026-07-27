@@ -25,8 +25,10 @@ export function OrganizationSelectCombobox({
   onChange,
 }: OrganizationSelectComboboxProps) {
   const listboxId = useId();
+  const containerRef = useRef<HTMLDivElement>(null);
   const optionRefs = useRef<Array<HTMLButtonElement | null>>([]);
-  const committedValueRef = useRef(value);
+  const committedValueRef = useRef<string | null>(value || null);
+  const observedValueRef = useRef(value);
   const selected = organizations.find(
     (organization) => organization.isActive && organization.id === value,
   );
@@ -35,16 +37,26 @@ export function OrganizationSelectCombobox({
   const [activeIndex, setActiveIndex] = useState(-1);
 
   useEffect(() => {
-    if (committedValueRef.current === value) return;
-    committedValueRef.current = value;
-    setQuery(selected?.name ?? "");
-  }, [selected?.name, value]);
+    const valueChanged = observedValueRef.current !== value;
+    observedValueRef.current = value;
 
-  useEffect(() => {
-    if (!value || selected) return;
-    committedValueRef.current = "";
-    setQuery("");
-    onChange("");
+    if (!value) {
+      if (valueChanged && committedValueRef.current !== null) {
+        setQuery("");
+      }
+      committedValueRef.current = null;
+      return;
+    }
+    if (!selected) {
+      committedValueRef.current = null;
+      setQuery("");
+      onChange("");
+      return;
+    }
+    if (valueChanged || committedValueRef.current === value) {
+      committedValueRef.current = value;
+      setQuery(selected.name);
+    }
   }, [onChange, selected, value]);
 
   const options = useMemo(() => {
@@ -52,7 +64,8 @@ export function OrganizationSelectCombobox({
     return organizations.filter(
       (organization) =>
         organization.isActive &&
-        (!key || canonicalizeOrganizationInput(organization.name).includes(key)),
+        (!key ||
+          canonicalizeOrganizationInput(organization.name).includes(key)),
     );
   }, [organizations, query]);
 
@@ -78,20 +91,19 @@ export function OrganizationSelectCombobox({
     optionRefs.current[activeIndex]?.scrollIntoView?.({ block: "nearest" });
   }, [activeIndex]);
 
+  function closeWhenFocusLeaves(event: FocusEvent<HTMLInputElement>) {
+    if (
+      event.relatedTarget instanceof Node &&
+      containerRef.current?.contains(event.relatedTarget)
+    ) {
+      return;
+    }
+    setOpen(false);
+    setActiveIndex(-1);
+  }
+
   return (
-    <div
-      className="er-selection-combobox"
-      onBlur={(event: FocusEvent<HTMLDivElement>) => {
-        if (
-          event.relatedTarget instanceof Node &&
-          event.currentTarget.contains(event.relatedTarget)
-        ) {
-          return;
-        }
-        setOpen(false);
-        setActiveIndex(-1);
-      }}
-    >
+    <div ref={containerRef} className="er-selection-combobox">
       <label className="er-field">
         <span>{label}</span>
         <input
@@ -107,6 +119,7 @@ export function OrganizationSelectCombobox({
           autoComplete="off"
           disabled={disabled}
           value={query}
+          onBlur={closeWhenFocusLeaves}
           onFocus={() => {
             setOpen(true);
             setActiveIndex(-1);
@@ -132,7 +145,8 @@ export function OrganizationSelectCombobox({
             }
             if (event.key === "Enter" && open && options.length > 0) {
               event.preventDefault();
-              select(options[activeIndex >= 0 ? activeIndex : 0]!);
+              const option = options[activeIndex >= 0 ? activeIndex : 0];
+              if (option) select(option);
             }
           }}
         />
@@ -152,7 +166,9 @@ export function OrganizationSelectCombobox({
                 className="er-combobox-option"
                 type="button"
                 role="option"
-                aria-selected={activeIndex === index}
+                tabIndex={-1}
+                aria-selected={organization.id === value}
+                data-active={activeIndex === index || undefined}
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={() => select(organization)}
               >

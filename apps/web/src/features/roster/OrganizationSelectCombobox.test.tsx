@@ -9,6 +9,12 @@ const organizations = [
   { id: "org-inactive", name: "비활성 조직", isActive: false },
 ];
 
+const renamedOrganizations = [
+  { id: "org-1", name: "새 성룡사", isActive: true },
+  { id: "org-2", name: "황룡사", isActive: true },
+  { id: "org-inactive", name: "비활성 조직", isActive: false },
+];
+
 afterEach(cleanup);
 
 it("filters active organizations and requires an explicit selection", () => {
@@ -104,4 +110,107 @@ it("closes when focus leaves the combobox", () => {
     relatedTarget: screen.getByRole("button", { name: "다음" }),
   });
   expect(input).toHaveAttribute("aria-expanded", "false");
+});
+
+it("keeps options out of tab order and closes before focus moves outside", () => {
+  render(
+    <>
+      <OrganizationSelectCombobox
+        label="소속 조직"
+        organizations={organizations}
+        value=""
+        onChange={vi.fn()}
+      />
+      <button type="button">다음</button>
+    </>,
+  );
+
+  const input = screen.getByRole("combobox", { name: "소속 조직" });
+  const next = screen.getByRole("button", { name: "다음" });
+  fireEvent.focus(input);
+  expect(screen.getAllByRole("option")).toHaveLength(2);
+  for (const option of screen.getAllByRole("option")) {
+    expect(option).toHaveAttribute("tabindex", "-1");
+  }
+
+  fireEvent.keyDown(input, { key: "Tab" });
+  fireEvent.blur(input, { relatedTarget: next });
+  next.focus();
+
+  expect(document.activeElement).toBe(next);
+  expect(input).toHaveAttribute("aria-expanded", "false");
+});
+
+it("updates a committed selection when its organization name changes", () => {
+  const { rerender } = render(
+    <OrganizationSelectCombobox
+      label="확정 소속 조직"
+      organizations={organizations}
+      value="org-1"
+      onChange={vi.fn()}
+    />,
+  );
+
+  rerender(
+    <OrganizationSelectCombobox
+      label="확정 소속 조직"
+      organizations={renamedOrganizations}
+      value="org-1"
+      onChange={vi.fn()}
+    />,
+  );
+
+  expect(screen.getByRole("combobox", { name: "확정 소속 조직" })).toHaveValue(
+    "새 성룡사",
+  );
+});
+
+it("preserves a free query when the same selected organization rerenders", () => {
+  const { rerender } = render(
+    <OrganizationSelectCombobox
+      label="확정 소속 조직"
+      organizations={organizations}
+      value="org-1"
+      onChange={vi.fn()}
+    />,
+  );
+
+  const input = screen.getByRole("combobox", {
+    name: "확정 소속 조직",
+  });
+  fireEvent.change(input, { target: { value: "직접 입력 중" } });
+
+  rerender(
+    <OrganizationSelectCombobox
+      label="확정 소속 조직"
+      organizations={renamedOrganizations}
+      value="org-1"
+      onChange={vi.fn()}
+    />,
+  );
+
+  expect(input).toHaveValue("직접 입력 중");
+});
+
+it("reports the committed selection separately from keyboard navigation", () => {
+  render(
+    <OrganizationSelectCombobox
+      label="소속 조직"
+      organizations={organizations}
+      value="org-1"
+      onChange={vi.fn()}
+    />,
+  );
+
+  const input = screen.getByRole("combobox", { name: "소속 조직" });
+  fireEvent.focus(input);
+  fireEvent.change(input, { target: { value: "" } });
+  fireEvent.keyDown(input, { key: "ArrowDown" });
+  fireEvent.keyDown(input, { key: "ArrowDown" });
+
+  const selected = screen.getByRole("option", { name: "성룡사" });
+  const active = screen.getByRole("option", { name: "황룡사" });
+  expect(selected).toHaveAttribute("aria-selected", "true");
+  expect(active).toHaveAttribute("aria-selected", "false");
+  expect(active).toHaveAttribute("data-active", "true");
 });
