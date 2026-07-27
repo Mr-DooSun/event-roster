@@ -41,3 +41,18 @@
 - full Web: 19 files / 264 tests 통과
 - Web TypeScript check 통과
 - repository Biome check: 248 files, 오류 없음
+
+## Fix round 2: commit-phase recency context
+
+- RED: reload 대기 중 `startTransition`과 Suspense로 다른 프로젝트 렌더를
+  시작하되 커밋하지 않는 회귀 테스트를 추가했다. render phase에서 ref를
+  변경하던 구현은 정상 project-1 mutation의 generation까지 오염시켜 최근
+  조직을 기록하지 못했고, `roster.test.tsx` 35개 중 신규 1개가 실패했다.
+- GREEN: 초기 committed context는 안전한 `useRef` initializer로 만들고,
+  사용자·프로젝트·활성 조직 ID 집합의 의미적 비교와 generation 증가는
+  `useLayoutEffect` commit phase에서만 수행한다. mutation 완료 비교는 이
+  committed ref만 사용하므로 버려진 speculative render의 영향이 없다.
+- focused: 최근 조직 유틸리티 + 콤보박스 + roster, 3 files / 57 tests 통과
+- full Web: 19 files / 265 tests 통과
+- Web TypeScript check 통과
+- repository Biome check: 248 files, 오류 없음

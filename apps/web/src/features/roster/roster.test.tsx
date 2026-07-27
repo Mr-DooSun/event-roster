@@ -8,7 +8,7 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
-import { useState } from "react";
+import { Suspense, startTransition, useState } from "react";
 import { afterEach, expect, it, vi } from "vitest";
 import { AuthProvider, useAuth } from "../auth/AuthProvider";
 import { LoginPage } from "../auth/LoginPage";
@@ -294,6 +294,41 @@ it("skips recency side effects when the chosen organization becomes inactive dur
     ).not.toBeInTheDocument(),
   );
   expect(recentOrganizationValue("user-1", "project-1")).toBeNull();
+});
+
+it("records recency when a speculative project render is discarded during reload", async () => {
+  const reload = deferred<void>();
+  const blockedRender = deferred<void>();
+  const fetchMock = rosterAddFetch();
+  vi.stubGlobal("fetch", fetchMock);
+  render(
+    <AuthProvider restoreOnMount={false}>
+      <Gate>
+        <ConcurrentRosterHarness
+          blockedRender={blockedRender.promise}
+          onChanged={vi.fn(() => reload.promise)}
+        />
+      </Gate>
+    </AuthProvider>,
+  );
+  await login();
+
+  await openNewParticipantForm("황룡사");
+  fireEvent.click(screen.getByRole("button", { name: "참가자 생성 후 추가" }));
+  await waitForRosterPost(fetchMock);
+
+  fireEvent.click(
+    screen.getByRole("button", { name: "프로젝트 전환 렌더 시작" }),
+  );
+
+  await act(async () => {
+    reload.resolve(undefined);
+    await reload.promise;
+  });
+
+  await waitFor(() =>
+    expect(recentOrganizationValue("user-1", "project-1")).toEqual(["org-2"]),
+  );
 });
 
 it.each([
@@ -2102,6 +2137,46 @@ function renderRosterForRecentOrganizations({
       </Gate>
     </AuthProvider>,
   );
+}
+
+function ConcurrentRosterHarness({
+  blockedRender,
+  onChanged,
+}: {
+  blockedRender: Promise<void>;
+  onChanged: () => Promise<void>;
+}) {
+  const [projectId, setProjectId] = useState("project-1");
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => {
+          startTransition(() => setProjectId("project-2"));
+        }}
+      >
+        프로젝트 전환 렌더 시작
+      </button>
+      <Suspense fallback={null}>
+        <ProjectRosterPage
+          project={{ ...project(), id: projectId }}
+          rows={[]}
+          participants={[]}
+          organizations={recentTestOrganizations()}
+          canMutate
+          onChanged={onChanged}
+        />
+        {projectId === "project-2" ? (
+          <BlockedRender promise={blockedRender} />
+        ) : null}
+      </Suspense>
+    </>
+  );
+}
+
+function BlockedRender({ promise }: { promise: Promise<void> }): never {
+  throw promise;
 }
 
 async function openNewParticipantForm(organizationName: string) {

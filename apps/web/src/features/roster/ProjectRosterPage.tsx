@@ -1,5 +1,5 @@
 import type { Organization, Project } from "@event-roster/contracts";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Button } from "../../components/ui/Button";
 import { Card } from "../../components/ui/Card";
 import { StatusMessage } from "../../components/ui/StatusMessage";
@@ -82,23 +82,22 @@ export function ProjectRosterPage({
     projectId: project.id,
     validOrganizationIds,
   });
-  const previousRecentOrganizationContext =
-    recentOrganizationContextRef.current;
-  const recentOrganizationContextChanged =
-    previousRecentOrganizationContext.userId !== authenticatedUserId ||
-    previousRecentOrganizationContext.projectId !== project.id ||
-    !hasSameOrganizationIds(
-      previousRecentOrganizationContext.validOrganizationIds,
+  useLayoutEffect(() => {
+    const previousContext = recentOrganizationContextRef.current;
+    const contextChanged =
+      previousContext.userId !== authenticatedUserId ||
+      previousContext.projectId !== project.id ||
+      !hasSameOrganizationIds(
+        previousContext.validOrganizationIds,
+        validOrganizationIds,
+      );
+    recentOrganizationContextRef.current = {
+      generation: previousContext.generation + (contextChanged ? 1 : 0),
+      userId: authenticatedUserId,
+      projectId: project.id,
       validOrganizationIds,
-    );
-  recentOrganizationContextRef.current = {
-    generation:
-      previousRecentOrganizationContext.generation +
-      (recentOrganizationContextChanged ? 1 : 0),
-    userId: authenticatedUserId,
-    projectId: project.id,
-    validOrganizationIds,
-  };
+    };
+  }, [authenticatedUserId, project.id, validOrganizationIds]);
   const [recentOrganizationIds, setRecentOrganizationIds] = useState<string[]>(
     () =>
       authenticatedUserId
