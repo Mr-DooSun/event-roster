@@ -788,6 +788,75 @@ it("keeps the selected history-preserving exclusion dialog open after a patch fa
   expect(screen.getByText("기록 보존 조직")).toBeVisible();
 });
 
+it("clears a stale exclusion and uses refreshed history when reopened", async () => {
+  const originalMembership = organizationMembership({
+    hasBusinessHistory: true,
+  });
+  const refreshedMembership = organizationMembership({
+    hasBusinessHistory: false,
+  });
+  let view: ReturnType<typeof render> | undefined;
+  const onChanged = vi.fn().mockImplementation(async () => {
+    view?.rerender(
+      <ProjectOrganizationsPanel
+        projectId="project-1"
+        projectRevision={8}
+        memberships={[refreshedMembership]}
+        allOrganizations={[]}
+        canMutateMemberships
+        canManageOrganizations
+        onChanged={onChanged}
+      />,
+    );
+  });
+  mockApi.patch.mockRejectedValueOnce(
+    new ApiError(409, {
+      code: "STALE_REVISION",
+      message: "stale",
+      requestId: "request-stale-exclusion",
+    }),
+  );
+  view = render(
+    <ProjectOrganizationsPanel
+      projectId="project-1"
+      projectRevision={7}
+      memberships={[originalMembership]}
+      allOrganizations={[]}
+      canMutateMemberships
+      canManageOrganizations
+      onChanged={onChanged}
+    />,
+  );
+
+  fireEvent.click(
+    screen.getByRole("button", { name: "프로젝트에서 제외" }),
+  );
+  expect(
+    screen.getByText(
+      "기존 명단과 집계를 보존하기 위해 사용 중지 상태로 전환됩니다.",
+    ),
+  ).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "제외하기" }));
+
+  expect(
+    await screen.findByText(
+      "다른 변경이 먼저 반영되어 최신 프로젝트 정보를 불러왔습니다. 조직을 다시 선택해 주세요.",
+    ),
+  ).toBeVisible();
+  expect(
+    screen.queryByRole("dialog", { name: "프로젝트 조직 제외" }),
+  ).not.toBeInTheDocument();
+
+  fireEvent.click(
+    screen.getByRole("button", { name: "프로젝트에서 제외" }),
+  );
+  expect(
+    screen.getByText(
+      "이 조직을 프로젝트에서 제외할까요? 다시 추가할 수 있습니다.",
+    ),
+  ).toBeVisible();
+});
+
 it("keeps the exclusion dialog open when cancel or close is attempted during mutation", () => {
   const pendingMutation = deferred<{
     organization: ProjectOrganization;

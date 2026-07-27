@@ -111,6 +111,7 @@ export function ProjectOrganizationsPanel({
         if (error.problem?.code === "STALE_REVISION") {
           setPendingSelection(null);
           setNewConfirmation(null);
+          setPendingExclusion(null);
           await onChanged();
           setMessage({
             tone: "info",
