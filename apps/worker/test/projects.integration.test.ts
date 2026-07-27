@@ -134,12 +134,7 @@ it("freezes expected snapshots on IN_PROGRESS and requires a valid reopen date",
   await env.DB.prepare(`INSERT INTO project_organizations
     (project_id, organization_id, is_active, added_at, added_by, updated_by)
     VALUES (?, 'org-1', 1, ?, ?, ?)`)
-    .bind(
-      pre.id,
-      "2026-05-01T00:00:00.000Z",
-      operator.userId,
-      operator.userId,
-    )
+    .bind(pre.id, "2026-05-01T00:00:00.000Z", operator.userId, operator.userId)
     .run();
   const active = await transition(operator, pre, "IN_PROGRESS");
   expect(
@@ -171,30 +166,22 @@ it("freezes expected snapshots on IN_PROGRESS and requires a valid reopen date",
   vi.setSystemTime(new Date("2026-05-23T15:00:00.000Z"));
   expect(
     (
-      await authedRequest(
-        operator,
-        `/api/v1/projects/${pre.id}/transition`,
-        {
-          method: "POST",
-          body: JSON.stringify({
-            targetStatus: "IN_PROGRESS",
-            expectedRevision: closed.revision,
-          }),
-        },
-      )
+      await authedRequest(operator, `/api/v1/projects/${pre.id}/transition`, {
+        method: "POST",
+        body: JSON.stringify({
+          targetStatus: "IN_PROGRESS",
+          expectedRevision: closed.revision,
+        }),
+      })
     ).status,
   ).toBe(409);
-  const cleared = await authedRequest(
-    operator,
-    `/api/v1/projects/${pre.id}`,
-    {
-      method: "PATCH",
-      body: JSON.stringify({
-        endDate: null,
-        expectedRevision: closed.revision,
-      }),
-    },
-  );
+  const cleared = await authedRequest(operator, `/api/v1/projects/${pre.id}`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      endDate: null,
+      expectedRevision: closed.revision,
+    }),
+  });
   expect(cleared.status).toBe(200);
   const clearedProject = await cleared.json<{ id: string; revision: number }>();
   expect(

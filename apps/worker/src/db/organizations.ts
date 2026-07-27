@@ -160,10 +160,7 @@ export async function findOrganizationDetail(
       .all<{
         project_id: string;
         project_name: string;
-        project_status:
-          | "PRE_REGISTRATION"
-          | "IN_PROGRESS"
-          | "CLOSED";
+        project_status: "PRE_REGISTRATION" | "IN_PROGRESS" | "CLOSED";
         membership_is_active: number;
       }>(),
   ]);
