@@ -129,9 +129,9 @@ migration이 `0004`와 함께 pending이면 여기서 중단한다. 신규 빈 D
 이 절차는 방금 생성했고 아직 Worker binding 연결, bootstrap, import, 수동
 schema 변경을 한 적이 없는 **신규 빈 `event-roster` D1** 전용이다. 기본
 config의 remote pending 목록이 정확히 `0001`~`0004` 네 개이고, 아래
-application table 수가 0일 때만 실행한다. 기존 운영 D1, export를 import한
-복원 D1, pending 조합이 다른 D1에는 사용하지 않는다. 조건이 하나라도
-다르면 중단한다.
+예상 밖 schema object 수와 적용된 migration ledger 행 수가 모두 0일 때만
+실행한다. 기존 운영 D1, export를 import한 복원 D1, pending 조합이 다른
+D1에는 사용하지 않는다. 조건이 하나라도 다르면 중단한다.
 
 Wrangler 4.112.0의 `d1 migrations apply`에는 특정 migration 파일만 고르는
 옵션이 없다. 따라서 저장소 밖 mode 0700 임시 디렉터리에 `0001`~`0003`
@@ -140,6 +140,19 @@ Wrangler 4.112.0의 `d1 migrations apply`에는 특정 migration 파일만 고�
 생성기는 기본 `wrangler.jsonc`를 strict JSON으로도 해석할 수 없거나 대상
 binding이 정확히 하나가 아니면 실패한다. 이 경우 값을 손으로 복사한 config를
 만들지 말고 문서와 생성 절차를 다시 검토한다.
+
+Wrangler 4.112.0 local D1에서 fresh `migrations list` 직후 관찰되는 schema
+object는 D1 내부 `_cf_METADATA`, 빈 `d1_migrations`와 SQLite가 관리하는
+`sqlite_sequence`, `sqlite_autoindex_d1_migrations_1`뿐이다. guard는 정확한
+D1 내부 이름 두 개와 SQLite 예약 `sqlite_` prefix만 제외한다. 그 외 이름의
+table, view, trigger, index가 하나라도 있거나 `d1_migrations`에 행이 있으면
+중단한다. guard는 최초 확인과 staged apply 직전에 두 번 실행한다.
+
+임시 루트는 `${TMPDIR:-/tmp}`가 가리키는 기존 절대 디렉터리를 `pwd -P`로
+canonicalize해 사용한다. `/tmp`가 `/private/tmp` symbolic link인 macOS에서도
+canonical 경로만 이후 검사에 사용한다. 생성된 디렉터리의 parent, 안전한
+basename, mode 0700, main checkout과 모든 linked worktree 밖이라는 조건을
+확인하기 전에는 migration이나 config를 쓰지 않는다.
 
 ```bash
 set -euo pipefail
@@ -159,37 +172,66 @@ test "$(printf '%s\n' "$EVENT_ROSTER_PENDING_BEFORE" | grep -c '0003_organizatio
 test "$(printf '%s\n' "$EVENT_ROSTER_PENDING_BEFORE" | grep -c '0004_automatic_project_preregistration.sql')" -eq 1
 test "$(printf '%s\n' "$EVENT_ROSTER_PENDING_BEFORE" | grep -Ec '[0-9]{4}_[[:alnum:]_]+\.sql')" -eq 4
 
-corepack pnpm@10.28.1 --filter @event-roster/worker exec \
-  wrangler d1 execute event-roster --remote --json --command \
-  "SELECT COUNT(*) AS application_table_count
-   FROM sqlite_schema
-   WHERE type='table'
-     AND name IN (
-       'organizations', 'users', 'user_organizations', 'projects',
-       'project_organizations', 'participants', 'project_roster_entries',
-       'audit_logs'
-     )" |
-  node -e '
-    let input = "";
-    process.stdin.setEncoding("utf8");
-    process.stdin.on("data", (chunk) => { input += chunk; });
-    process.stdin.on("end", () => {
-      const payload = JSON.parse(input);
-      const count = payload?.[0]?.results?.[0]?.application_table_count;
-      if (count !== 0) {
-        console.error(`fresh empty D1 required; application_table_count=${String(count)}`);
-        process.exit(1);
-      }
-    });
-  '
+assert_event_roster_fresh_empty() {
+  corepack pnpm@10.28.1 --filter @event-roster/worker exec \
+    wrangler d1 execute event-roster --remote --json --command \
+    "SELECT
+       (
+         SELECT COUNT(*)
+         FROM sqlite_schema
+         WHERE name NOT GLOB 'sqlite_*'
+           AND name NOT IN ('_cf_METADATA', 'd1_migrations')
+       ) AS unexpected_schema_count,
+       (SELECT COUNT(*) FROM d1_migrations) AS applied_migration_count" |
+    node -e '
+      let input = "";
+      process.stdin.setEncoding("utf8");
+      process.stdin.on("data", (chunk) => { input += chunk; });
+      process.stdin.on("end", () => {
+        const payload = JSON.parse(input);
+        const result = payload?.[0];
+        const row = result?.results?.[0];
+        if (
+          result?.success !== true ||
+          row?.unexpected_schema_count !== 0 ||
+          row?.applied_migration_count !== 0
+        ) {
+          console.error(
+            `fresh empty D1 required; unexpected_schema_count=${String(row?.unexpected_schema_count)}, applied_migration_count=${String(row?.applied_migration_count)}`,
+          );
+          process.exit(1);
+        }
+      });
+    '
+}
+assert_event_roster_fresh_empty
 
-EVENT_ROSTER_STAGE_DIR="$(mktemp -d /private/tmp/event-roster-d1-base.XXXXXX)"
+EVENT_ROSTER_TEMP_ROOT_INPUT="${TMPDIR:-/tmp}"
+case "$EVENT_ROSTER_TEMP_ROOT_INPUT" in
+  /*) ;;
+  *) echo "TMPDIR은 절대 경로여야 합니다." >&2; exit 1 ;;
+esac
+test -d "$EVENT_ROSTER_TEMP_ROOT_INPUT"
+test -w "$EVENT_ROSTER_TEMP_ROOT_INPUT"
+EVENT_ROSTER_TEMP_ROOT="$(
+  cd "$EVENT_ROSTER_TEMP_ROOT_INPUT"
+  pwd -P
+)"
+test -d "$EVENT_ROSTER_TEMP_ROOT"
+test ! -L "$EVENT_ROSTER_TEMP_ROOT"
+test "$EVENT_ROSTER_TEMP_ROOT" != "/"
+
+EVENT_ROSTER_STAGE_DIR="$(
+  mktemp -d "${EVENT_ROSTER_TEMP_ROOT}/event-roster-d1-base.XXXXXXXX"
+)"
 chmod 700 "$EVENT_ROSTER_STAGE_DIR"
 EVENT_ROSTER_STAGE_DIR="$(cd "$EVENT_ROSTER_STAGE_DIR" && pwd -P)"
-case "$EVENT_ROSTER_STAGE_DIR" in
-  /private/tmp/event-roster-d1-base.*) ;;
-  *) echo "예상하지 못한 임시 경로입니다." >&2; exit 1 ;;
-esac
+test ! -L "$EVENT_ROSTER_STAGE_DIR"
+test "${EVENT_ROSTER_STAGE_DIR%/*}" = "$EVENT_ROSTER_TEMP_ROOT"
+printf '%s\n' "${EVENT_ROSTER_STAGE_DIR##*/}" |
+  grep -Eq '^event-roster-d1-base\.[[:alnum:]]{6,}$'
+EVENT_ROSTER_STAGE_DIR_MODE="$(stat -c '%a' "$EVENT_ROSTER_STAGE_DIR" 2>/dev/null || stat -f '%Lp' "$EVENT_ROSTER_STAGE_DIR")"
+test "$EVENT_ROSTER_STAGE_DIR_MODE" = "700"
 
 EVENT_ROSTER_STAGE_MIGRATIONS="${EVENT_ROSTER_STAGE_DIR}/migrations-0001-0003"
 EVENT_ROSTER_STAGE_CONFIG="${EVENT_ROSTER_STAGE_DIR}/wrangler.0001-0003.json"
@@ -293,6 +335,9 @@ test "$(printf '%s\n' "$EVENT_ROSTER_STAGE_PENDING" | grep -c '0001_initial.sql'
 test "$(printf '%s\n' "$EVENT_ROSTER_STAGE_PENDING" | grep -c '0002_project_model.sql')" -eq 1
 test "$(printf '%s\n' "$EVENT_ROSTER_STAGE_PENDING" | grep -c '0003_organization_leadership.sql')" -eq 1
 test "$(printf '%s\n' "$EVENT_ROSTER_STAGE_PENDING" | grep -Ec '[0-9]{4}_[[:alnum:]_]+\.sql')" -eq 3
+
+# 목록 확인과 apply 사이에 schema나 ledger가 바뀌면 즉시 중단한다.
+assert_event_roster_fresh_empty
 
 corepack pnpm@10.28.1 --filter @event-roster/worker exec \
   wrangler d1 migrations apply event-roster --remote \
