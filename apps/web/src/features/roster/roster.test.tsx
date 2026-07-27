@@ -145,6 +145,46 @@ it("clears a selected organization when its search text changes", () => {
   expect(screen.getByRole("button", { name: "명단에 추가" })).toBeEnabled();
 });
 
+it("keeps the participant dialog open when Escape closes an organization listbox", () => {
+  const onClose = vi.fn();
+  render(
+    <ParticipantDialog
+      participants={[
+        {
+          id: "person-1",
+          participantId: "P-001",
+          name: "박민수",
+          organizationId: "org-1",
+          revision: 3,
+        },
+      ]}
+      organizations={[
+        { id: "org-1", name: "성룡사", isActive: true },
+        { id: "org-2", name: "황룡사", isActive: true },
+      ]}
+      onAdd={vi.fn().mockResolvedValue(undefined)}
+      onCreateAndAdd={vi.fn().mockResolvedValue(undefined)}
+      onClose={onClose}
+    />,
+  );
+
+  fireEvent.change(screen.getByLabelText("확정 이름"), {
+    target: { value: "수정 중인 이름" },
+  });
+  const organization = screen.getByRole("combobox", {
+    name: "확정 소속 조직",
+  });
+  fireEvent.focus(organization);
+  expect(screen.getByRole("listbox")).toBeVisible();
+
+  fireEvent.keyDown(organization, { key: "Escape" });
+
+  expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+  expect(screen.getByRole("dialog", { name: "참가자 추가" })).toBeVisible();
+  expect(screen.getByLabelText("확정 이름")).toHaveValue("수정 중인 이름");
+  expect(onClose).not.toHaveBeenCalled();
+});
+
 it("shows the pending roster row without removing the table", async () => {
   const pendingStatus = deferred<void>();
 

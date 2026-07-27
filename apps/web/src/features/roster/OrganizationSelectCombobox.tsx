@@ -134,6 +134,7 @@ export function OrganizationSelectCombobox({
           onKeyDown={(event) => {
             if (event.key === "Escape") {
               event.preventDefault();
+              event.stopPropagation();
               setOpen(false);
               setActiveIndex(-1);
               return;
