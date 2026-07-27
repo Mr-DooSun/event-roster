@@ -3,9 +3,16 @@ import { env } from "cloudflare:workers";
 import { expect, it } from "vitest";
 
 it("preserves legacy project, roster, snapshot, import, audit, and organization assignments", async () => {
-  const [initial, projectModel, organizationLeadership] = env.TEST_MIGRATIONS;
-  if (!initial || !projectModel || !organizationLeadership)
-    throw new Error("expected migrations 0001, 0002 and 0003");
+  const [initial, projectModel, organizationLeadership, automaticPreregistration] =
+    env.TEST_MIGRATIONS;
+  if (
+    !initial ||
+    !projectModel ||
+    !organizationLeadership ||
+    !automaticPreregistration
+  ) {
+    throw new Error("expected migrations 0001 through 0004");
+  }
   const legacyInProgressStatus = ["DAY", "OF"].join("_");
   const legacyPreRegistrationSource = ["PRE", "EVENT"].join("_");
 
@@ -73,6 +80,15 @@ it("preserves legacy project, roster, snapshot, import, audit, and organization 
     projectModel,
     organizationLeadership,
   ]);
+  await env.MIGRATION_DB.prepare(
+    `INSERT INTO projects
+     (id, name, start_date, end_date, status, revision, created_by,
+      created_at, updated_at, closed_at, closed_by, close_reason)
+     VALUES ('legacy-preparing', '준비 중 프로젝트', NULL, NULL, 'PREPARING', 5,
+      'migration-user', '2026-01-01T00:00:00.000Z',
+      '2026-05-01T00:00:00.000Z', NULL, NULL, NULL)`,
+  ).run();
+  await applyD1Migrations(env.MIGRATION_DB, [automaticPreregistration]);
 
   expect(
     await env.MIGRATION_DB.prepare(`SELECT assignment_role, assigned_by,
@@ -99,6 +115,34 @@ it("preserves legacy project, roster, snapshot, import, audit, and organization 
   });
   expect(
     await env.MIGRATION_DB.prepare(
+      `SELECT status, revision, updated_at <> '2026-05-01T00:00:00.000Z' AS changed
+       FROM projects WHERE id = 'legacy-preparing'`,
+    ).first(),
+  ).toEqual({ status: "PRE_REGISTRATION", revision: 6, changed: 1 });
+  expect(
+    await env.MIGRATION_DB.prepare(
+      `SELECT actor_user_id, action, entity_type, entity_id,
+              json_extract(details_json, '$.fromStatus') AS from_status,
+              json_extract(details_json, '$.toStatus') AS to_status
+       FROM audit_logs
+       WHERE action = 'PROJECT_AUTO_PREREGISTERED'
+         AND entity_id = 'legacy-preparing'`,
+    ).first(),
+  ).toEqual({
+    actor_user_id: null,
+    action: "PROJECT_AUTO_PREREGISTERED",
+    entity_type: "PROJECT",
+    entity_id: "legacy-preparing",
+    from_status: "PREPARING",
+    to_status: "PRE_REGISTRATION",
+  });
+  expect(
+    await env.MIGRATION_DB.prepare(
+      "SELECT COUNT(*) AS count FROM projects WHERE status = 'PREPARING'",
+    ).first(),
+  ).toEqual({ count: 0 });
+  expect(
+    await env.MIGRATION_DB.prepare(
       `SELECT project_id, source, status, was_expected_at_start, revision
        FROM project_roster_entries WHERE id='migration-entry'`,
     ).first(),
@@ -119,7 +163,7 @@ it("preserves legacy project, roster, snapshot, import, audit, and organization 
       "SELECT COUNT(*) AS count FROM project_import_runs",
     ).first(),
   ).toEqual({ count: legacyCounts.imports });
-  expect(await countMigrationRows("projects")).toBe(legacyCounts.projects);
+  expect(await countMigrationRows("projects")).toBe(legacyCounts.projects + 1);
   expect(await countMigrationRows("project_roster_entries")).toBe(
     legacyCounts.roster,
   );
