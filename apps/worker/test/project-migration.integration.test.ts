@@ -3,8 +3,12 @@ import { env } from "cloudflare:workers";
 import { expect, it } from "vitest";
 
 it("preserves legacy project, roster, snapshot, import, audit, and organization assignments", async () => {
-  const [initial, projectModel, organizationLeadership, automaticPreregistration] =
-    env.TEST_MIGRATIONS;
+  const [
+    initial,
+    projectModel,
+    organizationLeadership,
+    automaticPreregistration,
+  ] = env.TEST_MIGRATIONS;
   if (
     !initial ||
     !projectModel ||
