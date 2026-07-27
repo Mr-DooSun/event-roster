@@ -163,17 +163,20 @@ it("coalesces repeated scroll measurements and cancels a pending frame on close"
 });
 
 it("falls back to a constrained below placement when measurement fails", () => {
+  vi.stubGlobal("innerWidth", 360);
+  vi.stubGlobal("innerHeight", 240);
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
     () => {
       throw new DOMException("measurement failed");
     },
   );
+  const onChange = vi.fn();
   render(
     <OrganizationSelectCombobox
       label="소속 조직"
       organizations={organizations}
       value=""
-      onChange={vi.fn()}
+      onChange={onChange}
     />,
   );
 
@@ -182,9 +185,65 @@ it("falls back to a constrained below placement when measurement fails", () => {
   const listbox = screen.getByRole("listbox");
   expect(listbox).toHaveAttribute("data-placement", "bottom");
   expect(listbox).toHaveStyle({ position: "fixed" });
-  expect(Number.parseFloat(listbox.style.maxHeight)).toBeLessThanOrEqual(
-    window.innerHeight,
+  const width = Number.parseFloat(listbox.style.width);
+  const maxHeight = Number.parseFloat(listbox.style.maxHeight);
+  expect(Number.isFinite(width)).toBe(true);
+  expect(width).toBeGreaterThan(0);
+  expect(width).toBeLessThanOrEqual(344);
+  expect(Number.isFinite(maxHeight)).toBe(true);
+  expect(maxHeight).toBeGreaterThan(0);
+  expect(maxHeight).toBeLessThanOrEqual(240);
+
+  fireEvent.click(screen.getByRole("option", { name: "성룡사" }));
+  expect(onChange).toHaveBeenCalledWith("org-1");
+});
+
+it("reuses the last valid anchor when a later measurement fails", () => {
+  vi.stubGlobal("innerWidth", 800);
+  vi.stubGlobal("innerHeight", 800);
+  const rect = vi
+    .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+    .mockReturnValue({
+      top: 100,
+      right: 220,
+      bottom: 144,
+      left: 20,
+      width: 200,
+      height: 44,
+      x: 20,
+      y: 100,
+      toJSON: () => ({}),
+    });
+  render(
+    <OrganizationSelectCombobox
+      label="소속 조직"
+      organizations={organizations}
+      value=""
+      onChange={vi.fn()}
+    />,
   );
+  fireEvent.focus(screen.getByRole("combobox"));
+  expect(screen.getByRole("listbox")).toHaveStyle({
+    top: "148px",
+    left: "20px",
+    width: "200px",
+    maxHeight: "288px",
+  });
+
+  vi.stubGlobal("innerWidth", 180);
+  rect.mockImplementation(() => {
+    throw new DOMException("measurement failed");
+  });
+  fireEvent(window, new Event("resize"));
+
+  const listbox = screen.getByRole("listbox");
+  expect(listbox).toHaveAttribute("data-placement", "bottom");
+  expect(listbox).toHaveStyle({
+    top: "148px",
+    left: "8px",
+    width: "164px",
+    maxHeight: "288px",
+  });
 });
 
 it("closes for outside pointers but keeps listbox pointers internal", () => {

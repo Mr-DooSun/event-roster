@@ -108,3 +108,69 @@ available and the list height stays constrained to the viewport.
 ## Commit
 
 `feat: render organization picker above dialogs`
+
+---
+
+## Important Fix Round 1: Visible Measurement Fallback
+
+### Finding
+
+The first measurement exception used a synthetic zero-width anchor. That
+produced `width: 0px` while the combobox remained expanded, so the Portal
+listbox could be effectively invisible.
+
+### RED
+
+Strengthened the first-failure test to require finite positive width and
+height, bottom placement, viewport bounds, and successful pointer selection.
+Added a second test that measures a 200px anchor successfully, narrows the
+viewport to 180px, then throws on resize and expects the cached anchor to
+recalculate to the viewport-safe 164px width.
+
+Both tests failed before the fix:
+
+- the first fallback returned `width: 0px`;
+- the later fallback discarded the previous anchor and collapsed back to
+  `top: 4px; width: 0px`.
+
+### GREEN
+
+`useOrganizationPopover` now copies the last anchor geometry whose position
+calculation succeeded. A later measurement exception recalculates from that
+geometry against the current viewport. If the first measurement fails, the
+hook uses the input's positive `clientWidth` or `offsetWidth`, then a bounded
+320px default; the existing position calculator clamps it inside the viewport.
+Layout-width access is also guarded so the measurement failure path cannot
+leak an exception.
+
+Verification:
+
+```sh
+corepack pnpm@10.28.1 --filter @event-roster/web exec vitest run \
+  src/features/roster/organization-popover-position.test.ts \
+  src/features/roster/OrganizationSelectCombobox.test.tsx \
+  src/styles/global.test.ts
+corepack pnpm@10.28.1 --filter @event-roster/web check
+corepack pnpm@10.28.1 --filter @event-roster/web test
+corepack pnpm@10.28.1 exec biome check \
+  apps/web/src/features/roster/useOrganizationPopover.ts \
+  apps/web/src/features/roster/OrganizationSelectCombobox.test.tsx
+```
+
+Results:
+
+- focused: 25 tests passed;
+- full web: 19 test files, 253 tests passed;
+- TypeScript and e2e TypeScript checks passed;
+- Biome passed with no errors.
+
+### Concerns
+
+No blocking concerns. When no valid geometry or layout width has ever been
+available, the 320px default is intentionally clamped by the existing 8px
+viewport margins; exact input alignment is unknowable, but the listbox remains
+visible and selectable.
+
+### Commit
+
+`fix: keep organization fallback list visible`

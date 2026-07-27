@@ -7,6 +7,13 @@ import {
 } from "react";
 import { calculateOrganizationPopoverPosition } from "./organization-popover-position";
 
+type AnchorGeometry = Pick<
+  DOMRect,
+  "top" | "right" | "bottom" | "left" | "width"
+>;
+
+const DEFAULT_FALLBACK_WIDTH = 320;
+
 export function useOrganizationPopover(input: {
   open: boolean;
   anchorRef: RefObject<HTMLInputElement | null>;
@@ -18,6 +25,7 @@ export function useOrganizationPopover(input: {
   placement: "top" | "bottom";
 } {
   const listboxRef = useRef<HTMLDivElement>(null);
+  const lastValidAnchorRef = useRef<AnchorGeometry | null>(null);
   const [popoverStyle, setPopoverStyle] = useState<CSSProperties | null>(null);
   const [placement, setPlacement] = useState<"top" | "bottom">("bottom");
 
@@ -37,11 +45,20 @@ export function useOrganizationPopover(input: {
       }
 
       try {
+        const measuredAnchor = anchor.getBoundingClientRect();
+        const anchorGeometry: AnchorGeometry = {
+          top: measuredAnchor.top,
+          right: measuredAnchor.right,
+          bottom: measuredAnchor.bottom,
+          left: measuredAnchor.left,
+          width: measuredAnchor.width,
+        };
         const position = calculateOrganizationPopoverPosition({
-          anchor: anchor.getBoundingClientRect(),
+          anchor: anchorGeometry,
           viewportWidth: window.innerWidth,
           viewportHeight: window.innerHeight,
         });
+        lastValidAnchorRef.current = anchorGeometry;
         setPlacement(position.placement);
         setPopoverStyle({
           position: "fixed",
@@ -51,12 +68,14 @@ export function useOrganizationPopover(input: {
           maxHeight: position.maxHeight,
         });
       } catch {
+        const fallbackAnchor =
+          lastValidAnchorRef.current ?? visibleFallbackAnchor(anchor);
         const fallback = calculateOrganizationPopoverPosition({
-          anchor: { top: 0, right: 0, bottom: 0, left: 0, width: 0 },
+          anchor: fallbackAnchor,
           viewportWidth: window.innerWidth,
           viewportHeight: window.innerHeight,
         });
-        setPlacement("bottom");
+        setPlacement(fallback.placement);
         setPopoverStyle({
           position: "fixed",
           top: fallback.top,
@@ -103,4 +122,18 @@ export function useOrganizationPopover(input: {
   }, [input.anchorRef, input.containerRef, input.onRequestClose, input.open]);
 
   return { listboxRef, popoverStyle, placement };
+}
+
+function visibleFallbackAnchor(anchor: HTMLInputElement): AnchorGeometry {
+  let width = DEFAULT_FALLBACK_WIDTH;
+  try {
+    const layoutWidth = anchor.clientWidth || anchor.offsetWidth;
+    if (Number.isFinite(layoutWidth) && layoutWidth > 0) {
+      width = layoutWidth;
+    }
+  } catch {
+    // The bounded default keeps the listbox usable when layout access fails.
+  }
+
+  return { top: 0, right: width, bottom: 0, left: 0, width };
 }
