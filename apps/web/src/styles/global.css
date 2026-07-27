@@ -382,6 +382,12 @@ a {
   gap: var(--er-space-4);
   margin-top: var(--er-space-4);
 }
+.er-participant-mode-actions {
+  margin-top: var(--er-space-4);
+}
+.er-participant-mode-actions + .er-dialog-form {
+  margin-top: var(--er-space-4);
+}
 .er-dialog-form__dates {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

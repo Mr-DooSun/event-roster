@@ -6,6 +6,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, expect, it, vi } from "vitest";
@@ -73,6 +74,75 @@ it("defaults reusable participants from an inactive master organization to an ac
     organizationId: "org-active",
     expectedParticipantRevision: 3,
   });
+});
+
+it("groups participant fields and actions with visible spacing hooks", () => {
+  render(
+    <ParticipantDialog
+      participants={[
+        {
+          id: "person-1",
+          participantId: "P-001",
+          name: "박민수",
+          organizationId: "org-1",
+          revision: 3,
+        },
+      ]}
+      organizations={[
+        { id: "org-1", name: "성룡사", isActive: true },
+        { id: "org-2", name: "황룡사", isActive: true },
+      ]}
+      onAdd={vi.fn().mockResolvedValue(undefined)}
+      onCreateAndAdd={vi.fn().mockResolvedValue(undefined)}
+      onClose={vi.fn()}
+    />,
+  );
+
+  const dialog = screen.getByRole("dialog", { name: "참가자 추가" });
+  expect(
+    screen.getByRole("button", { name: "기존 참가자" }).parentElement,
+  ).toHaveClass("er-participant-mode-actions");
+  expect(screen.getByLabelText("참가자").closest("form")).toHaveClass(
+    "er-dialog-form",
+  );
+  expect(
+    within(dialog).getByRole("button", { name: "닫기" }).parentElement,
+  ).toHaveClass("er-dialog-actions");
+  expect(
+    within(dialog).getByRole("button", { name: "명단에 추가" }).parentElement,
+  ).toHaveClass("er-dialog-actions");
+});
+
+it("clears a selected organization when its search text changes", () => {
+  render(
+    <ParticipantDialog
+      participants={[
+        {
+          id: "person-1",
+          participantId: "P-001",
+          name: "박민수",
+          organizationId: "org-1",
+          revision: 3,
+        },
+      ]}
+      organizations={[
+        { id: "org-1", name: "성룡사", isActive: true },
+        { id: "org-2", name: "황룡사", isActive: true },
+      ]}
+      onAdd={vi.fn().mockResolvedValue(undefined)}
+      onCreateAndAdd={vi.fn().mockResolvedValue(undefined)}
+      onClose={vi.fn()}
+    />,
+  );
+
+  const organization = screen.getByRole("combobox", {
+    name: "확정 소속 조직",
+  });
+  expect(screen.getByRole("button", { name: "명단에 추가" })).toBeEnabled();
+  fireEvent.change(organization, { target: { value: "황" } });
+  expect(screen.getByRole("button", { name: "명단에 추가" })).toBeDisabled();
+  fireEvent.click(screen.getByRole("option", { name: "황룡사" }));
+  expect(screen.getByRole("button", { name: "명단에 추가" })).toBeEnabled();
 });
 
 it("shows the pending roster row without removing the table", async () => {
@@ -267,6 +337,12 @@ it("keeps an existing-participant dialog pending without submitting twice", asyn
   expect(onAdd).toHaveBeenCalledTimes(1);
   expect(screen.getByLabelText("확정 이름")).toHaveValue("확정 이름");
   expect(screen.getByRole("dialog", { name: "참가자 추가" })).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "닫기" }));
+  fireEvent.keyDown(screen.getByRole("dialog", { name: "참가자 추가" }), {
+    key: "Escape",
+  });
+  expect(onClose).not.toHaveBeenCalled();
+  expect(screen.getByRole("dialog", { name: "참가자 추가" })).toBeVisible();
 
   await act(async () => {
     pendingAdd.reject(new Error("add failed"));
@@ -279,13 +355,14 @@ it("keeps an existing-participant dialog pending without submitting twice", asyn
 it("keeps a new-participant dialog pending without submitting twice", async () => {
   const pendingCreate = deferred<void>();
   const onCreateAndAdd = vi.fn(() => pendingCreate.promise);
+  const onClose = vi.fn();
   render(
     <ParticipantDialog
       participants={[]}
       organizations={[{ id: "org-1", name: "1팀", isActive: true }]}
       onAdd={vi.fn().mockResolvedValue(undefined)}
       onCreateAndAdd={onCreateAndAdd}
-      onClose={vi.fn()}
+      onClose={onClose}
     />,
   );
   fireEvent.click(screen.getByRole("button", { name: "새 참가자" }));
@@ -302,6 +379,12 @@ it("keeps a new-participant dialog pending without submitting twice", async () =
   fireEvent.click(pendingButton);
   expect(onCreateAndAdd).toHaveBeenCalledTimes(1);
   expect(screen.getByLabelText("이름")).toHaveValue("새 참가자 이름");
+  fireEvent.click(screen.getByRole("button", { name: "닫기" }));
+  fireEvent.keyDown(screen.getByRole("dialog", { name: "참가자 추가" }), {
+    key: "Escape",
+  });
+  expect(onClose).not.toHaveBeenCalled();
+  expect(screen.getByRole("dialog", { name: "참가자 추가" })).toBeVisible();
 
   await act(async () => {
     pendingCreate.reject(new Error("create failed"));
@@ -663,14 +746,16 @@ it("confirms reusable participant details in one existing-roster request", async
   await login();
   await openRosterTab();
   fireEvent.click(await screen.findByRole("button", { name: "참가자 추가" }));
-  expect(screen.getByLabelText("확정 소속 조직")).toHaveValue("org-1");
-  expect(screen.getByLabelText("확정 소속 조직")).toBeEnabled();
+  const organization = screen.getByRole("combobox", {
+    name: "확정 소속 조직",
+  });
+  expect(organization).toHaveValue("1팀");
+  expect(organization).toBeEnabled();
   fireEvent.change(screen.getByLabelText("확정 이름"), {
     target: { value: "확정 이름" },
   });
-  fireEvent.change(screen.getByLabelText("확정 소속 조직"), {
-    target: { value: "org-2" },
-  });
+  fireEvent.change(organization, { target: { value: "2팀" } });
+  fireEvent.click(screen.getByRole("option", { name: "2팀" }));
   fireEvent.click(screen.getByRole("button", { name: "명단에 추가" }));
 
   await vi.waitFor(() =>
@@ -784,9 +869,10 @@ it("keeps a manager reuse confirmation in the participant master organization", 
 
   const organization = screen.getByLabelText("확정 소속 조직");
   expect(organization).toBeDisabled();
-  expect(organization).toHaveValue("org-1");
-  fireEvent.change(organization, { target: { value: "org-2" } });
-  expect(organization).toHaveValue("org-1");
+  expect(organization).toHaveValue("1팀");
+  expect(
+    screen.queryByRole("combobox", { name: "확정 소속 조직" }),
+  ).not.toBeInTheDocument();
   fireEvent.change(screen.getByLabelText("확정 이름"), {
     target: { value: "담당자 확인 이름" },
   });

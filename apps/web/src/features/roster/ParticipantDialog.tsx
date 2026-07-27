@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { Button } from "../../components/ui/Button";
 import { Dialog } from "../../components/ui/Dialog";
 import { TextInput } from "../../components/ui/TextInput";
+import { OrganizationSelectCombobox } from "./OrganizationSelectCombobox";
 
 export interface ParticipantView {
   id: string;
@@ -129,9 +130,13 @@ export function ParticipantDialog({
     }
   }
 
+  const close = () => {
+    if (busy === null) onClose();
+  };
+
   return (
-    <Dialog title="참가자 추가" onClose={onClose}>
-      <div className="er-action-row">
+    <Dialog title="참가자 추가" hideDefaultCloseAction onClose={close}>
+      <div className="er-participant-mode-actions er-action-row">
         <Button
           type="button"
           variant={mode === "EXISTING" ? "primary" : "secondary"}
@@ -149,107 +154,115 @@ export function ParticipantDialog({
           새 참가자
         </Button>
       </div>
-      {mode === "EXISTING" ? (
-        <>
-          <label className="er-field">
-            <span>참가자</span>
-            <select
-              value={participantId}
-              disabled={busy !== null}
-              onChange={(event) => setParticipantId(event.currentTarget.value)}
-            >
-              {participants.map((participant) => (
-                <option key={participant.id} value={participant.id}>
-                  {participant.name} · {participant.participantId}
-                </option>
-              ))}
-            </select>
-          </label>
-          <TextInput
-            label="확정 이름"
-            required
-            value={confirmedName}
-            disabled={busy !== null}
-            onChange={(event) => setConfirmedName(event.currentTarget.value)}
-          />
-          <label className="er-field">
-            <span>확정 소속 조직</span>
-            <select
-              value={confirmedOrganizationId}
-              disabled={busy !== null || !allowExistingOrganizationChange}
-              onChange={
-                allowExistingOrganizationChange
-                  ? (event) =>
-                      setConfirmedOrganizationId(event.currentTarget.value)
-                  : undefined
-              }
-            >
-              {organizations
-                .filter((organization) =>
-                  allowExistingOrganizationChange
-                    ? organization.isActive
-                    : organization.id === selectedParticipant?.organizationId,
-                )
-                .map((organization) => (
-                  <option key={organization.id} value={organization.id}>
-                    {organization.name}
+      <form
+        className="er-dialog-form"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (mode === "EXISTING") void addExisting();
+          else void createAndAdd();
+        }}
+      >
+        {mode === "EXISTING" ? (
+          <>
+            <label className="er-field">
+              <span>참가자</span>
+              <select
+                value={participantId}
+                disabled={busy !== null}
+                onChange={(event) =>
+                  setParticipantId(event.currentTarget.value)
+                }
+              >
+                {participants.map((participant) => (
+                  <option key={participant.id} value={participant.id}>
+                    {participant.name} · {participant.participantId}
                   </option>
                 ))}
-            </select>
-          </label>
-          <Button
-            type="button"
-            variant="primary"
-            loading={busy === "EXISTING"}
-            loadingText="명단에 추가 중…"
-            disabled={
-              busy !== null ||
-              !selectedParticipant ||
-              !confirmedName.trim() ||
-              !confirmedOrganizationId
-            }
-            onClick={() => void addExisting()}
-          >
-            명단에 추가
-          </Button>
-        </>
-      ) : (
-        <>
-          <TextInput
-            label="이름"
-            required
-            value={name}
-            disabled={busy !== null}
-            onChange={(event) => setName(event.currentTarget.value)}
-          />
-          <label className="er-field">
-            <span>소속 조직</span>
-            <select
+              </select>
+            </label>
+            <TextInput
+              label="확정 이름"
+              required
+              value={confirmedName}
+              disabled={busy !== null}
+              onChange={(event) =>
+                setConfirmedName(event.currentTarget.value)
+              }
+            />
+            {allowExistingOrganizationChange ? (
+              <OrganizationSelectCombobox
+                label="확정 소속 조직"
+                organizations={organizations}
+                value={confirmedOrganizationId}
+                disabled={busy !== null}
+                onChange={setConfirmedOrganizationId}
+              />
+            ) : (
+              <TextInput
+                label="확정 소속 조직"
+                value={
+                  organizations.find(
+                    (organization) =>
+                      organization.id === selectedParticipant?.organizationId,
+                  )?.name ?? ""
+                }
+                disabled
+                readOnly
+              />
+            )}
+            <div className="er-dialog-actions">
+              <Button type="button" disabled={busy !== null} onClick={close}>
+                닫기
+              </Button>
+              <Button
+                type="submit"
+                variant="primary"
+                loading={busy === "EXISTING"}
+                loadingText="명단에 추가 중…"
+                disabled={
+                  busy !== null ||
+                  !selectedParticipant ||
+                  !confirmedName.trim() ||
+                  !confirmedOrganizationId
+                }
+              >
+                명단에 추가
+              </Button>
+            </div>
+          </>
+        ) : (
+          <>
+            <TextInput
+              label="이름"
+              required
+              value={name}
+              disabled={busy !== null}
+              onChange={(event) => setName(event.currentTarget.value)}
+            />
+            <OrganizationSelectCombobox
+              label="소속 조직"
+              organizations={organizations}
               value={organizationId}
               disabled={busy !== null}
-              onChange={(event) => setOrganizationId(event.currentTarget.value)}
-            >
-              {organizations
-                .filter((organization) => organization.isActive)
-                .map((organization) => (
-                  <option key={organization.id} value={organization.id}>
-                    {organization.name}
-                  </option>
-                ))}
-            </select>
-          </label>
-          <Button
-            type="button"
-            variant="primary"
-            loading={busy === "NEW"}
-            loadingText="참가자 만드는 중…"
-            disabled={busy !== null || !name.trim() || !organizationId}
-            onClick={() => void createAndAdd()}
-          >
-            참가자 생성 후 추가
-          </Button>
-        </>
-      )}
+              onChange={setOrganizationId}
+            />
+            <div className="er-dialog-actions">
+              <Button type="button" disabled={busy !== null} onClick={close}>
+                닫기
+              </Button>
+              <Button
+                type="submit"
+                variant="primary"
+                loading={busy === "NEW"}
+                loadingText="참가자 만드는 중…"
+                disabled={busy !== null || !name.trim() || !organizationId}
+              >
+                참가자 생성 후 추가
+              </Button>
+            </div>
+          </>
+        )}
+      </form>
     </Dialog>
   );
 }
