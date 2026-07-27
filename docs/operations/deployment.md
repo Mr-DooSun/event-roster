@@ -243,12 +243,14 @@ migration의 승인된 사전·사후 검증 절차가 문서화되어 있어야
 
 `0004_automatic_project_preregistration.sql`이 pending이면 아래 절차를 일반
 반복 release migration 명령보다 먼저 수행한다. export와 체크섬은 실행별
-전용 디렉터리에만 보관하고, post-migration `preparing_count`는 반드시 0이어야
-한다. `audit_count`는 migration 전 `preparing_count`만큼 증가해야 하며,
+전용 디렉터리에만 보관한다. migration 전 `preparing_count`와 `audit_count`를
+배포 기록에 남긴다. post-migration `preparing_count`는 반드시 0이어야 하고,
+사후 `audit_count`는 사전 `audit_count + preparing_count`와 같아야 하며,
 foreign-key 검사는 행을 반환하지 않아야 한다. 하나라도 충족하지 않으면
 Worker를 배포하지 말고 [복구 절차](recovery.md)의 격리 복원을 따른다.
 
 ```bash
+set -euo pipefail
 release_backup_dir="$(mktemp -d /private/tmp/event-roster-d1-0004.XXXXXX)"
 chmod 700 "$release_backup_dir"
 corepack pnpm@10.28.1 --filter @event-roster/worker exec \
@@ -262,6 +264,9 @@ chmod 600 "$release_backup_dir/event-roster-before-0004.sql.sha256"
 corepack pnpm@10.28.1 --filter @event-roster/worker exec \
   wrangler d1 execute event-roster --remote --command \
   "SELECT COUNT(*) AS preparing_count FROM projects WHERE status='PREPARING'"
+corepack pnpm@10.28.1 --filter @event-roster/worker exec \
+  wrangler d1 execute event-roster --remote --command \
+  "SELECT COUNT(*) AS audit_count FROM audit_logs WHERE action='PROJECT_AUTO_PREREGISTERED'"
 
 corepack pnpm@10.28.1 --filter @event-roster/worker exec \
   wrangler d1 migrations apply event-roster --remote
@@ -276,6 +281,9 @@ corepack pnpm@10.28.1 --filter @event-roster/worker exec \
   wrangler d1 execute event-roster --remote --command \
   "PRAGMA foreign_key_check"
 ```
+
+`0004`가 pending인 경우에는 위 전용 block만 실행한다. 그 밖의 pending
+migration에는 아래 일반 block을 실행한다.
 
 ```bash
 set -euo pipefail
