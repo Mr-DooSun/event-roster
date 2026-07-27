@@ -90,7 +90,13 @@ it("shows project status, dates, and automatic closing in the header", async () 
   expect(
     await screen.findByRole("heading", { name: "리더십 캠프" }),
   ).toBeVisible();
-  expect(screen.getByText("사전 등록")).toBeVisible();
+  expect(await screen.findByText("사전 등록")).toBeVisible();
+  expect(
+    screen.getByRole("button", { name: "진행 시작" }),
+  ).toBeEnabled();
+  expect(
+    screen.queryByRole("button", { name: "사전 등록 시작" }),
+  ).not.toBeInTheDocument();
   expect(screen.getByText("2026.05.22 ~ 2026.05.23")).toBeVisible();
   expect(screen.getByText("자동 종료")).toBeVisible();
 });
@@ -2129,7 +2135,7 @@ it("ignores a successful transition response after switching projects", async ()
   });
 
   expect(screen.getByRole("heading", { name: "신규 프로젝트" })).toBeVisible();
-  expect(screen.getByText("준비 중")).toBeVisible();
+  expect(screen.getByText("사전 등록")).toBeVisible();
   expect(
     screen.queryByRole("heading", { name: "리더십 캠프" }),
   ).not.toBeInTheDocument();
@@ -2168,7 +2174,7 @@ it("ignores a stale reload response after switching projects", async () => {
   });
 
   expect(screen.getByRole("heading", { name: "신규 프로젝트" })).toBeVisible();
-  expect(screen.getByText("준비 중")).toBeVisible();
+  expect(screen.getByText("사전 등록")).toBeVisible();
 });
 
 it("refreshes a project edit once when the project closed concurrently", async () => {
@@ -2314,7 +2320,7 @@ function projectTwo() {
     ...project,
     id: "project-2",
     name: "신규 프로젝트",
-    status: "PREPARING" as const,
+    status: "PRE_REGISTRATION" as const,
     revision: 0,
   };
 }

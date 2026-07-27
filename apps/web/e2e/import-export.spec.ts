@@ -42,18 +42,6 @@ test("imports 130 rows and downloads two-sheet Excel", async ({ page }) => {
     },
   );
   expect(linkedResponse.ok()).toBe(true);
-  const linked = (await linkedResponse.json()) as { projectRevision: number };
-  expect(
-    (
-      await api.post(`/api/v1/projects/${project.id}/transition`, {
-        headers,
-        data: {
-          targetStatus: "PRE_REGISTRATION",
-          expectedRevision: linked.projectRevision,
-        },
-      })
-    ).ok(),
-  ).toBe(true);
   await api.dispose();
   await login(page, data.operator.loginId, data.operator.password);
   await page.goto(`/projects/${project.id}/import`);

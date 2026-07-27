@@ -46,24 +46,9 @@ export async function setupPreRegistration(): Promise<RosterFixture> {
        VALUES ('participant-2', 'P-SECOND', '둘째 참가자', 'org-1', 0, ?, ?)`,
     ).bind(now, now),
   ]);
-  const transitioned = await authedRequest(
-    operator,
-    `/api/v1/projects/${project.id}/transition`,
-    {
-      method: "POST",
-      body: JSON.stringify({
-        targetStatus: "PRE_REGISTRATION",
-        expectedRevision: linked.projectRevision,
-      }),
-    },
-  );
   return {
     operator,
-    project: await transitioned.json<{
-      id: string;
-      revision: number;
-      status: string;
-    }>(),
+    project: { ...project, revision: linked.projectRevision },
     firstParticipant: {
       id: "participant-1",
       participantId: "P-FIRST",

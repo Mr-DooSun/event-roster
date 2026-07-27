@@ -266,14 +266,15 @@ it("renders the minimal B-style project card fields", async () => {
       name: "일정 미정 프로젝트",
       startDate: null,
       endDate: null,
-      status: "PREPARING",
+      status: "PRE_REGISTRATION",
       createdAt: "2026-07-18T00:00:00.000Z",
     },
   ]);
   render(<ProjectsPage />);
 
   expect(await screen.findByText("상반기 리더십 캠프")).toBeVisible();
-  expect(screen.getByText("사전 등록")).toBeVisible();
+  expect(await screen.findAllByText("사전 등록")).toHaveLength(2);
+  expect(screen.queryByText("준비 중")).not.toBeInTheDocument();
   expect(screen.getByText("시작 2026.05.22")).toBeVisible();
   expect(screen.getByText("종료 2026.05.23")).toBeVisible();
   expect(screen.getByText("시작 미정")).toBeVisible();

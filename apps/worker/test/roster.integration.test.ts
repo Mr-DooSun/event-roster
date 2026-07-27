@@ -712,18 +712,7 @@ it("atomically refreshes a reused participant only for a new project and preserv
     },
   );
   const linked = await linkedResponse.json<{ projectRevision: number }>();
-  const pre = await authedRequest(
-    fixture.operator,
-    `/api/v1/projects/${targetProject.id}/transition`,
-    {
-      method: "POST",
-      body: JSON.stringify({
-        targetStatus: "PRE_REGISTRATION",
-        expectedRevision: linked.projectRevision,
-      }),
-    },
-  );
-  const target = await pre.json<{ revision: number }>();
+  const target = { revision: linked.projectRevision };
   const reused = await authedRequest(
     fixture.operator,
     `/api/v1/projects/${targetProject.id}/roster`,
@@ -789,18 +778,7 @@ it("atomically refreshes a reused participant only for a new project and preserv
   const staleLinked = await staleLinkedResponse.json<{
     projectRevision: number;
   }>();
-  const stalePre = await authedRequest(
-    fixture.operator,
-    `/api/v1/projects/${staleProject.id}/transition`,
-    {
-      method: "POST",
-      body: JSON.stringify({
-        targetStatus: "PRE_REGISTRATION",
-        expectedRevision: staleLinked.projectRevision,
-      }),
-    },
-  );
-  const staleTarget = await stalePre.json<{ revision: number }>();
+  const staleTarget = { revision: staleLinked.projectRevision };
   const stale = await authedRequest(
     fixture.operator,
     `/api/v1/projects/${staleProject.id}/roster`,
@@ -1177,21 +1155,7 @@ async function setupManagerReuseProject() {
     projectRevision = (await linked.json<{ projectRevision: number }>())
       .projectRevision;
   }
-  const transitioned = await authedRequest(
-    fixture.operator,
-    `/api/v1/projects/${target.id}/transition`,
-    {
-      method: "POST",
-      body: JSON.stringify({
-        targetStatus: "PRE_REGISTRATION",
-        expectedRevision: projectRevision,
-      }),
-    },
-  );
-  const targetProject = await transitioned.json<{
-    id: string;
-    revision: number;
-  }>();
+  const targetProject = { id: target.id, revision: projectRevision };
   const manager = await seedManager("org-1");
   await env.DB.prepare(
     `INSERT INTO user_organizations

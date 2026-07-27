@@ -93,16 +93,6 @@ export default async function globalSetup() {
     },
   );
   await ok(linkResponse);
-  const linked = (await linkResponse.json()) as { projectRevision: number };
-  await ok(
-    await api.post(`/api/v1/projects/${project.id}/transition`, {
-      headers: authHeaders(operatorAuth),
-      data: {
-        targetStatus: "PRE_REGISTRATION",
-        expectedRevision: linked.projectRevision,
-      },
-    }),
-  );
   fixture.projectId = project.id;
   await ok(
     await api.post("/api/v1/projects", {
@@ -130,18 +120,6 @@ export default async function globalSetup() {
     },
   );
   await ok(rosterLinkResponse);
-  const rosterLink = (await rosterLinkResponse.json()) as {
-    projectRevision: number;
-  };
-  await ok(
-    await api.post(`/api/v1/projects/${rosterProject.id}/transition`, {
-      headers: authHeaders(operatorAuth),
-      data: {
-        targetStatus: "PRE_REGISTRATION",
-        expectedRevision: rosterLink.projectRevision,
-      },
-    }),
-  );
   fixture.rosterProjectId = rosterProject.id;
   const temporaryUser = await api.post("/api/v1/users", {
     headers: authHeaders(operatorAuth),

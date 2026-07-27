@@ -28,7 +28,6 @@ const PROJECT_STATUS_LABEL: Record<
   OrganizationProject["projectStatus"],
   string
 > = {
-  PREPARING: "준비 중",
   PRE_REGISTRATION: "사전 등록",
   IN_PROGRESS: "진행 중",
   CLOSED: "종료",

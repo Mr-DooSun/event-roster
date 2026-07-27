@@ -84,7 +84,6 @@ const RESOURCE_LOADING_STATE: Record<
 };
 
 const STATUS_LABEL: Record<ProjectStatus, string> = {
-  PREPARING: "준비 중",
   PRE_REGISTRATION: "사전 등록",
   IN_PROGRESS: "진행 중",
   CLOSED: "종료",
@@ -94,7 +93,6 @@ const NEXT_ACTION: Record<
   ProjectStatus,
   { target: ProjectStatus; label: string }
 > = {
-  PREPARING: { target: "PRE_REGISTRATION", label: "사전 등록 시작" },
   PRE_REGISTRATION: { target: "IN_PROGRESS", label: "진행 시작" },
   IN_PROGRESS: { target: "CLOSED", label: "프로젝트 종료" },
   CLOSED: { target: "IN_PROGRESS", label: "프로젝트 재개" },
@@ -554,7 +552,6 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
     project.endDate < currentKstDate();
   const canMutateRoster =
     project.status !== "CLOSED" &&
-    project.status !== "PREPARING" &&
     (operator ||
       (project.status === "PRE_REGISTRATION" &&
         memberships.some(
