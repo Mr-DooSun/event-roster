@@ -28,6 +28,17 @@ test("operator moves a pre-registration project in progress and updates its rost
   await expect(page.getByRole("tab", { name: "변경 이력" })).toBeVisible();
   await expect(page.getByText("예상 0명")).toBeVisible();
 
+  await page.getByRole("tab", { name: "조직" }).click();
+  const organizationSearch = page.getByRole("combobox", {
+    name: "조직 이름 검색 또는 입력",
+  });
+  await organizationSearch.fill("황룡사");
+  await page
+    .getByRole("option", { name: "“황룡사” 새 조직 생성 후 추가" })
+    .click();
+  await page.getByRole("button", { name: "생성 후 추가" }).click();
+  await expect(page.getByText("황룡사", { exact: true })).toBeVisible();
+
   await page.getByRole("button", { name: "진행 시작" }).click();
   await page.getByRole("button", { name: "변경 확인" }).click();
   await expect(page.getByText("진행 중", { exact: true })).toBeVisible();
@@ -57,4 +68,35 @@ test("operator moves a pre-registration project in progress and updates its rost
   await expect(page.getByText("예상 0명")).toBeVisible();
   await expect(page.getByText("실제 0명")).toBeVisible();
   await expect(page.getByText("0명", { exact: true })).toBeVisible();
+
+  await page.getByRole("tab", { name: "참가 명단" }).click();
+  await page.getByRole("button", { name: "참가자 추가" }).click();
+  await page.getByRole("button", { name: "새 참가자" }).click();
+  const organization = page.getByRole("combobox", { name: "소속 조직" });
+  await organization.fill("황룡사");
+  await expect(page.getByRole("listbox")).toBeVisible();
+  const geometry = await page.getByRole("listbox").evaluate((element) => ({
+    parent: element.parentElement === document.body,
+    zIndex: Number(getComputedStyle(element).zIndex),
+    top: element.getBoundingClientRect().top,
+    bottom: element.getBoundingClientRect().bottom,
+    viewport: window.innerHeight,
+  }));
+  expect(geometry).toMatchObject({ parent: true, zIndex: 110 });
+  expect(geometry.top).toBeGreaterThanOrEqual(0);
+  expect(geometry.bottom).toBeLessThanOrEqual(geometry.viewport);
+  await page.getByRole("option", { name: "황룡사" }).click();
+  await page.getByLabel("이름").fill("최근 조직 참가자");
+  await page.getByRole("button", { name: "참가자 생성 후 추가" }).click();
+  await expect(
+    page.getByRole("cell", { name: "최근 조직 참가자", exact: true }),
+  ).toBeVisible();
+
+  await page.reload();
+  await page.getByRole("tab", { name: "참가 명단" }).click();
+  await page.getByRole("button", { name: "참가자 추가" }).click();
+  await page.getByRole("button", { name: "새 참가자" }).click();
+  await expect(page.getByRole("combobox", { name: "소속 조직" })).toHaveValue(
+    "황룡사",
+  );
 });
