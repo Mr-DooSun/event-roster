@@ -649,6 +649,15 @@ a {
 .er-action-row--wrap {
   flex-wrap: wrap;
 }
+.er-roster-actions {
+  gap: var(--er-space-3);
+}
+.er-roster-filters {
+  display: grid;
+  grid-template-columns: minmax(16rem, 2fr) repeat(2, minmax(10rem, 1fr));
+  align-items: end;
+  gap: var(--er-space-4);
+}
 .er-compact-list {
   display: flex;
   flex-wrap: wrap;
@@ -973,7 +982,8 @@ th {
 
 @media (max-width: 42rem) {
   .er-organization-filters,
-  .er-organization-facts {
+  .er-organization-facts,
+  .er-roster-filters {
     grid-template-columns: 1fr;
   }
   .er-organization-filters .er-field:first-child {

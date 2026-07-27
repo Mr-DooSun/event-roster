@@ -113,6 +113,55 @@ it("groups participant fields and actions with visible spacing hooks", () => {
   ).toHaveClass("er-dialog-actions");
 });
 
+it("uses dedicated responsive spacing for roster actions and filters", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL) => {
+      if (String(input).endsWith("/auth/login")) {
+        return Promise.resolve(Response.json(auth()));
+      }
+      throw new Error(`unexpected request: ${String(input)}`);
+    }),
+  );
+
+  render(
+    <AuthProvider restoreOnMount={false}>
+      <Gate>
+        <ProjectRosterPage
+          project={project()}
+          rows={[entry("ACTIVE")]}
+          participants={[]}
+          organizations={[{ id: "org-1", name: "1팀", isActive: true }]}
+          canMutate
+          onChanged={vi.fn().mockResolvedValue(undefined)}
+        />
+      </Gate>
+    </AuthProvider>,
+  );
+
+  await login();
+
+  const exportButton = await screen.findByRole("button", {
+    name: "엑셀 내보내기",
+  });
+  const addButton = screen.getByRole("button", { name: "참가자 추가" });
+  expect(exportButton.parentElement).toBe(addButton.parentElement);
+  expect(exportButton.parentElement).toHaveClass(
+    "er-roster-actions",
+    "er-action-row--wrap",
+  );
+
+  const filterGrid = screen.getByLabelText("명단 검색").parentElement
+    ?.parentElement;
+  expect(filterGrid).toHaveClass("er-roster-filters");
+  expect(
+    within(filterGrid as HTMLElement).getByLabelText("조직 필터"),
+  ).toBeVisible();
+  expect(
+    within(filterGrid as HTMLElement).getByLabelText("상태 필터"),
+  ).toBeVisible();
+});
+
 it("clears a selected organization when its search text changes", () => {
   render(
     <ParticipantDialog

@@ -60,7 +60,7 @@ export function RosterTable({
   }, [organization, query, rows, status]);
   return (
     <div className="er-page-stack">
-      <div className="er-filter-row">
+      <div className="er-roster-filters">
         <TextInput
           label="명단 검색"
           placeholder="이름, 조직, 고유 ID"

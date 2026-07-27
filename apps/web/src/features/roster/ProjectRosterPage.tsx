@@ -199,7 +199,7 @@ export function ProjectRosterPage({
           {message}
         </StatusMessage>
       ) : null}
-      <div className="er-action-row er-action-row--wrap">
+      <div className="er-roster-actions er-action-row er-action-row--wrap">
         {auth?.session.user.role === "OPERATOR" &&
         project.status === "PRE_REGISTRATION" ? (
           <a
