@@ -1,10 +1,15 @@
 import type { Organization, Project } from "@event-roster/contracts";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "../../components/ui/Button";
 import { Card } from "../../components/ui/Card";
 import { StatusMessage } from "../../components/ui/StatusMessage";
 import { ApiError } from "../../lib/api";
 import type { ExportData } from "../../lib/excel/download-workbook";
+import {
+  getBrowserOrganizationStorage,
+  readRecentOrganizationIds,
+  recordRecentOrganizationId,
+} from "../../lib/recent-organizations";
 import { useAuth } from "../auth/AuthProvider";
 import {
   type ExistingParticipantConfirmation,
@@ -44,7 +49,8 @@ export function ProjectRosterPage({
   const [exporting, setExporting] = useState(false);
   const busyRowIdsRef = useRef<ReadonlySet<string>>(new Set());
   const exportingRef = useRef(false);
-  const activeOrganizationIds = useMemo(
+  const authenticatedUserId = auth?.session.user.id ?? "";
+  const validOrganizationIds = useMemo(
     () =>
       new Set(
         organizations
@@ -53,19 +59,57 @@ export function ProjectRosterPage({
       ),
     [organizations],
   );
+  const [recentOrganizationIds, setRecentOrganizationIds] = useState<string[]>(
+    () =>
+      authenticatedUserId
+        ? readRecentOrganizationIds({
+            storage: getBrowserOrganizationStorage(),
+            userId: authenticatedUserId,
+            projectId: project.id,
+            validOrganizationIds,
+          })
+        : [],
+  );
+  useEffect(() => {
+    if (!authenticatedUserId) {
+      setRecentOrganizationIds([]);
+      return;
+    }
+    setRecentOrganizationIds(
+      readRecentOrganizationIds({
+        storage: getBrowserOrganizationStorage(),
+        userId: authenticatedUserId,
+        projectId: project.id,
+        validOrganizationIds,
+      }),
+    );
+  }, [authenticatedUserId, project.id, validOrganizationIds]);
   const availableParticipants = useMemo(
     () =>
       participants.filter(
         (participant) =>
           (auth?.session.user.role === "OPERATOR" ||
-            activeOrganizationIds.has(participant.organizationId)) &&
+            validOrganizationIds.has(participant.organizationId)) &&
           !rows.some(
             (row) =>
               row.participantId === participant.id && row.status === "ACTIVE",
           ),
       ),
-    [activeOrganizationIds, auth?.session.user.role, participants, rows],
+    [auth?.session.user.role, participants, rows, validOrganizationIds],
   );
+
+  function rememberOrganization(organizationId: string) {
+    if (!authenticatedUserId) return;
+    setRecentOrganizationIds(
+      recordRecentOrganizationId({
+        storage: getBrowserOrganizationStorage(),
+        userId: authenticatedUserId,
+        projectId: project.id,
+        organizationId,
+        validOrganizationIds,
+      }),
+    );
+  }
 
   async function handleMutation(
     operation: () => Promise<unknown>,
@@ -157,7 +201,10 @@ export function ProjectRosterPage({
         expectedRevision: project.revision,
       }),
     );
-    if (completed) setShowAdd(false);
+    if (completed) {
+      rememberOrganization(input.organizationId);
+      setShowAdd(false);
+    }
   }
 
   async function createAndAdd(input: { name: string; organizationId: string }) {
@@ -167,7 +214,10 @@ export function ProjectRosterPage({
         expectedRevision: project.revision,
       }),
     );
-    if (completed) setShowAdd(false);
+    if (completed) {
+      rememberOrganization(input.organizationId);
+      setShowAdd(false);
+    }
   }
 
   async function exportRoster() {
@@ -236,12 +286,12 @@ export function ProjectRosterPage({
           busyRowIds={busyRowIds}
           canMutateRow={(row) =>
             auth?.session.user.role === "OPERATOR" ||
-            activeOrganizationIds.has(row.organizationId)
+            validOrganizationIds.has(row.organizationId)
           }
           canEditRow={(row) =>
             participantCandidatesAvailable &&
             (auth?.session.user.role === "OPERATOR" ||
-              activeOrganizationIds.has(row.organizationId))
+              validOrganizationIds.has(row.organizationId))
           }
           onStatusChange={changeStatus}
           onEdit={edit}
@@ -251,6 +301,7 @@ export function ProjectRosterPage({
         <ParticipantDialog
           participants={availableParticipants}
           organizations={organizations}
+          recentOrganizationIds={recentOrganizationIds}
           allowExistingOrganizationChange={
             auth?.session.user.role === "OPERATOR"
           }

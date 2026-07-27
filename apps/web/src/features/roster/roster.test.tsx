@@ -20,6 +20,7 @@ import { RosterTable, type RosterView } from "./RosterTable";
 
 afterEach(() => {
   cleanup();
+  window.localStorage.clear();
   vi.unstubAllGlobals();
 });
 
@@ -74,6 +75,256 @@ it("defaults reusable participants from an inactive master organization to an ac
     organizationId: "org-active",
     expectedParticipantRevision: 3,
   });
+});
+
+it("defaults a new participant to the newest valid recent organization", () => {
+  render(
+    <ParticipantDialog
+      participants={[
+        {
+          id: "person-1",
+          participantId: "P-001",
+          name: "박민수",
+          organizationId: "org-1",
+          revision: 3,
+        },
+      ]}
+      organizations={[
+        { id: "org-1", name: "성룡사", isActive: true },
+        { id: "org-2", name: "황룡사", isActive: true },
+        { id: "org-inactive", name: "휴면사", isActive: false },
+      ]}
+      recentOrganizationIds={["org-2", "org-inactive"]}
+      onAdd={vi.fn().mockResolvedValue(undefined)}
+      onCreateAndAdd={vi.fn().mockResolvedValue(undefined)}
+      onClose={vi.fn()}
+    />,
+  );
+
+  fireEvent.click(screen.getByRole("button", { name: "새 참가자" }));
+
+  expect(screen.getByRole("combobox", { name: "소속 조직" })).toHaveValue(
+    "황룡사",
+  );
+});
+
+it("keeps an existing participant organization while ordering recent options", () => {
+  render(
+    <ParticipantDialog
+      participants={[
+        {
+          id: "person-1",
+          participantId: "P-001",
+          name: "박민수",
+          organizationId: "org-1",
+          revision: 3,
+        },
+      ]}
+      organizations={[
+        { id: "org-1", name: "성룡사", isActive: true },
+        { id: "org-2", name: "황룡사", isActive: true },
+      ]}
+      recentOrganizationIds={["org-2"]}
+      onAdd={vi.fn().mockResolvedValue(undefined)}
+      onCreateAndAdd={vi.fn().mockResolvedValue(undefined)}
+      onClose={vi.fn()}
+    />,
+  );
+
+  const input = screen.getByRole("combobox", {
+    name: "확정 소속 조직",
+  });
+  expect(input).toHaveValue("성룡사");
+  fireEvent.focus(input);
+  expect(
+    within(screen.getByRole("listbox")).getAllByRole("option")[0],
+  ).toHaveTextContent("황룡사");
+});
+
+it("records a new participant organization only after POST and reload succeed", async () => {
+  const reload = deferred<void>();
+  const onChanged = vi.fn(() => reload.promise);
+  const fetchMock = rosterAddFetch();
+  vi.stubGlobal("fetch", fetchMock);
+  renderRosterForRecentOrganizations({
+    onChanged,
+  });
+  await login();
+
+  await openNewParticipantForm("황룡사");
+  fireEvent.click(screen.getByRole("button", { name: "참가자 생성 후 추가" }));
+
+  await waitFor(() =>
+    expect(
+      fetchMock.mock.calls.some(
+        ([url, init]) =>
+          String(url).endsWith("/projects/project-1/roster") &&
+          init?.method === "POST",
+      ),
+    ).toBe(true),
+  );
+  expect(recentOrganizationValue("user-1", "project-1")).toBeNull();
+
+  await act(async () => {
+    reload.resolve(undefined);
+    await reload.promise;
+  });
+
+  await waitFor(() =>
+    expect(recentOrganizationValue("user-1", "project-1")).toEqual(["org-2"]),
+  );
+});
+
+it("records the confirmed organization after an existing participant add succeeds", async () => {
+  const onChanged = vi.fn().mockResolvedValue(undefined);
+  vi.stubGlobal("fetch", rosterAddFetch());
+  renderRosterForRecentOrganizations({
+    onChanged,
+    participants: [
+      {
+        id: "person-1",
+        participantId: "P-001",
+        name: "박민수",
+        organizationId: "org-2",
+        revision: 3,
+      },
+    ],
+  });
+  await login();
+
+  fireEvent.click(await screen.findByRole("button", { name: "참가자 추가" }));
+  fireEvent.click(screen.getByRole("button", { name: "명단에 추가" }));
+
+  await waitFor(() =>
+    expect(recentOrganizationValue("user-1", "project-1")).toEqual(["org-2"]),
+  );
+});
+
+it.each([
+  {
+    name: "POST rejection",
+    post: () => Promise.reject(new Error("network failed")),
+    onChanged: () => Promise.resolve(),
+  },
+  {
+    name: "STALE_REVISION",
+    post: () =>
+      Promise.resolve(
+        Response.json(
+          {
+            code: "STALE_REVISION",
+            message: "stale",
+            requestId: "request-stale",
+          },
+          { status: 409 },
+        ),
+      ),
+    onChanged: () => Promise.resolve(),
+  },
+  {
+    name: "PROJECT_CLOSED",
+    post: () =>
+      Promise.resolve(
+        Response.json(
+          {
+            code: "PROJECT_CLOSED",
+            message: "closed",
+            requestId: "request-closed",
+          },
+          { status: 409 },
+        ),
+      ),
+    onChanged: () => Promise.resolve(),
+  },
+  {
+    name: "reload rejection",
+    post: () =>
+      Promise.resolve(Response.json({ id: "entry-new" }, { status: 201 })),
+    onChanged: () => Promise.reject(new Error("reload failed")),
+  },
+])(
+  "does not record a recent organization after $name",
+  async ({ post, onChanged }) => {
+    const fetchMock = rosterAddFetch("user-1", post);
+    vi.stubGlobal("fetch", fetchMock);
+    renderRosterForRecentOrganizations({
+      onChanged: vi.fn(onChanged),
+    });
+    await login();
+
+    await openNewParticipantForm("황룡사");
+    fireEvent.click(
+      screen.getByRole("button", { name: "참가자 생성 후 추가" }),
+    );
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "참가자 생성 후 추가" }),
+      ).toBeEnabled(),
+    );
+    expect(recentOrganizationValue("user-1", "project-1")).toBeNull();
+  },
+);
+
+it("isolates recent defaults by project and authenticated user while ignoring invalid IDs", async () => {
+  window.localStorage.setItem(
+    "event-roster:recent-organizations:v1:user-1:project-1",
+    JSON.stringify(["org-inactive", "missing", "org-2"]),
+  );
+  window.localStorage.setItem(
+    "event-roster:recent-organizations:v1:user-1:project-2",
+    JSON.stringify(["org-1"]),
+  );
+  window.localStorage.setItem(
+    "event-roster:recent-organizations:v1:user-2:project-1",
+    JSON.stringify(["org-1"]),
+  );
+  vi.stubGlobal("fetch", rosterAddFetch());
+  const view = renderRosterForRecentOrganizations({
+    onChanged: vi.fn().mockResolvedValue(undefined),
+  });
+  await login();
+
+  fireEvent.click(await screen.findByRole("button", { name: "참가자 추가" }));
+  fireEvent.click(screen.getByRole("button", { name: "새 참가자" }));
+  expect(screen.getByRole("combobox", { name: "소속 조직" })).toHaveValue(
+    "황룡사",
+  );
+  fireEvent.click(screen.getByRole("button", { name: "닫기" }));
+
+  view.rerender(
+    <AuthProvider restoreOnMount={false}>
+      <Gate>
+        <ProjectRosterPage
+          project={{ ...project(), id: "project-2" }}
+          rows={[]}
+          participants={[]}
+          organizations={recentTestOrganizations()}
+          canMutate
+          onChanged={vi.fn().mockResolvedValue(undefined)}
+        />
+      </Gate>
+    </AuthProvider>,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "참가자 추가" }));
+  fireEvent.click(screen.getByRole("button", { name: "새 참가자" }));
+  await waitFor(() =>
+    expect(screen.getByRole("combobox", { name: "소속 조직" })).toHaveValue(
+      "성룡사",
+    ),
+  );
+
+  cleanup();
+  vi.stubGlobal("fetch", rosterAddFetch("user-2"));
+  renderRosterForRecentOrganizations({
+    onChanged: vi.fn().mockResolvedValue(undefined),
+  });
+  await login();
+  fireEvent.click(await screen.findByRole("button", { name: "참가자 추가" }));
+  fireEvent.click(screen.getByRole("button", { name: "새 참가자" }));
+  expect(screen.getByRole("combobox", { name: "소속 조직" })).toHaveValue(
+    "성룡사",
+  );
 });
 
 it("groups participant fields and actions with visible spacing hooks", () => {
@@ -1624,6 +1875,7 @@ async function openRosterTab() {
 function auth(
   role: "OPERATOR" | "ORGANIZATION_MANAGER" = "OPERATOR",
   organizationIds: string[] = [],
+  userId = "user-1",
 ) {
   return {
     accessToken: "access",
@@ -1631,7 +1883,7 @@ function auth(
     session: {
       sessionKind: "FULL",
       user: {
-        id: "user-1",
+        id: userId,
         loginId: "manager-01",
         displayName: "운영자",
         role,
@@ -1706,4 +1958,72 @@ function deferred<T>() {
     reject = nextReject;
   });
   return { promise, resolve, reject };
+}
+
+function recentTestOrganizations() {
+  return [
+    { id: "org-1", name: "성룡사", isActive: true },
+    { id: "org-2", name: "황룡사", isActive: true },
+    { id: "org-inactive", name: "휴면사", isActive: false },
+  ];
+}
+
+function rosterAddFetch(
+  userId = "user-1",
+  post: () => Promise<Response> = () =>
+    Promise.resolve(Response.json({ id: "entry-new" }, { status: 201 })),
+) {
+  return vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.endsWith("/auth/login")) {
+      return Promise.resolve(Response.json(auth("OPERATOR", [], userId)));
+    }
+    if (url.endsWith("/projects/project-1/roster") && init?.method === "POST") {
+      return post();
+    }
+    throw new Error(`unexpected request: ${url}`);
+  });
+}
+
+function renderRosterForRecentOrganizations({
+  onChanged,
+  participants = [],
+}: {
+  onChanged: () => Promise<void>;
+  participants?: React.ComponentProps<typeof ProjectRosterPage>["participants"];
+}) {
+  return render(
+    <AuthProvider restoreOnMount={false}>
+      <Gate>
+        <ProjectRosterPage
+          project={project()}
+          rows={[]}
+          participants={participants}
+          organizations={recentTestOrganizations()}
+          canMutate
+          onChanged={onChanged}
+        />
+      </Gate>
+    </AuthProvider>,
+  );
+}
+
+async function openNewParticipantForm(organizationName: string) {
+  fireEvent.click(await screen.findByRole("button", { name: "참가자 추가" }));
+  fireEvent.click(screen.getByRole("button", { name: "새 참가자" }));
+  fireEvent.change(screen.getByLabelText("이름"), {
+    target: { value: "김신규" },
+  });
+  const organization = screen.getByRole("combobox", { name: "소속 조직" });
+  fireEvent.change(organization, {
+    target: { value: organizationName.slice(0, 1) },
+  });
+  fireEvent.click(screen.getByRole("option", { name: organizationName }));
+}
+
+function recentOrganizationValue(userId: string, projectId: string) {
+  const value = window.localStorage.getItem(
+    `event-roster:recent-organizations:v1:${userId}:${projectId}`,
+  );
+  return value === null ? null : JSON.parse(value);
 }

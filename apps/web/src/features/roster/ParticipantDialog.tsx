@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { Button } from "../../components/ui/Button";
 import { Dialog } from "../../components/ui/Dialog";
 import { TextInput } from "../../components/ui/TextInput";
+import { orderOrganizationsByRecent } from "../../lib/recent-organizations";
 import { OrganizationSelectCombobox } from "./OrganizationSelectCombobox";
 
 export interface ParticipantView {
@@ -40,9 +41,22 @@ function initialConfirmedOrganizationId(
   return organizations.find((organization) => organization.isActive)?.id ?? "";
 }
 
+function firstActiveOrganizationId(
+  organizations: Organization[],
+  recentOrganizationIds: readonly string[],
+) {
+  return (
+    orderOrganizationsByRecent(
+      organizations.filter((organization) => organization.isActive),
+      recentOrganizationIds,
+    )[0]?.id ?? ""
+  );
+}
+
 export function ParticipantDialog({
   participants,
   organizations,
+  recentOrganizationIds = [],
   onAdd,
   onCreateAndAdd,
   allowExistingOrganizationChange = true,
@@ -51,6 +65,7 @@ export function ParticipantDialog({
 }: {
   participants: ParticipantView[];
   organizations: Organization[];
+  recentOrganizationIds?: readonly string[];
   onAdd: (input: ExistingParticipantConfirmation) => Promise<void>;
   onCreateAndAdd: (input: {
     name: string;
@@ -81,7 +96,7 @@ export function ParticipantDialog({
     ),
   );
   const [organizationId, setOrganizationId] = useState(
-    organizations.find((organization) => organization.isActive)?.id ?? "",
+    firstActiveOrganizationId(organizations, recentOrganizationIds),
   );
   const initializationContextRef = useRef({
     allowExistingOrganizationChange,
@@ -261,6 +276,7 @@ export function ParticipantDialog({
               <OrganizationSelectCombobox
                 label="확정 소속 조직"
                 organizations={organizations}
+                recentOrganizationIds={recentOrganizationIds}
                 value={confirmedOrganizationId}
                 disabled={busy !== null}
                 onChange={setConfirmedOrganizationId}
@@ -310,6 +326,7 @@ export function ParticipantDialog({
             <OrganizationSelectCombobox
               label="소속 조직"
               organizations={organizations}
+              recentOrganizationIds={recentOrganizationIds}
               value={organizationId}
               disabled={busy !== null}
               onChange={setOrganizationId}

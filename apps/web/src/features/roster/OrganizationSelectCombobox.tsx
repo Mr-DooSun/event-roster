@@ -79,7 +79,10 @@ export function OrganizationSelectCombobox({
   }, [onChange, selected, value]);
 
   const options = useMemo(() => {
-    const key = canonicalizeOrganizationInput(query);
+    const key =
+      committedValueRef.current === value
+        ? ""
+        : canonicalizeOrganizationInput(query);
     const filtered = organizations.filter(
       (organization) =>
         organization.isActive &&
@@ -87,7 +90,7 @@ export function OrganizationSelectCombobox({
           canonicalizeOrganizationInput(organization.name).includes(key)),
     );
     return orderOrganizationsByRecent(filtered, recentOrganizationIds);
-  }, [organizations, query, recentOrganizationIds]);
+  }, [organizations, query, recentOrganizationIds, value]);
   const optionIdSequence = options
     .map((organization) => organization.id)
     .join("\u0000");
