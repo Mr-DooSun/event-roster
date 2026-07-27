@@ -73,10 +73,7 @@ export async function addProjectOrganization(
   );
   if (current?.isActive) throw new DomainError("CONFLICT");
 
-  const priorAudit = current
-    ? true
-    : await hasPriorMembershipAudit(env.DB, projectId, organizationId);
-  const created = !current && !priorAudit;
+  const created = !current;
   const action = created
     ? "PROJECT_ORGANIZATION_ADDED"
     : "PROJECT_ORGANIZATION_REACTIVATED";
@@ -252,7 +249,7 @@ export async function setProjectOrganizationActive(
   const timestamp = now.toISOString();
   const today = toKstDate(now);
   const guardId = crypto.randomUUID();
-  const historyPredicate = `(
+  const businessHistoryPredicate = `(
     EXISTS (
       SELECT 1 FROM project_roster_entries roster
       WHERE roster.project_id = project_organizations.project_id
@@ -261,27 +258,41 @@ export async function setProjectOrganizationActive(
       SELECT 1 FROM project_expected_snapshots snapshot
       WHERE snapshot.project_id = project_organizations.project_id
         AND snapshot.organization_id = project_organizations.organization_id
-    ) OR EXISTS (
-      SELECT 1 FROM audit_logs audit
-      WHERE audit.entity_type = 'PROJECT_ORGANIZATION'
-        AND audit.action GLOB 'PROJECT_ORGANIZATION_*'
-        AND audit.entity_id = project_organizations.project_id || ':' || project_organizations.organization_id
     )
   )`;
-  const membershipPredicate = `project_id = ? AND organization_id = ?
-    AND is_active = 1 AND ${current.hasHistory ? "" : "NOT "}${historyPredicate}`;
-  const mutation = current.hasHistory
-    ? env.DB.prepare(
-        `UPDATE project_organizations
-         SET is_active = 0, deactivated_at = ?, updated_by = ?
-         WHERE ${membershipPredicate}`,
-      ).bind(timestamp, actor.session.user.id, projectId, organizationId)
-    : env.DB.prepare(
-        `DELETE FROM project_organizations WHERE ${membershipPredicate}`,
-      ).bind(projectId, organizationId);
-  const action = current.hasHistory
-    ? "PROJECT_ORGANIZATION_DEACTIVATED"
-    : "PROJECT_ORGANIZATION_REMOVED";
+  const activeMembershipPredicate =
+    "project_id = ? AND organization_id = ? AND is_active = 1";
+  const conditionalAudit = env.DB.prepare(
+    `INSERT INTO audit_logs
+     (id, actor_user_id, action, entity_type, entity_id, occurred_at, details_json)
+     SELECT ?, ?,
+       CASE WHEN ${businessHistoryPredicate}
+         THEN 'PROJECT_ORGANIZATION_DEACTIVATED'
+         ELSE 'PROJECT_ORGANIZATION_REMOVED'
+       END,
+       'PROJECT_ORGANIZATION', ?, ?, ?
+     FROM project_organizations
+     WHERE ${activeMembershipPredicate}`,
+  ).bind(
+    crypto.randomUUID(),
+    actor.session.user.id,
+    membershipEntityId(projectId, organizationId),
+    timestamp,
+    JSON.stringify({ projectId, organizationId }),
+    projectId,
+    organizationId,
+  );
+  const deactivateWithHistory = env.DB.prepare(
+    `UPDATE project_organizations
+     SET is_active = 0, deactivated_at = ?, updated_by = ?
+     WHERE ${activeMembershipPredicate}
+       AND ${businessHistoryPredicate}`,
+  ).bind(timestamp, actor.session.user.id, projectId, organizationId);
+  const removeWithoutHistory = env.DB.prepare(
+    `DELETE FROM project_organizations
+     WHERE ${activeMembershipPredicate}
+       AND NOT ${businessHistoryPredicate}`,
+  ).bind(projectId, organizationId);
   try {
     await runGuardedAtomic(env.DB, {
       guardId,
@@ -294,7 +305,8 @@ export async function setProjectOrganizationActive(
              AND status <> 'CLOSED'
              AND (end_date IS NULL OR end_date >= ?)
          ) AND EXISTS (
-           SELECT 1 FROM project_organizations WHERE ${membershipPredicate}
+           SELECT 1 FROM project_organizations
+           WHERE project_id = ? AND organization_id = ? AND is_active = 1
          )`,
         [
           projectId,
@@ -305,20 +317,14 @@ export async function setProjectOrganizationActive(
         ],
       ),
       statements: [
-        mutation,
+        conditionalAudit,
+        deactivateWithHistory,
+        removeWithoutHistory,
         env.DB.prepare(
           `UPDATE projects
            SET revision = revision + 1, updated_at = ?
            WHERE id = ? AND revision = ?`,
         ).bind(timestamp, projectId, input.expectedProjectRevision),
-        membershipAuditStatement(
-          env.DB,
-          actor.session.user.id,
-          action,
-          projectId,
-          organizationId,
-          timestamp,
-        ),
       ],
       failureCode: "CONFLICT",
     });
@@ -421,23 +427,6 @@ function throwOrganizationNameConflict(organization: {
     organizationName: organization.name,
     reason: "ORGANIZATION_NAME_EXISTS",
   });
-}
-
-async function hasPriorMembershipAudit(
-  db: D1Database,
-  projectId: string,
-  organizationId: string,
-): Promise<boolean> {
-  const row = await db
-    .prepare(
-      `SELECT 1 AS found FROM audit_logs
-       WHERE entity_type = 'PROJECT_ORGANIZATION'
-         AND action GLOB 'PROJECT_ORGANIZATION_*' AND entity_id = ?
-       LIMIT 1`,
-    )
-    .bind(membershipEntityId(projectId, organizationId))
-    .first<{ found: number }>();
-  return row?.found === 1;
 }
 
 function membershipAuditStatement(

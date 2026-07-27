@@ -34,7 +34,7 @@ it("loads only active project organizations as import targets", async () => {
             isActive: true,
             masterIsActive: true,
             activeProjectCount: 1,
-            hasHistory: false,
+            hasBusinessHistory: false,
           },
           {
             organizationId: "org-inactive",
@@ -42,7 +42,7 @@ it("loads only active project organizations as import targets", async () => {
             isActive: false,
             masterIsActive: true,
             activeProjectCount: 0,
-            hasHistory: true,
+            hasBusinessHistory: true,
           },
           {
             organizationId: "org-master-inactive",
@@ -50,7 +50,7 @@ it("loads only active project organizations as import targets", async () => {
             isActive: true,
             masterIsActive: false,
             activeProjectCount: 0,
-            hasHistory: true,
+            hasBusinessHistory: true,
           },
         ]),
       );
@@ -136,7 +136,7 @@ it("retries only the failed organization region", async () => {
                   isActive: true,
                   masterIsActive: true,
                   activeProjectCount: 1,
-                  hasHistory: false,
+                  hasBusinessHistory: false,
                 },
               ]),
             );
@@ -186,7 +186,7 @@ it("ignores organizations loaded for an obsolete project", async () => {
               isActive: true,
               masterIsActive: true,
               activeProjectCount: 1,
-              hasHistory: false,
+              hasBusinessHistory: false,
             },
           ]),
         );
@@ -222,7 +222,7 @@ it("ignores organizations loaded for an obsolete project", async () => {
           isActive: true,
           masterIsActive: true,
           activeProjectCount: 1,
-          hasHistory: false,
+          hasBusinessHistory: false,
         },
       ]),
     );

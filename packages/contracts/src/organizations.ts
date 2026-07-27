@@ -127,7 +127,7 @@ export interface ProjectOrganization {
   isActive: boolean;
   masterIsActive: boolean;
   activeProjectCount: number;
-  hasHistory: boolean;
+  hasBusinessHistory: boolean;
   primaryLeader: Pick<OrganizationManager, "userId" | "displayName"> | null;
   managerCount: number;
   rosterCount: number;

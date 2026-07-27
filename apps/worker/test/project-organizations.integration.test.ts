@@ -45,6 +45,10 @@ it("links an existing organization, deactivates it, and reuses the row", async (
     },
     projectRevision: project.revision + 1,
   });
+  await env.DB.prepare(`INSERT INTO project_expected_snapshots
+    (project_id, organization_id, expected_count, captured_at) VALUES (?, ?, 0, ?)`)
+    .bind(project.id, organization.id, "2026-07-27T00:00:00.000Z")
+    .run();
   expect(
     await (
       await authedRequest(
@@ -59,7 +63,7 @@ it("links an existing organization, deactivates it, and reuses the row", async (
       isActive: true,
       masterIsActive: true,
       activeProjectCount: 1,
-      hasHistory: true,
+      hasBusinessHistory: true,
       primaryLeader: null,
       managerCount: 0,
       rosterCount: 0,
@@ -315,7 +319,7 @@ it("creates and links a new organization atomically, then deletes a no-history l
         .bind(project.id, membership.organization.organizationId)
         .first<{ count: number }>()
     )?.count,
-  ).toBe(1);
+  ).toBe(0);
   const audits = (
     await env.DB.prepare(
       `SELECT action, entity_type, entity_id, details_json FROM audit_logs
@@ -354,45 +358,36 @@ it("creates and links a new organization atomically, then deletes a no-history l
   ]);
 });
 
-it("treats membership audit rows as history and deletes only a truly audit-free fixture", async () => {
+it("removes an audit-only membership and can add and remove it again", async () => {
   const operator = await seedOperator();
-  const audited = await seedOrganization("org-audited", "감사 조직");
-  const legacy = await seedOrganization("org-legacy", "수동 조직");
+  const organization = await seedOrganization("org-audit-only", "감사 전용 조직");
   const project = await seedProject(operator);
   const linked = await linkProjectOrganization(
     operator,
     project.id,
-    audited.id,
+    organization.id,
     project.revision,
   );
-  await env.DB.prepare(`INSERT INTO project_organizations
-    (project_id, organization_id, is_active, added_at, added_by, updated_by)
-    VALUES (?, ?, 1, ?, ?, ?)`)
-    .bind(
-      project.id,
-      legacy.id,
-      "2026-07-21T00:00:00.000Z",
-      operator.userId,
-      operator.userId,
-    )
-    .run();
 
   const listed = await (
     await authedRequest(
       operator,
       `/api/v1/projects/${project.id}/organizations`,
     )
-  ).json<Array<{ organizationId: string; hasHistory: boolean }>>();
-  expect(
-    listed.find((item) => item.organizationId === audited.id)?.hasHistory,
-  ).toBe(true);
-  expect(
-    listed.find((item) => item.organizationId === legacy.id)?.hasHistory,
-  ).toBe(false);
+  ).json<Array<{
+    organizationId: string;
+    hasBusinessHistory: boolean;
+  }>>();
+  expect(listed).toEqual([
+    expect.objectContaining({
+      organizationId: organization.id,
+      hasBusinessHistory: false,
+    }),
+  ]);
 
-  const auditedDisabled = await authedRequest(
+  const removed = await authedRequest(
     operator,
-    `/api/v1/projects/${project.id}/organizations/${audited.id}`,
+    `/api/v1/projects/${project.id}/organizations/${organization.id}`,
     {
       method: "PATCH",
       body: JSON.stringify({
@@ -401,41 +396,54 @@ it("treats membership audit rows as history and deletes only a truly audit-free 
       }),
     },
   );
-  const auditedDisabledBody = await auditedDisabled.json<{
+  const removedBody = await removed.json<{
     projectRevision: number;
   }>();
-  expect(auditedDisabledBody).toMatchObject({
-    organization: { isActive: false },
-  });
-  const legacyDisabled = await authedRequest(
+  expect(removed.status).toBe(200);
+  expect(
+    await env.DB.prepare(
+      `SELECT 1 FROM project_organizations
+       WHERE project_id = ? AND organization_id = ?`,
+    )
+      .bind(project.id, organization.id)
+      .first(),
+  ).toBeNull();
+
+  const relinked = await linkProjectOrganization(
     operator,
-    `/api/v1/projects/${project.id}/organizations/${legacy.id}`,
+    project.id,
+    organization.id,
+    removedBody.projectRevision,
+  );
+  const removedAgain = await authedRequest(
+    operator,
+    `/api/v1/projects/${project.id}/organizations/${organization.id}`,
     {
       method: "PATCH",
       body: JSON.stringify({
         isActive: false,
-        expectedProjectRevision: auditedDisabledBody.projectRevision,
+        expectedProjectRevision: relinked.projectRevision,
       }),
     },
   );
-  expect(await legacyDisabled.json()).toMatchObject({
-    organization: { isActive: false },
-  });
+  expect(removedAgain.status).toBe(200);
   expect(
     (
       await env.DB.prepare(
-        "SELECT COUNT(*) AS count FROM project_organizations WHERE project_id = ?",
+        `SELECT action FROM audit_logs
+         WHERE entity_type = 'PROJECT_ORGANIZATION'
+           AND entity_id = ?
+         ORDER BY rowid`,
       )
-        .bind(project.id)
-        .first<{ count: number }>()
-    )?.count,
-  ).toBe(1);
-
-  const manager = await seedManager(audited.id);
-  const projects = await (
-    await authedRequest(manager, "/api/v1/projects")
-  ).json<Array<{ id: string }>>();
-  expect(projects.map((item) => item.id)).toContain(project.id);
+        .bind(`${project.id}:${organization.id}`)
+        .all<{ action: string }>()
+    ).results.map((row) => row.action),
+  ).toEqual([
+    "PROJECT_ORGANIZATION_ADDED",
+    "PROJECT_ORGANIZATION_REMOVED",
+    "PROJECT_ORGANIZATION_ADDED",
+    "PROJECT_ORGANIZATION_REMOVED",
+  ]);
 });
 
 it("requeries the active project count after deleting an audit-free membership", async () => {
@@ -540,11 +548,11 @@ it("does not treat LIKE-wildcard lookalike audit actions as membership history",
       operator,
       `/api/v1/projects/${project.id}/organizations`,
     )
-  ).json<Array<{ organizationId: string; hasHistory: boolean }>>();
+  ).json<Array<{ organizationId: string; hasBusinessHistory: boolean }>>();
   expect(listed).toEqual([
     expect.objectContaining({
       organizationId: organization.id,
-      hasHistory: false,
+      hasBusinessHistory: false,
     }),
   ]);
   const disabled = await authedRequest(
@@ -791,7 +799,11 @@ it("preserves a historical link and scopes an organization manager to linked pro
     },
   );
   expect(await disabled.json()).toMatchObject({
-    organization: { isActive: false },
+    organization: {
+      organizationId: organization.id,
+      isActive: false,
+      hasBusinessHistory: true,
+    },
   });
   expect(
     await (
@@ -804,7 +816,7 @@ it("preserves a historical link and scopes an organization manager to linked pro
     expect.objectContaining({
       organizationId: organization.id,
       isActive: false,
-      hasHistory: true,
+      hasBusinessHistory: true,
     }),
   ]);
   expect(

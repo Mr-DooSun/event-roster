@@ -6,7 +6,7 @@ interface ProjectOrganizationRow {
   is_active: number;
   master_is_active: number;
   active_project_count: number;
-  has_history: number;
+  has_business_history: number;
   primary_user_id: string | null;
   primary_display_name: string | null;
   manager_count: number;
@@ -46,12 +46,7 @@ const SELECT_PROJECT_ORGANIZATION = `SELECT
     SELECT 1 FROM project_expected_snapshots snapshot
     WHERE snapshot.project_id = po.project_id
       AND snapshot.organization_id = po.organization_id
-    UNION ALL
-    SELECT 1 FROM audit_logs audit
-    WHERE audit.entity_type = 'PROJECT_ORGANIZATION'
-      AND audit.action GLOB 'PROJECT_ORGANIZATION_*'
-      AND audit.entity_id = po.project_id || ':' || po.organization_id
-  ) AS has_history
+  ) AS has_business_history
 FROM project_organizations po
 JOIN organizations o ON o.id = po.organization_id`;
 
@@ -136,7 +131,7 @@ function mapProjectOrganization(
     isActive: row.is_active === 1,
     masterIsActive: row.master_is_active === 1,
     activeProjectCount: row.active_project_count,
-    hasHistory: row.has_history === 1,
+    hasBusinessHistory: row.has_business_history === 1,
     primaryLeader:
       row.primary_user_id === null || row.primary_display_name === null
         ? null
