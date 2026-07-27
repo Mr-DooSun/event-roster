@@ -27,13 +27,26 @@ it("creates duplicate-name projects and validates date order", async () => {
     body: JSON.stringify(body),
   });
   expect(first.status).toBe(201);
-  expect(await first.json()).toMatchObject({
+  const project = await first.json<{ id: string; revision: number }>();
+  expect(project).toMatchObject({
     ...body,
-    status: "PREPARING",
+    status: "PRE_REGISTRATION",
     createdBy: operator.userId,
     closedBy: null,
   });
   expect(second.status).toBe(201);
+  const invalid = await authedRequest(
+    operator,
+    `/api/v1/projects/${project.id}/transition`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        targetStatus: "PREPARING",
+        expectedRevision: project.revision,
+      }),
+    },
+  );
+  expect(invalid.status).toBe(422);
   expect(
     (
       await authedRequest(operator, "/api/v1/projects", {
@@ -56,7 +69,6 @@ it("returns project detail and orders open projects before recently closed proje
     startDate: "2026-08-01",
   });
   let closing = await seedProject(operator, { name: "종료 대상" });
-  closing = await transition(operator, closing, "PRE_REGISTRATION");
   closing = await transition(operator, closing, "IN_PROGRESS");
   const closed = await transition(operator, closing, "CLOSED");
 
@@ -118,32 +130,31 @@ it("freezes expected snapshots on IN_PROGRESS and requires a valid reopen date",
   vi.setSystemTime(new Date("2026-05-23T14:59:59.999Z"));
   const operator = await seedOperator();
   await seedOrganization();
-  const project = await seedProject(operator, { endDate: "2026-05-23" });
+  const pre = await seedProject(operator, { endDate: "2026-05-23" });
   await env.DB.prepare(`INSERT INTO project_organizations
     (project_id, organization_id, is_active, added_at, added_by, updated_by)
     VALUES (?, 'org-1', 1, ?, ?, ?)`)
     .bind(
-      project.id,
+      pre.id,
       "2026-05-01T00:00:00.000Z",
       operator.userId,
       operator.userId,
     )
     .run();
-  const pre = await transition(operator, project, "PRE_REGISTRATION");
   const active = await transition(operator, pre, "IN_PROGRESS");
   expect(
     (
       await env.DB.prepare(
         "SELECT expected_count FROM project_expected_snapshots WHERE project_id=? AND organization_id='org-1'",
       )
-        .bind(project.id)
+        .bind(pre.id)
         .first<{ expected_count: number }>()
     )?.expected_count,
   ).toBe(0);
   const closed = await transition(operator, active, "CLOSED");
   const closedNamePatch = await authedRequest(
     operator,
-    `/api/v1/projects/${project.id}`,
+    `/api/v1/projects/${pre.id}`,
     {
       method: "PATCH",
       body: JSON.stringify({
@@ -162,7 +173,7 @@ it("freezes expected snapshots on IN_PROGRESS and requires a valid reopen date",
     (
       await authedRequest(
         operator,
-        `/api/v1/projects/${project.id}/transition`,
+        `/api/v1/projects/${pre.id}/transition`,
         {
           method: "POST",
           body: JSON.stringify({
@@ -175,7 +186,7 @@ it("freezes expected snapshots on IN_PROGRESS and requires a valid reopen date",
   ).toBe(409);
   const cleared = await authedRequest(
     operator,
-    `/api/v1/projects/${project.id}`,
+    `/api/v1/projects/${pre.id}`,
     {
       method: "PATCH",
       body: JSON.stringify({

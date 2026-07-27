@@ -2,7 +2,6 @@ import type { ProjectStatus, Role } from "@event-roster/contracts";
 import { DomainError } from "./errors";
 
 const FORWARD: Readonly<Record<ProjectStatus, ProjectStatus | null>> = {
-  PREPARING: "PRE_REGISTRATION",
   PRE_REGISTRATION: "IN_PROGRESS",
   IN_PROGRESS: "CLOSED",
   CLOSED: null,

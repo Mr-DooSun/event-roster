@@ -161,7 +161,6 @@ export async function findOrganizationDetail(
         project_id: string;
         project_name: string;
         project_status:
-          | "PREPARING"
           | "PRE_REGISTRATION"
           | "IN_PROGRESS"
           | "CLOSED";

@@ -64,7 +64,7 @@ export async function createProject(
         `INSERT INTO projects
          (id, name, start_date, end_date, status, revision, created_by,
           created_at, updated_at, closed_at, closed_by, close_reason)
-         VALUES (?, ?, ?, ?, 'PREPARING', 0, ?, ?, ?, NULL, NULL, NULL)`,
+         VALUES (?, ?, ?, ?, 'PRE_REGISTRATION', 0, ?, ?, ?, NULL, NULL, NULL)`,
       ).bind(
         id,
         input.name,

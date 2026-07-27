@@ -4,6 +4,16 @@ import { countRows, insertOrganization } from "./support/database";
 import { IDS } from "./support/ids";
 
 describe("initial D1 schema", () => {
+  it("keeps the legacy PREPARING value in the physical project status check", async () => {
+    const projectTable = await env.DB.prepare(
+      "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'projects'",
+    ).first<{ sql: string }>();
+
+    expect(projectTable?.sql).toContain(
+      "'PREPARING', 'PRE_REGISTRATION', 'IN_PROGRESS', 'CLOSED'",
+    );
+  });
+
   it("rejects duplicate canonical login IDs and validates project date order", async () => {
     await insertOrganization(IDS.organization, "조직 A");
     await env.DB.prepare(

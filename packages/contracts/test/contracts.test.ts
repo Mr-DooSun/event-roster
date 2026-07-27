@@ -9,6 +9,7 @@ import {
   OrganizationPrimaryPatchRequestSchema,
   PasswordSchema,
   ProjectOrganizationPatchSchema,
+  ProjectStatusSchema,
   RosterCreateRequestSchema,
   RosterSourceSchema,
   UpdateProjectRequestSchema,
@@ -153,6 +154,14 @@ describe("roster contracts", () => {
       expectedRevision: 3,
     });
   });
+});
+
+it("exposes the three runtime project statuses", () => {
+  expect(ProjectStatusSchema.options).toEqual([
+    "PRE_REGISTRATION",
+    "IN_PROGRESS",
+    "CLOSED",
+  ]);
 });
 
 it("accepts duplicate-name project payloads with independently optional dates", () => {

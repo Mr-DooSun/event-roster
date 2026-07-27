@@ -29,7 +29,7 @@ export interface OrganizationManager {
 export interface OrganizationProject {
   projectId: string;
   projectName: string;
-  projectStatus: "PREPARING" | "PRE_REGISTRATION" | "IN_PROGRESS" | "CLOSED";
+  projectStatus: "PRE_REGISTRATION" | "IN_PROGRESS" | "CLOSED";
   membershipIsActive: boolean;
 }
 

@@ -3,7 +3,6 @@ import { transitionProject } from "../src";
 
 describe("transitionProject", () => {
   it.each([
-    ["PREPARING", "PRE_REGISTRATION"],
     ["PRE_REGISTRATION", "IN_PROGRESS"],
     ["IN_PROGRESS", "CLOSED"],
     ["CLOSED", "IN_PROGRESS"],
@@ -13,12 +12,12 @@ describe("transitionProject", () => {
 
   it("rejects skipped and organization-manager transitions", () => {
     expect(() =>
-      transitionProject("PREPARING", "IN_PROGRESS", "OPERATOR"),
+      transitionProject("PRE_REGISTRATION", "CLOSED", "OPERATOR"),
     ).toThrow("INVALID_TRANSITION");
     expect(() =>
       transitionProject(
-        "PREPARING",
         "PRE_REGISTRATION",
+        "IN_PROGRESS",
         "ORGANIZATION_MANAGER",
       ),
     ).toThrow("FORBIDDEN");
