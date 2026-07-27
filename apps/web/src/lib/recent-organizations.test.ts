@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  getBrowserOrganizationStorage,
   type OrganizationStorage,
   orderOrganizationsByRecent,
   readRecentOrganizationIds,
@@ -17,6 +18,29 @@ function memoryStorage(): OrganizationStorage {
 }
 
 describe("recent organizations", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("returns null when browser window is unavailable", () => {
+    vi.stubGlobal("window", undefined);
+
+    expect(getBrowserOrganizationStorage()).toBeNull();
+  });
+
+  it("returns null when the localStorage getter throws", () => {
+    vi.stubGlobal(
+      "window",
+      Object.defineProperty({}, "localStorage", {
+        get() {
+          throw new DOMException("denied");
+        },
+      }),
+    );
+
+    expect(getBrowserOrganizationStorage()).toBeNull();
+  });
+
   it("scopes recent IDs by user and project and keeps newest three", () => {
     const storage = memoryStorage();
     const validOrganizationIds = new Set(["a", "b", "c", "d"]);

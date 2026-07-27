@@ -20,19 +20,20 @@ describe("calculateOrganizationPopoverPosition", () => {
   });
 
   it("flips above when the lower viewport is too small", () => {
-    expect(
-      calculateOrganizationPopoverPosition({
-        anchor: { top: 700, right: 220, bottom: 744, left: 20, width: 200 },
-        viewportWidth: 800,
-        viewportHeight: 800,
-      }),
-    ).toEqual({
-      top: 408,
+    const position = calculateOrganizationPopoverPosition({
+      anchor: { top: 700, right: 220, bottom: 744, left: 20, width: 200 },
+      viewportWidth: 800,
+      viewportHeight: 800,
+    });
+
+    expect(position).toEqual({
+      top: 696,
       left: 20,
       width: 200,
       maxHeight: 288,
       placement: "top",
     });
+    expect(position.top).toBe(700 - 4);
   });
 
   it("clamps width and left edge inside a narrow viewport", () => {

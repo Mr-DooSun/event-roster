@@ -43,7 +43,7 @@ export function calculateOrganizationPopoverPosition(input: {
   const top =
     placement === "bottom"
       ? input.anchor.bottom + gap
-      : Math.max(margin, input.anchor.top - gap - maxHeight);
+      : Math.max(margin, input.anchor.top - gap);
 
   return { top, left, width, maxHeight, placement };
 }

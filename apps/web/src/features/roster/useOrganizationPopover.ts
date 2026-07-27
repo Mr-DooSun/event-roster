@@ -66,6 +66,8 @@ export function useOrganizationPopover(input: {
           left: position.left,
           width: position.width,
           maxHeight: position.maxHeight,
+          transform:
+            position.placement === "top" ? "translateY(-100%)" : undefined,
         });
       } catch {
         const fallbackAnchor =
@@ -82,6 +84,8 @@ export function useOrganizationPopover(input: {
           left: fallback.left,
           width: fallback.width,
           maxHeight: fallback.maxHeight,
+          transform:
+            fallback.placement === "top" ? "translateY(-100%)" : undefined,
         });
       }
     }

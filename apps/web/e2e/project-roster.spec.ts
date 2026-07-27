@@ -70,21 +70,33 @@ test("operator moves a pre-registration project in progress and updates its rost
   await expect(page.getByText("0명", { exact: true })).toBeVisible();
 
   await page.getByRole("tab", { name: "참가 명단" }).click();
+  await page.setViewportSize({ width: 900, height: 480 });
   await page.getByRole("button", { name: "참가자 추가" }).click();
   await page.getByRole("button", { name: "새 참가자" }).click();
   const organization = page.getByRole("combobox", { name: "소속 조직" });
   await organization.fill("황룡사");
   await expect(page.getByRole("listbox")).toBeVisible();
+  const anchorGeometry = await organization.evaluate((element) => ({
+    top: element.getBoundingClientRect().top,
+  }));
   const geometry = await page.getByRole("listbox").evaluate((element) => ({
     parent: element.parentElement === document.body,
+    placement: element.dataset.placement,
     zIndex: Number(getComputedStyle(element).zIndex),
     top: element.getBoundingClientRect().top,
     bottom: element.getBoundingClientRect().bottom,
     viewport: window.innerHeight,
   }));
-  expect(geometry).toMatchObject({ parent: true, zIndex: 110 });
+  expect(geometry).toMatchObject({
+    parent: true,
+    placement: "top",
+    zIndex: 110,
+  });
   expect(geometry.top).toBeGreaterThanOrEqual(0);
   expect(geometry.bottom).toBeLessThanOrEqual(geometry.viewport);
+  expect(
+    Math.abs(geometry.bottom - (anchorGeometry.top - 4)),
+  ).toBeLessThanOrEqual(1);
   await page.getByRole("option", { name: "황룡사" }).click();
   await page.getByLabel("이름").fill("최근 조직 참가자");
   await page.getByRole("button", { name: "참가자 생성 후 추가" }).click();

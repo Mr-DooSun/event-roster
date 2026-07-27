@@ -200,6 +200,29 @@ it("records the confirmed organization after an existing participant add succeed
   );
 });
 
+it("does not mutate raw recent storage when the add modal closes", async () => {
+  const storageKey = "event-roster:recent-organizations:v1:user-1:project-1";
+  const rawRecentOrganizations = '["org-1","missing"]';
+  window.localStorage.setItem(storageKey, rawRecentOrganizations);
+  vi.stubGlobal("fetch", rosterAddFetch());
+  renderRosterForRecentOrganizations({
+    onChanged: vi.fn().mockResolvedValue(undefined),
+  });
+  await login();
+
+  fireEvent.click(await screen.findByRole("button", { name: "참가자 추가" }));
+  fireEvent.click(screen.getByRole("button", { name: "새 참가자" }));
+  const organization = screen.getByRole("combobox", { name: "소속 조직" });
+  fireEvent.change(organization, { target: { value: "황" } });
+  fireEvent.click(screen.getByRole("option", { name: "황룡사" }));
+  fireEvent.click(screen.getByRole("button", { name: "닫기" }));
+
+  expect(
+    screen.queryByRole("dialog", { name: "참가자 추가" }),
+  ).not.toBeInTheDocument();
+  expect(window.localStorage.getItem(storageKey)).toBe(rawRecentOrganizations);
+});
+
 it("skips recency side effects when the project changes during reload", async () => {
   window.localStorage.setItem(
     "event-roster:recent-organizations:v1:user-1:project-2",

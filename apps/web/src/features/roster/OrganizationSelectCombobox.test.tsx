@@ -79,6 +79,10 @@ it("recalculates placement on captured scroll and viewport resize", () => {
   );
   fireEvent.focus(screen.getByRole("combobox"));
   expect(screen.getByRole("listbox")).toHaveAttribute("data-placement", "top");
+  expect(screen.getByRole("listbox")).toHaveStyle({
+    top: "696px",
+    transform: "translateY(-100%)",
+  });
 
   rect.mockReturnValue({
     top: 20,
@@ -96,6 +100,9 @@ it("recalculates placement on captured scroll and viewport resize", () => {
     "data-placement",
     "bottom",
   );
+  expect(screen.getByRole("listbox")).not.toHaveStyle({
+    transform: "translateY(-100%)",
+  });
 
   rect.mockReturnValue({
     top: 700,
