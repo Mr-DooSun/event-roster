@@ -95,6 +95,41 @@ it("shows project status, dates, and automatic closing in the header", async () 
   expect(screen.getByText("자동 종료")).toBeVisible();
 });
 
+it("marks inactive historical organizations in the overview summary", async () => {
+  mockApi.get.mockImplementation((path: string) => {
+    if (path === "/projects/project-1/summary") {
+      return {
+        projectId: "project-1",
+        expectedTotal: 2,
+        finalTotal: 1,
+        deltaTotal: -1,
+        organizations: [
+          {
+            organizationId: "org-history",
+            organizationName: "과거 조직",
+            isActive: false,
+            masterIsActive: true,
+            expected: 2,
+            inProgressAdded: 0,
+            inProgressCancelled: 1,
+            final: 1,
+            delta: -1,
+          },
+        ],
+      };
+    }
+    return defaultGet(path);
+  });
+
+  render(<ProjectDetailPage projectId="project-1" />);
+
+  const row = (await screen.findByText("과거 조직")).closest("tr");
+  expect(row).not.toBeNull();
+  expect(within(row as HTMLElement).getByText("비활성")).toHaveClass(
+    "er-badge--inactive",
+  );
+});
+
 it("shows a project header skeleton while the project shell is loading", async () => {
   const projectRequest = deferred<Project>();
   mockApi.get.mockImplementation((path: string) => {

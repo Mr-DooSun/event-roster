@@ -89,3 +89,29 @@ it("limits export rows and summaries to an organization manager's scope", async 
   expect(body.명단.map((row) => row.조직)).toEqual(["1팀"]);
   expect(body.집계.map((row) => row.조직)).toEqual(["1팀"]);
 });
+
+it("uses the same inactive-organization visibility rule for export summaries", async () => {
+  const fixture = await setupPreRegistration();
+  const now = "2026-07-21T00:00:00.000Z";
+  await seedOrganization("org-export-empty", "내보내기 빈 비활성");
+  await env.DB.prepare(
+    `INSERT INTO project_organizations
+     (project_id, organization_id, is_active, added_at, added_by, updated_by)
+     VALUES (?, 'org-export-empty', 0, ?, ?, ?)`,
+  )
+    .bind(
+      fixture.project.id,
+      now,
+      fixture.operator.userId,
+      fixture.operator.userId,
+    )
+    .run();
+
+  const response = await authedRequest(
+    fixture.operator,
+    `/api/v1/projects/${fixture.project.id}/exports/roster`,
+  );
+  const body = await response.json<{ 집계: Array<{ 조직: string }> }>();
+
+  expect(body.집계.map((row) => row.조직)).toEqual(["1팀"]);
+});

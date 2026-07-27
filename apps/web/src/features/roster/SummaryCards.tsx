@@ -37,7 +37,16 @@ export function SummaryCards({ summary }: { summary: ProjectSummary }) {
             <tbody>
               {summary.organizations.map((row) => (
                 <tr key={row.organizationId}>
-                  <td>{row.organizationName}</td>
+                  <td>
+                    <span className="er-table-organization">
+                      <span>{row.organizationName}</span>
+                      {!row.isActive || !row.masterIsActive ? (
+                        <span className="er-badge er-badge--inactive">
+                          비활성
+                        </span>
+                      ) : null}
+                    </span>
+                  </td>
                   <td>{row.expected}</td>
                   <td>{row.inProgressAdded}</td>
                   <td>{row.inProgressCancelled}</td>

@@ -1292,6 +1292,8 @@ function summary(final: number) {
       {
         organizationId: "org-1",
         organizationName: "1팀",
+        isActive: true,
+        masterIsActive: true,
         expected: 100,
         inProgressAdded: 0,
         inProgressCancelled: 100 - final,

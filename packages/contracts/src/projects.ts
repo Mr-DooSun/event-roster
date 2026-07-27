@@ -72,18 +72,22 @@ export interface Project {
   closeReason: "MANUAL" | "SCHEDULED" | null;
 }
 
+export interface ProjectSummaryOrganization {
+  organizationId: string;
+  organizationName: string;
+  isActive: boolean;
+  masterIsActive: boolean;
+  expected: number;
+  inProgressAdded: number;
+  inProgressCancelled: number;
+  final: number;
+  delta: number;
+}
+
 export interface ProjectSummary {
   projectId: string;
   expectedTotal: number;
   finalTotal: number;
   deltaTotal: number;
-  organizations: Array<{
-    organizationId: string;
-    organizationName: string;
-    expected: number;
-    inProgressAdded: number;
-    inProgressCancelled: number;
-    final: number;
-    delta: number;
-  }>;
+  organizations: ProjectSummaryOrganization[];
 }

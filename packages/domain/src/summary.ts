@@ -1,5 +1,6 @@
 import type {
   ProjectSummary,
+  ProjectSummaryOrganization,
   RosterSource,
   RosterStatus,
 } from "@event-roster/contracts";
@@ -9,6 +10,8 @@ export interface ProjectSummaryInput {
   organizations: Array<{
     organizationId: string;
     organizationName: string;
+    isActive: boolean;
+    masterIsActive: boolean;
   }>;
   expectedSnapshots: Array<{
     organizationId: string;
@@ -21,6 +24,26 @@ export interface ProjectSummaryInput {
   }>;
 }
 
+export function shouldIncludeProjectSummaryOrganization(
+  organization: Pick<
+    ProjectSummaryOrganization,
+    | "isActive"
+    | "masterIsActive"
+    | "expected"
+    | "inProgressAdded"
+    | "inProgressCancelled"
+    | "final"
+  >,
+): boolean {
+  if (organization.isActive && organization.masterIsActive) return true;
+  return (
+    organization.expected !== 0 ||
+    organization.inProgressAdded !== 0 ||
+    organization.inProgressCancelled !== 0 ||
+    organization.final !== 0
+  );
+}
+
 export function calculateProjectSummary(
   input: ProjectSummaryInput,
 ): ProjectSummary {
@@ -31,30 +54,34 @@ export function calculateProjectSummary(
     ]),
   );
 
-  const organizations = input.organizations.map((organization) => {
-    const entries = input.rosterEntries.filter(
-      (entry) => entry.organizationId === organization.organizationId,
-    );
-    const expected =
-      expectedByOrganization.get(organization.organizationId) ?? 0;
-    const inProgressAdded = entries.filter(
-      (entry) => entry.source === "IN_PROGRESS" && entry.status === "ACTIVE",
-    ).length;
-    const inProgressCancelled = entries.filter(
-      (entry) =>
-        entry.source === "PRE_REGISTRATION" && entry.status === "CANCELLED",
-    ).length;
-    const final = entries.filter((entry) => entry.status === "ACTIVE").length;
+  const organizations = input.organizations
+    .map((organization) => {
+      const entries = input.rosterEntries.filter(
+        (entry) => entry.organizationId === organization.organizationId,
+      );
+      const expected =
+        expectedByOrganization.get(organization.organizationId) ?? 0;
+      const inProgressAdded = entries.filter(
+        (entry) => entry.source === "IN_PROGRESS" && entry.status === "ACTIVE",
+      ).length;
+      const inProgressCancelled = entries.filter(
+        (entry) =>
+          entry.source === "PRE_REGISTRATION" && entry.status === "CANCELLED",
+      ).length;
+      const final = entries.filter(
+        (entry) => entry.status === "ACTIVE",
+      ).length;
 
-    return {
-      ...organization,
-      expected,
-      inProgressAdded,
-      inProgressCancelled,
-      final,
-      delta: final - expected,
-    };
-  });
+      return {
+        ...organization,
+        expected,
+        inProgressAdded,
+        inProgressCancelled,
+        final,
+        delta: final - expected,
+      };
+    })
+    .filter(shouldIncludeProjectSummaryOrganization);
   const expectedTotal = organizations.reduce(
     (total, organization) => total + organization.expected,
     0,

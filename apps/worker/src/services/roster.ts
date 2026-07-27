@@ -3,7 +3,11 @@ import type {
   RosterSource,
   RosterStatus,
 } from "@event-roster/contracts";
-import { DomainError, toKstDate } from "@event-roster/domain";
+import {
+  DomainError,
+  shouldIncludeProjectSummaryOrganization,
+  toKstDate,
+} from "@event-roster/domain";
 import { runGuardedAtomic } from "../db/atomic";
 import {
   findProjectOrganization,
@@ -372,6 +376,7 @@ export async function getSummary(env: Env, actor: Actor, projectId: string) {
   const rows = (
     await env.DB.prepare(
       `SELECT po.organization_id, o.name AS organization_name,
+         po.is_active, o.is_active AS master_is_active,
          CASE WHEN p.status = 'PRE_REGISTRATION' THEN
            SUM(CASE WHEN r.source = 'PRE_REGISTRATION' AND r.status = 'ACTIVE'
                     THEN 1 ELSE 0 END)
@@ -391,28 +396,35 @@ export async function getSummary(env: Env, actor: Actor, projectId: string) {
        LEFT JOIN project_roster_entries r
          ON r.project_id = p.id AND r.organization_id = po.organization_id
        WHERE p.id = ?${scopeSql}
-       GROUP BY po.organization_id, o.name, p.status, s.expected_count
+       GROUP BY po.organization_id, o.name, po.is_active, o.is_active,
+                p.status, s.expected_count
        ORDER BY o.name, po.organization_id`,
     )
       .bind(projectId, ...(scope ?? []))
       .all<{
         organization_id: string;
         organization_name: string;
+        is_active: number;
+        master_is_active: number;
         expected: number;
         in_progress_added: number;
         in_progress_cancelled: number;
         final: number;
       }>()
   ).results;
-  const organizations = rows.map((row) => ({
-    organizationId: row.organization_id,
-    organizationName: row.organization_name,
-    expected: row.expected,
-    inProgressAdded: row.in_progress_added,
-    inProgressCancelled: row.in_progress_cancelled,
-    final: row.final,
-    delta: row.final - row.expected,
-  }));
+  const organizations = rows
+    .map((row) => ({
+      organizationId: row.organization_id,
+      organizationName: row.organization_name,
+      isActive: row.is_active === 1,
+      masterIsActive: row.master_is_active === 1,
+      expected: row.expected,
+      inProgressAdded: row.in_progress_added,
+      inProgressCancelled: row.in_progress_cancelled,
+      final: row.final,
+      delta: row.final - row.expected,
+    }))
+    .filter(shouldIncludeProjectSummaryOrganization);
   const expectedTotal = organizations.reduce(
     (sum, row) => sum + row.expected,
     0,

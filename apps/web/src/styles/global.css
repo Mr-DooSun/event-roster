@@ -672,6 +672,11 @@ a {
   color: var(--er-color-danger);
   background: var(--er-color-danger-soft);
 }
+.er-table-organization {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--er-space-2);
+}
 .er-organization-filters {
   display: grid;
   grid-template-columns: minmax(14rem, 2fr) repeat(2, minmax(10rem, 1fr)) auto;
