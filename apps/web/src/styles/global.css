@@ -980,10 +980,15 @@ th {
   }
 }
 
+@media (max-width: 54rem) {
+  .er-roster-filters {
+    grid-template-columns: 1fr;
+  }
+}
+
 @media (max-width: 42rem) {
   .er-organization-filters,
-  .er-organization-facts,
-  .er-roster-filters {
+  .er-organization-facts {
     grid-template-columns: 1fr;
   }
   .er-organization-filters .er-field:first-child {
