@@ -1,5 +1,6 @@
 import type { Organization } from "@event-roster/contracts";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { canonicalizeOrganizationInput } from "../../lib/organization-name";
 
 export type OrganizationComboboxSelection =
   | { kind: "EXISTING"; organizationId: string }
@@ -26,10 +27,6 @@ interface NewOption {
 }
 
 type ComboboxOption = ExistingOption | NewOption;
-
-export function canonicalizeOrganizationInput(value: string): string {
-  return value.normalize("NFKC").trim().toLocaleLowerCase();
-}
 
 export function OrganizationCombobox({
   organizations,
