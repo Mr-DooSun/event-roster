@@ -612,10 +612,14 @@ EVENT_ROSTER_0005_PENDING="$(
     wrangler d1 migrations list event-roster --remote
 )"
 printf '%s\n' "$EVENT_ROSTER_0005_PENDING"
-test "$(printf '%s\n' "$EVENT_ROSTER_0005_PENDING" |
-  grep -c '0005_roster_participant_profiles.sql')" -eq 1
-test "$(printf '%s\n' "$EVENT_ROSTER_0005_PENDING" |
-  grep -Ec '[0-9]{4}_[[:alnum:]_]+\.sql')" -eq 1
+EVENT_ROSTER_0005_PENDING_FILES="$(
+  printf '%s\n' "$EVENT_ROSTER_0005_PENDING" |
+    LC_ALL=C tr -cs '[:alnum:]_.\n-' '\n' |
+    LC_ALL=C awk '/^[[:alnum:]_.-]+[.]sql$/ { print }' |
+    LC_ALL=C sort -u
+)"
+test "$EVENT_ROSTER_0005_PENDING_FILES" = \
+  "0005_roster_participant_profiles.sql"
 ```
 
 출력 형식 변경 등으로 위 검사가 확실하지 않으면 통과로 간주하지 않는다.
@@ -708,6 +712,20 @@ schema, 사전 `roster_count`, export 절대 경로, checksum을 배포 기록�
 남긴 뒤에만 migration을 적용한다.
 
 ```bash
+set -euo pipefail
+EVENT_ROSTER_0005_PENDING_BEFORE_APPLY="$(
+  corepack pnpm@10.28.1 --filter @event-roster/worker exec \
+    wrangler d1 migrations list event-roster --remote
+)"
+printf '%s\n' "$EVENT_ROSTER_0005_PENDING_BEFORE_APPLY"
+EVENT_ROSTER_0005_PENDING_FILES_BEFORE_APPLY="$(
+  printf '%s\n' "$EVENT_ROSTER_0005_PENDING_BEFORE_APPLY" |
+    LC_ALL=C tr -cs '[:alnum:]_.\n-' '\n' |
+    LC_ALL=C awk '/^[[:alnum:]_.-]+[.]sql$/ { print }' |
+    LC_ALL=C sort -u
+)"
+test "$EVENT_ROSTER_0005_PENDING_FILES_BEFORE_APPLY" = \
+  "0005_roster_participant_profiles.sql"
 corepack pnpm@10.28.1 --filter @event-roster/worker exec \
   wrangler d1 migrations apply event-roster --remote
 
@@ -724,13 +742,13 @@ corepack pnpm@10.28.1 --filter @event-roster/worker exec \
   wrangler d1 execute event-roster --remote --command \
   "SELECT COUNT(*) AS invalid_profile_count
    FROM project_roster_entries
-   WHERE NOT (
+   WHERE (
      (participant_role_snapshot IS NULL AND student_grade_snapshot IS NULL)
      OR (participant_role_snapshot = 'STUDENT'
          AND student_grade_snapshot IN ('M1','M2','M3','H1','H2','H3'))
      OR (participant_role_snapshot = 'TEACHER'
          AND student_grade_snapshot IS NULL)
-   )"
+   ) IS NOT TRUE"
 corepack pnpm@10.28.1 --filter @event-roster/worker exec \
   wrangler d1 execute event-roster --remote --command \
   "PRAGMA foreign_key_check"

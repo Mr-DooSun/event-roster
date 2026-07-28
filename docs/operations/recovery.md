@@ -113,7 +113,9 @@
    `event-roster --remote`가 아니라
    `DB --remote --config "$EVENT_ROSTER_RECOVERY_CONFIG"`로 바꾸고, 외부
    mode 0700 디렉터리의 mode 0600 export/checksum, schema-first 사전 기록,
-   세 수량 일치, invalid 0, foreign-key 0행 조건을 동일하게 유지한다.
+   migration 적용 직전의 정규화된 전체 pending filename set exact 재검사,
+   세 수량 일치, NULL-safe `(valid profile predicate) IS NOT TRUE` 조회의
+   invalid 0, foreign-key 0행 조건을 동일하게 유지한다.
    운영 config나 운영 database ID가 명령에 남아 있으면 실행하지 않는다.
 
    gate 통과 후 격리 D1에만 연결된 local 또는 preview Worker로 health,

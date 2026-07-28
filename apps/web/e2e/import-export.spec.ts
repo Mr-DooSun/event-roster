@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { expect, request, test } from "@playwright/test";
+import { errors, expect, request, test } from "@playwright/test";
 import * as XLSX from "xlsx";
 import { fixture, login } from "./support";
 
@@ -119,14 +119,15 @@ test("import and export profile preserves mixed and canceled roster rows", async
   await expect(page.getByRole("row", { name: /E2E 담당교사/ })).toBeVisible();
   await expect(page.getByRole("row", { name: /E2E 활성 학생/ })).toBeHidden();
 
-  const downloads: string[] = [];
-  page.on("download", (download) =>
-    downloads.push(download.suggestedFilename()),
-  );
+  const prematureDownloadPromise = page
+    .waitForEvent("download", { timeout: 750 })
+    .catch((error: unknown) => {
+      if (error instanceof errors.TimeoutError) return null;
+      throw error;
+    });
   await page.getByRole("button", { name: "엑셀 내보내기" }).click();
   const dialog = page.getByRole("dialog", { name: "엑셀 명단 내보내기" });
   await expect(dialog).toBeVisible();
-  expect(downloads).toHaveLength(0);
   await expect(
     dialog.locator("dl div").filter({ hasText: "전체" }),
   ).toContainText("3명");
@@ -142,6 +143,7 @@ test("import and export profile preserves mixed and canceled roster rows", async
   await expect(
     dialog.locator("dl div").filter({ hasText: "교사" }),
   ).toContainText("1명");
+  expect(await prematureDownloadPromise).toBeNull();
 
   const downloadPromise = page.waitForEvent("download");
   await dialog.getByRole("button", { name: "엑셀 내보내기" }).click();
