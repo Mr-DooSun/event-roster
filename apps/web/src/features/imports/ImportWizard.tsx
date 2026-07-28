@@ -11,9 +11,11 @@ import { StatusMessage } from "../../components/ui/StatusMessage";
 import { ApiError } from "../../lib/api";
 import {
   getSheetHeaders,
+  type ImportColumns,
   normalizeSheet,
   type ParsedWorkbook,
   readWorkbook,
+  WorkbookImportError,
 } from "../../lib/excel/read-workbook";
 import { useAuth } from "../auth/AuthProvider";
 import { ColumnMapping } from "./ColumnMapping";
@@ -31,11 +33,18 @@ interface ImportRequestOwner {
 
 type ImportBusyAction = "READ_FILE" | "VALIDATE" | "COMMIT" | null;
 
+const EMPTY_COLUMNS: ImportColumns = {
+  name: "",
+  organization: "",
+  role: "",
+  grade: "",
+};
+
 export function ImportWizard({ projectId }: { projectId: string }) {
   const { api } = useAuth();
   const [parsed, setParsed] = useState<ParsedWorkbook | null>(null);
   const [sheetName, setSheetName] = useState("");
-  const [columns, setColumns] = useState({ name: "", organization: "" });
+  const [columns, setColumns] = useState<ImportColumns>(EMPTY_COLUMNS);
   const [normalizedRows, setNormalizedRows] = useState<NormalizedImportRow[]>(
     [],
   );
@@ -79,7 +88,7 @@ export function ImportWizard({ projectId }: { projectId: string }) {
     setBusyAction(null);
     setParsed(null);
     setSheetName("");
-    setColumns({ name: "", organization: "" });
+    setColumns(EMPTY_COLUMNS);
     setNormalizedRows([]);
     setValidation(null);
     setResolutionDirty(false);
@@ -158,12 +167,7 @@ export function ImportWizard({ projectId }: { projectId: string }) {
       const nextHeaders = firstSheet ? getSheetHeaders(next, firstSheet) : [];
       setParsed(next);
       setSheetName(firstSheet);
-      setColumns({
-        name: nextHeaders.includes("이름") ? "이름" : (nextHeaders[0] ?? ""),
-        organization: nextHeaders.includes("조직")
-          ? "조직"
-          : (nextHeaders[1] ?? nextHeaders[0] ?? ""),
-      });
+      setColumns(defaultColumns(nextHeaders));
     } catch {
       if (
         generation !== workflowGeneration.current ||
@@ -185,20 +189,27 @@ export function ImportWizard({ projectId }: { projectId: string }) {
     workflowGeneration.current += 1;
     const nextHeaders = parsed ? getSheetHeaders(parsed, nextSheet) : [];
     setSheetName(nextSheet);
-    setColumns({
-      name: nextHeaders.includes("이름") ? "이름" : (nextHeaders[0] ?? ""),
-      organization: nextHeaders.includes("조직")
-        ? "조직"
-        : (nextHeaders[1] ?? nextHeaders[0] ?? ""),
-    });
+    setColumns(defaultColumns(nextHeaders));
     setNormalizedRows([]);
     setValidation(null);
     setResolutionDirty(false);
+    setMessage(null);
   }
 
   async function validate() {
     if (!parsed || requestInFlight.current) return;
-    const rows = normalizeSheet(parsed, sheetName, columns).map((row) => {
+    let parsedRows: NormalizedImportRow[];
+    try {
+      parsedRows = normalizeSheet(parsed, sheetName, columns);
+    } catch (error) {
+      setMessage(
+        error instanceof WorkbookImportError
+          ? error.message
+          : "엑셀 행을 확인하지 못했습니다.",
+      );
+      return;
+    }
+    const rows = parsedRows.map((row) => {
       const selected = normalizedRows.find(
         (current) => current.rowNumber === row.rowNumber,
       )?.resolvedParticipantId;
@@ -307,7 +318,7 @@ export function ImportWizard({ projectId }: { projectId: string }) {
     setBusyAction(null);
     setParsed(null);
     setSheetName("");
-    setColumns({ name: "", organization: "" });
+    setColumns(EMPTY_COLUMNS);
     setNormalizedRows([]);
     setValidation(null);
     setResolutionDirty(false);
@@ -323,7 +334,7 @@ export function ImportWizard({ projectId }: { projectId: string }) {
     setBusyAction(null);
     setParsed(null);
     setSheetName("");
-    setColumns({ name: "", organization: "" });
+    setColumns(EMPTY_COLUMNS);
     setNormalizedRows([]);
     setValidation(null);
     setResolutionDirty(false);
@@ -432,8 +443,7 @@ export function ImportWizard({ projectId }: { projectId: string }) {
           </label>
           <ColumnMapping
             headers={headers}
-            nameColumn={columns.name}
-            organizationColumn={columns.organization}
+            columns={columns}
             disabled={busy}
             onChange={(next) => {
               workflowGeneration.current += 1;
@@ -441,6 +451,7 @@ export function ImportWizard({ projectId }: { projectId: string }) {
               setNormalizedRows([]);
               setValidation(null);
               setResolutionDirty(false);
+              setMessage(null);
             }}
           />
           <div className="er-action-row">
@@ -486,4 +497,15 @@ export function ImportWizard({ projectId }: { projectId: string }) {
       ) : null}
     </div>
   );
+}
+
+function defaultColumns(headers: string[]): ImportColumns {
+  return {
+    name: headers.includes("이름") ? "이름" : (headers[0] ?? ""),
+    organization: headers.includes("조직")
+      ? "조직"
+      : (headers[1] ?? headers[0] ?? ""),
+    role: headers.includes("참가자 구분") ? "참가자 구분" : "",
+    grade: headers.includes("학년") ? "학년" : "",
+  };
 }

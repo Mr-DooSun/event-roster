@@ -274,6 +274,150 @@ it("shows file reading progress and locks the file input", async () => {
   expect(await screen.findByLabelText("시트")).toBeEnabled();
 });
 
+it("automatically maps all participant profile columns and resets them for a new sheet", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL) =>
+      String(input).endsWith("/auth/login")
+        ? Promise.resolve(Response.json(auth()))
+        : Promise.reject(new Error("organizations unavailable")),
+    ),
+  );
+  const parsed = parsedWorkbookWithSheets({
+    첫시트: [
+      {
+        이름: "학생 1",
+        조직: "1팀",
+        "참가자 구분": "학생",
+        학년: "중1",
+        별명: "별명",
+        팀: "대체 조직",
+        역할: "대체 역할",
+        반: "대체 학년",
+      },
+    ],
+    둘째시트: [
+      {
+        이름: "학생 2",
+        조직: "2팀",
+        "참가자 구분": "학생",
+        학년: "고1",
+      },
+    ],
+  });
+  vi.spyOn(workbookReader, "readWorkbook").mockResolvedValueOnce(parsed);
+  render(
+    <AuthProvider restoreOnMount={false}>
+      <Gate>
+        <ImportWizard projectId="project-1" />
+      </Gate>
+    </AuthProvider>,
+  );
+  await login();
+  fireEvent.change(await screen.findByLabelText("엑셀 파일"), {
+    target: { files: [new File(["workbook"], "roster.xlsx")] },
+  });
+
+  expect(await screen.findByLabelText("이름 열")).toHaveValue("이름");
+  expect(screen.getByLabelText("조직 열")).toHaveValue("조직");
+  expect(screen.getByLabelText("참가자 구분 열")).toHaveValue("참가자 구분");
+  expect(screen.getByLabelText("학년 열")).toHaveValue("학년");
+
+  fireEvent.change(screen.getByLabelText("이름 열"), {
+    target: { value: "별명" },
+  });
+  fireEvent.change(screen.getByLabelText("조직 열"), {
+    target: { value: "팀" },
+  });
+  fireEvent.change(screen.getByLabelText("참가자 구분 열"), {
+    target: { value: "역할" },
+  });
+  fireEvent.change(screen.getByLabelText("학년 열"), {
+    target: { value: "반" },
+  });
+  fireEvent.change(screen.getByLabelText("시트"), {
+    target: { value: "둘째시트" },
+  });
+
+  expect(screen.getByLabelText("이름 열")).toHaveValue("이름");
+  expect(screen.getByLabelText("조직 열")).toHaveValue("조직");
+  expect(screen.getByLabelText("참가자 구분 열")).toHaveValue("참가자 구분");
+  expect(screen.getByLabelText("학년 열")).toHaveValue("학년");
+});
+
+it("does not validate a legacy workbook missing participant profile columns", async () => {
+  const fetchMock = vi.fn((input: RequestInfo | URL) =>
+    String(input).endsWith("/auth/login")
+      ? Promise.resolve(Response.json(auth()))
+      : Promise.reject(new Error("organizations unavailable")),
+  );
+  vi.stubGlobal("fetch", fetchMock);
+  render(
+    <AuthProvider restoreOnMount={false}>
+      <Gate>
+        <ImportWizard projectId="project-1" />
+      </Gate>
+    </AuthProvider>,
+  );
+  await login();
+  fireEvent.change(await screen.findByLabelText("엑셀 파일"), {
+    target: {
+      files: [workbookFixture([{ 이름: "박민수", 조직: "1팀" }], false)],
+    },
+  });
+  fireEvent.click(await screen.findByRole("button", { name: "서버 검증" }));
+
+  expect(
+    await screen.findByText("필수 열이 없습니다: 참가자 구분, 학년"),
+  ).toBeVisible();
+  expect(
+    fetchMock.mock.calls.some(([url]) =>
+      String(url).endsWith("/imports/validate"),
+    ),
+  ).toBe(false);
+});
+
+it("does not validate a workbook with a row-specific invalid profile value", async () => {
+  const fetchMock = vi.fn((input: RequestInfo | URL) =>
+    String(input).endsWith("/auth/login")
+      ? Promise.resolve(Response.json(auth()))
+      : Promise.reject(new Error("organizations unavailable")),
+  );
+  vi.stubGlobal("fetch", fetchMock);
+  render(
+    <AuthProvider restoreOnMount={false}>
+      <Gate>
+        <ImportWizard projectId="project-1" />
+      </Gate>
+    </AuthProvider>,
+  );
+  await login();
+  fireEvent.change(await screen.findByLabelText("엑셀 파일"), {
+    target: {
+      files: [
+        workbookFixture([
+          {
+            이름: "박민수",
+            조직: "1팀",
+            "참가자 구분": "학생",
+            학년: "중1~중3",
+          },
+        ]),
+      ],
+    },
+  });
+  fireEvent.click(await screen.findByRole("button", { name: "서버 검증" }));
+
+  expect(
+    await screen.findByText("2행 학년 값이 올바르지 않습니다."),
+  ).toBeVisible();
+  expect(
+    fetchMock.mock.calls.some(([url]) =>
+      String(url).endsWith("/imports/validate"),
+    ),
+  ).toBe(false);
+});
+
 it("sends normalized rows without uploading the source workbook", async () => {
   const fetchMock = vi.fn((input: RequestInfo | URL, _init?: RequestInit) => {
     const url = String(input);
@@ -317,9 +461,21 @@ it("sends normalized rows without uploading the source workbook", async () => {
     String(url).endsWith("/projects/project-1/imports/validate"),
   );
   expect(JSON.parse(String(validateCall?.[1]?.body))).toEqual([
-    { rowNumber: 2, name: "박민수", organizationName: "1팀" },
+    {
+      rowNumber: 2,
+      name: "박민수",
+      organizationName: "1팀",
+      role: "STUDENT",
+      grade: "M1",
+    },
   ]);
   expect(String(validateCall?.[1]?.body)).not.toContain(file.name);
+  expect(
+    screen.getByRole("columnheader", { name: "참가자 구분" }),
+  ).toBeVisible();
+  expect(screen.getByRole("columnheader", { name: "학년" })).toBeVisible();
+  expect(screen.getByRole("cell", { name: "학생" })).toBeVisible();
+  expect(screen.getByRole("cell", { name: "중1" })).toBeVisible();
 });
 
 it("revalidates an ambiguous participant selection before atomic commit", async () => {
@@ -399,6 +555,8 @@ it("revalidates an ambiguous participant selection before atomic commit", async 
         rowNumber: 2,
         name: "동명이인",
         organizationName: "1팀",
+        role: "STUDENT",
+        grade: "M1",
         resolvedParticipantId: "person-2",
       },
     ],
@@ -820,8 +978,11 @@ async function login() {
   fireEvent.click(screen.getByRole("button", { name: "로그인" }));
 }
 
-function workbookFixture(rows: Array<Record<string, string>>) {
-  const { workbook } = parsedWorkbookFixture(rows);
+function workbookFixture(
+  rows: Array<Record<string, string>>,
+  withDefaultProfile = true,
+) {
+  const { workbook } = parsedWorkbookFixture(rows, withDefaultProfile);
   const bytes = XLSX.write(workbook, { type: "array", bookType: "xlsx" });
   return new File([bytes], "source-roster.xlsx", {
     type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -830,14 +991,30 @@ function workbookFixture(rows: Array<Record<string, string>>) {
 
 function parsedWorkbookFixture(
   rows: Array<Record<string, string>>,
+  withDefaultProfile = true,
+): workbookReader.ParsedWorkbook {
+  const normalizedRows = withDefaultProfile
+    ? rows.map((row) => ({
+        "참가자 구분": "학생",
+        학년: "중1",
+        ...row,
+      }))
+    : rows;
+  return parsedWorkbookWithSheets({ 참가자: normalizedRows });
+}
+
+function parsedWorkbookWithSheets(
+  sheets: Record<string, Array<Record<string, string>>>,
 ): workbookReader.ParsedWorkbook {
   const workbook = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(
-    workbook,
-    XLSX.utils.json_to_sheet(rows),
-    "참가자",
-  );
-  return { workbook, sheetNames: ["참가자"] };
+  for (const [sheetName, rows] of Object.entries(sheets)) {
+    XLSX.utils.book_append_sheet(
+      workbook,
+      XLSX.utils.json_to_sheet(rows),
+      sheetName,
+    );
+  }
+  return { workbook, sheetNames: [...workbook.SheetNames] };
 }
 
 function auth() {
