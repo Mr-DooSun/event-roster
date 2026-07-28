@@ -70,7 +70,9 @@ export function RosterTable({
         (role === "UNSPECIFIED" ? row.role === null : row.role === role);
       const matchesGrade =
         grade === "ALL" ||
-        (grade === "UNSPECIFIED" ? row.grade === null : row.grade === grade);
+        (grade === "UNSPECIFIED"
+          ? row.grade === null
+          : row.role !== "TEACHER" && row.grade === grade);
       return (
         matchesQuery &&
         matchesOrganization &&

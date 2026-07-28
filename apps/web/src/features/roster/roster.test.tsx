@@ -1306,6 +1306,41 @@ it("shows participant profiles and combines role and grade filters with existing
   expect(screen.queryByText("기존 참가자")).not.toBeInTheDocument();
 });
 
+it("excludes teachers with stale grades from exact grade filters", () => {
+  render(
+    <RosterTable
+      rows={[
+        {
+          ...entry("ACTIVE"),
+          participantName: "중2 학생",
+          participantNumber: "P-002",
+          role: "STUDENT",
+          grade: "M2",
+        },
+        {
+          ...entry("ACTIVE"),
+          id: "entry-teacher-stale-grade",
+          participantId: "person-teacher-stale-grade",
+          participantName: "학년이 남은 담당교사",
+          participantNumber: "P-003",
+          role: "TEACHER",
+          grade: "M2",
+        },
+      ]}
+      canMutate={false}
+      onStatusChange={vi.fn().mockResolvedValue(undefined)}
+      onEdit={vi.fn()}
+    />,
+  );
+
+  fireEvent.change(screen.getByRole("combobox", { name: "학년 필터" }), {
+    target: { value: "M2" },
+  });
+
+  expect(screen.getByText("중2 학생")).toBeVisible();
+  expect(screen.queryByText("학년이 남은 담당교사")).not.toBeInTheDocument();
+});
+
 it("shows the pending roster row without removing the table", async () => {
   const pendingStatus = deferred<void>();
 

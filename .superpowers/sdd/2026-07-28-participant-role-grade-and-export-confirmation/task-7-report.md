@@ -64,3 +64,35 @@ git diff --check
 ## 우려 사항
 
 - web check/build를 막는 import reader의 타입 오류는 Task 9 완료 후 재검증이 필요하다.
+
+## Fix round 1: stale 담당교사의 exact-grade 제외
+
+### 변경
+
+- exact 학년 필터에서 `row.role !== "TEACHER"`를 함께 확인하도록 수정했다.
+  따라서 비정상적인 legacy/stale 데이터가 `role: "TEACHER", grade: "M2"`처럼
+  남아 있어도 화면의 `-` 표시와 동일하게 중2 exact filter 결과에서는 제외된다.
+
+### RED
+
+```sh
+corepack pnpm@10.28.1 --filter @event-roster/web exec vitest run \
+  src/features/roster/roster.test.tsx \
+  -t "excludes teachers with stale grades from exact grade filters"
+```
+
+- 1 failed, 49 skipped.
+- `학년이 남은 담당교사` 행이 `M2` filter 결과에 남아 회귀를 재현했다.
+
+### GREEN
+
+```sh
+corepack pnpm@10.28.1 --filter @event-roster/web exec vitest run \
+  src/features/roster/roster.test.tsx \
+  -t "excludes teachers with stale grades from exact grade filters"
+corepack pnpm@10.28.1 --filter @event-roster/web test
+```
+
+- covering test: 1 passed, 49 skipped.
+- Web 전체: 20 files, 291/291 통과.
+- `biome check`(수정 2개 파일) 및 `git diff --check`도 통과했다.
