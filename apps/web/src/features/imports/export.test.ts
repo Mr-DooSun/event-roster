@@ -5,9 +5,12 @@ import {
   fireEvent,
   render,
   screen,
+  waitFor,
+  within,
 } from "@testing-library/react";
 import { createElement } from "react";
 import { expect, it, vi } from "vitest";
+import * as exportWorkbook from "../../lib/excel/download-workbook";
 import {
   buildExportWorkbook,
   downloadExportWorkbook,
@@ -73,10 +76,15 @@ it("builds a sanitized project roster filename", () => {
   );
 });
 
-it("keeps the roster and filters while an export fails", async () => {
+it("waits for confirmation before exporting the complete roster and keeps filters after a failure", async () => {
   const pendingExport = deferred<never>();
+  const downloadExportWorkbook = vi
+    .spyOn(exportWorkbook, "downloadExportWorkbook")
+    .mockImplementation(() => undefined);
   mockApi.get.mockReset();
-  mockApi.get.mockReturnValue(pendingExport.promise);
+  mockApi.get
+    .mockReturnValueOnce(pendingExport.promise)
+    .mockResolvedValueOnce(fixture);
   const rows = [
     {
       id: "entry-1",
@@ -124,7 +132,17 @@ it("keeps the roster and filters while an export fails", async () => {
 
   fireEvent.click(screen.getByRole("button", { name: "엑셀 내보내기" }));
 
-  const pendingButton = screen.getByRole("button", {
+  expect(mockApi.get).not.toHaveBeenCalled();
+  expect(downloadExportWorkbook).not.toHaveBeenCalled();
+
+  const dialog = screen.getByRole("dialog", { name: "엑셀 명단 내보내기" });
+  expect(within(dialog).getByText("전체", { selector: "dt" })).toBeVisible();
+  expect(within(dialog).getAllByText("1명")).toHaveLength(3);
+  fireEvent.click(
+    within(dialog).getByRole("button", { name: "엑셀 내보내기" }),
+  );
+
+  const pendingButton = within(dialog).getByRole("button", {
     name: "내보내는 중…",
   });
   expect(pendingButton).toBeDisabled();
@@ -137,9 +155,27 @@ it("keeps the roster and filters while an export fails", async () => {
     pendingExport.reject(new Error("export unavailable"));
     await pendingExport.promise.catch(() => undefined);
   });
-  expect(screen.getByText("엑셀 명단을 내보내지 못했습니다.")).toBeVisible();
+  expect(
+    screen.getByText("엑셀 명단을 내보내지 못했습니다. 다시 시도해 주세요."),
+  ).toBeVisible();
+  expect(
+    screen.getByRole("dialog", { name: "엑셀 명단 내보내기" }),
+  ).toBeVisible();
   expect(screen.getByText("박민수")).toBeVisible();
   expect(screen.getByLabelText("명단 검색")).toHaveValue("박민수");
+
+  fireEvent.click(
+    within(
+      screen.getByRole("dialog", { name: "엑셀 명단 내보내기" }),
+    ).getByRole("button", { name: "엑셀 내보내기" }),
+  );
+  await waitFor(() => {
+    expect(mockApi.get).toHaveBeenCalledTimes(2);
+    expect(
+      screen.queryByRole("dialog", { name: "엑셀 명단 내보내기" }),
+    ).not.toBeInTheDocument();
+  });
+  expect(downloadExportWorkbook).toHaveBeenCalledOnce();
   cleanup();
 });
 

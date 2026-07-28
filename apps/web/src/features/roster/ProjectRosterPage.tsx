@@ -18,6 +18,7 @@ import {
   recordRecentOrganizationId,
 } from "../../lib/recent-organizations";
 import { useAuth } from "../auth/AuthProvider";
+import { ExportRosterDialog } from "./ExportRosterDialog";
 import {
   type BulkParticipantSubmitInput,
   type BulkParticipantSubmitOutcome,
@@ -83,6 +84,8 @@ export function ProjectRosterPage({
     () => new Set(),
   );
   const [exporting, setExporting] = useState(false);
+  const [showExport, setShowExport] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
   const busyRowIdsRef = useRef<ReadonlySet<string>>(new Set());
   const exportingRef = useRef(false);
   const authenticatedUserId = auth?.session.user.id ?? "";
@@ -351,7 +354,7 @@ export function ProjectRosterPage({
     if (exportingRef.current) return;
     exportingRef.current = true;
     setExporting(true);
-    setNotice(null);
+    setExportError(null);
     try {
       const data = await api.get<ExportData>(
         `/projects/${project.id}/exports/roster`,
@@ -361,11 +364,9 @@ export function ProjectRosterPage({
       );
       const filename = projectRosterFilename(project.name);
       downloadExportWorkbook(data, filename);
+      setShowExport(false);
     } catch {
-      setNotice({
-        text: "엑셀 명단을 내보내지 못했습니다.",
-        tone: "error",
-      });
+      setExportError("엑셀 명단을 내보내지 못했습니다. 다시 시도해 주세요.");
     } finally {
       exportingRef.current = false;
       setExporting(false);
@@ -391,7 +392,10 @@ export function ProjectRosterPage({
           type="button"
           loading={exporting}
           loadingText="내보내는 중…"
-          onClick={() => void exportRoster()}
+          onClick={() => {
+            setExportError(null);
+            setShowExport(true);
+          }}
         >
           엑셀 내보내기
         </Button>
@@ -449,6 +453,16 @@ export function ProjectRosterPage({
           }
           onSave={updateParticipant}
           onClose={() => setEditingParticipant(null)}
+        />
+      ) : null}
+      {showExport ? (
+        <ExportRosterDialog
+          projectName={project.name}
+          rows={rows}
+          pending={exporting}
+          error={exportError}
+          onClose={() => setShowExport(false)}
+          onConfirm={() => void exportRoster()}
         />
       ) : null}
     </div>
