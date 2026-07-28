@@ -120,9 +120,16 @@ export function BulkParticipantRowsField({
             canonicalizeParticipantName(row.name),
           );
           const normalizedName = normalizeParticipantName(row.name);
-          const invalidName =
-            normalizedName.length === 0 || normalizedName.length > 100;
+          const nameError =
+            normalizedName.length === 0
+              ? "이름을 입력해 주세요."
+              : normalizedName.length > 100
+                ? "이름은 100자 이하여야 합니다."
+                : null;
+          const missingStudentGrade =
+            row.role === "STUDENT" && row.grade === null;
           const nameErrorId = `bulk-participant-${row.clientId}-name-error`;
+          const gradeErrorId = `bulk-participant-${row.clientId}-grade-error`;
           return (
             <fieldset key={row.clientId} className="er-bulk-participant-row">
               <legend className="er-visually-hidden">
@@ -133,21 +140,20 @@ export function BulkParticipantRowsField({
                 <input
                   value={row.name}
                   disabled={disabled}
+                  required
                   aria-label={`${rowNumber}번 이름`}
-                  aria-invalid={invalidName}
-                  aria-describedby={
-                    normalizedName.length > 100 ? nameErrorId : undefined
-                  }
+                  aria-invalid={nameError !== null}
+                  aria-describedby={nameError ? nameErrorId : undefined}
                   onChange={(event) =>
                     changeName(row.clientId, event.currentTarget.value)
                   }
                 />
-                {normalizedName.length > 100 ? (
+                {nameError ? (
                   <small
                     id={nameErrorId}
                     className="er-bulk-participant-invalid"
                   >
-                    이름은 100자 이하여야 합니다.
+                    {nameError}
                   </small>
                 ) : null}
                 {duplicate?.kinds.includes("INPUT_DUPLICATE") ? (
@@ -183,7 +189,11 @@ export function BulkParticipantRowsField({
                   value={row.grade ?? ""}
                   disabled={disabled || row.role === "TEACHER"}
                   required={row.role === "STUDENT"}
-                  aria-invalid={row.role === "STUDENT" && row.grade === null}
+                  aria-label={`${rowNumber}번 학년`}
+                  aria-invalid={missingStudentGrade}
+                  aria-describedby={
+                    missingStudentGrade ? gradeErrorId : undefined
+                  }
                   onChange={(event) =>
                     changeRow(row.clientId, (current) => ({
                       ...current,
@@ -199,6 +209,14 @@ export function BulkParticipantRowsField({
                     </option>
                   ))}
                 </select>
+                {missingStudentGrade ? (
+                  <small
+                    id={gradeErrorId}
+                    className="er-bulk-participant-invalid"
+                  >
+                    학생은 학년을 선택해 주세요.
+                  </small>
+                ) : null}
               </label>
               <Button
                 type="button"

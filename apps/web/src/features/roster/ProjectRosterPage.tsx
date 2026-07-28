@@ -173,10 +173,7 @@ export function ProjectRosterPage({
     );
   }
 
-  async function handleMutation(
-    operation: () => Promise<unknown>,
-    onStale?: () => void,
-  ) {
+  async function handleMutation(operation: () => Promise<unknown>) {
     setNotice(null);
     try {
       await operation();
@@ -187,7 +184,6 @@ export function ProjectRosterPage({
         error instanceof ApiError &&
         error.problem?.code === "STALE_REVISION"
       ) {
-        onStale?.();
         setNotice({
           text: "다른 변경이 먼저 반영되어 최신 명단을 다시 불러왔습니다.",
           tone: "info",
@@ -248,13 +244,11 @@ export function ProjectRosterPage({
     expectedRevision: number;
   }) {
     if (!editingParticipant) return;
-    const completed = await handleMutation(
-      () =>
-        api.patch(
-          `/projects/${project.id}/participants/${editingParticipant.participant.id}`,
-          { ...input, expectedProjectRevision: project.revision },
-        ),
-      () => setEditingParticipant(null),
+    const completed = await handleMutation(() =>
+      api.patch(
+        `/projects/${project.id}/participants/${editingParticipant.participant.id}`,
+        { ...input, expectedProjectRevision: project.revision },
+      ),
     );
     if (completed) setEditingParticipant(null);
   }

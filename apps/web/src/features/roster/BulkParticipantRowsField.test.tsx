@@ -105,6 +105,39 @@ it("exposes student grade requirements and name errors to assistive technology",
   );
 });
 
+it("describes every missing student field and omits grade errors for teachers", () => {
+  render(
+    <BulkParticipantRowsField
+      rows={[
+        student("student"),
+        {
+          clientId: "teacher",
+          name: "담당교사",
+          role: "TEACHER",
+          grade: null,
+        },
+      ]}
+      duplicates={[]}
+      duplicateNamesConfirmed={false}
+      onRowsChange={vi.fn()}
+      onDuplicateNamesConfirmedChange={vi.fn()}
+    />,
+  );
+
+  expect(screen.getByRole("textbox", { name: "1번 이름" })).toBeRequired();
+  expect(
+    screen.getByRole("textbox", { name: "1번 이름" }),
+  ).toHaveAccessibleDescription("이름을 입력해 주세요.");
+  expect(
+    screen.getByRole("combobox", { name: "1번 학년" }),
+  ).toHaveAccessibleDescription("학생은 학년을 선택해 주세요.");
+
+  const teacherGrade = screen.getByRole("combobox", { name: "2번 학년" });
+  expect(teacherGrade).toBeDisabled();
+  expect(teacherGrade).not.toHaveAttribute("aria-describedby");
+  expect(teacherGrade).toHaveAttribute("aria-invalid", "false");
+});
+
 it("clears and disables grade when a row changes to teacher", () => {
   const onRowsChange = vi.fn();
   const props = {

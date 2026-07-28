@@ -2337,17 +2337,21 @@ it("keeps in-progress roster controls read-only for managers and available to op
   expect(screen.getByRole("button", { name: "참가자 추가" })).toBeVisible();
 });
 
-it("closes participant editing after a stale revision reload", async () => {
+it("keeps the participant profile draft after a stale revision reload", async () => {
   const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     if (url.endsWith("/auth/login"))
       return Promise.resolve(Response.json(auth()));
     if (url.endsWith("/projects/project-1"))
-      return Promise.resolve(Response.json(project()));
+      return Promise.resolve(
+        Response.json({ ...project(), status: "PRE_REGISTRATION" }),
+      );
     if (url.endsWith("/summary"))
       return Promise.resolve(Response.json(summary(100)));
     if (url.endsWith("/roster") && (!init?.method || init.method === "GET")) {
-      return Promise.resolve(Response.json([entry("ACTIVE")]));
+      return Promise.resolve(
+        Response.json([{ ...entry("ACTIVE"), role: "TEACHER", grade: null }]),
+      );
     }
     if (
       url.endsWith("/projects/project-1/participants/person-1") &&
@@ -2388,12 +2392,23 @@ it("closes participant editing after a stale revision reload", async () => {
             activeProjectCount: 1,
             hasBusinessHistory: false,
           },
+          {
+            organizationId: "org-2",
+            name: "2팀",
+            isActive: true,
+            masterIsActive: true,
+            activeProjectCount: 1,
+            hasBusinessHistory: false,
+          },
         ]),
       );
     }
     if (url.endsWith("/organizations")) {
       return Promise.resolve(
-        Response.json([{ id: "org-1", name: "1팀", isActive: true }]),
+        Response.json([
+          { id: "org-1", name: "1팀", isActive: true },
+          { id: "org-2", name: "2팀", isActive: true },
+        ]),
       );
     }
     if (url.includes("/audit")) {
@@ -2415,6 +2430,15 @@ it("closes participant editing after a stale revision reload", async () => {
   fireEvent.change(screen.getByLabelText("이름"), {
     target: { value: "박민수 수정" },
   });
+  fireEvent.change(screen.getByRole("combobox", { name: "소속 조직" }), {
+    target: { value: "org-2" },
+  });
+  fireEvent.change(screen.getByRole("combobox", { name: "참가자 구분" }), {
+    target: { value: "STUDENT" },
+  });
+  fireEvent.change(screen.getByRole("combobox", { name: "학년" }), {
+    target: { value: "H3" },
+  });
   fireEvent.click(screen.getByRole("button", { name: "정보 저장" }));
 
   expect(
@@ -2423,8 +2447,16 @@ it("closes participant editing after a stale revision reload", async () => {
     ),
   ).toBeVisible();
   expect(
-    screen.queryByRole("dialog", { name: "참가자 정보 수정" }),
-  ).not.toBeInTheDocument();
+    screen.getByRole("dialog", { name: "참가자 정보 수정" }),
+  ).toBeVisible();
+  expect(screen.getByLabelText("이름")).toHaveValue("박민수 수정");
+  expect(screen.getByRole("combobox", { name: "소속 조직" })).toHaveValue(
+    "org-2",
+  );
+  expect(screen.getByRole("combobox", { name: "참가자 구분" })).toHaveValue(
+    "STUDENT",
+  );
+  expect(screen.getByRole("combobox", { name: "학년" })).toHaveValue("H3");
   const participantWrite = fetchMock.mock.calls.find(
     ([url, init]) =>
       String(url).endsWith("/projects/project-1/participants/person-1") &&
@@ -2432,9 +2464,9 @@ it("closes participant editing after a stale revision reload", async () => {
   );
   expect(JSON.parse(String(participantWrite?.[1]?.body))).toEqual({
     name: "박민수 수정",
-    organizationId: "org-1",
+    organizationId: "org-2",
     role: "STUDENT",
-    grade: "M1",
+    grade: "H3",
     expectedRevision: 1,
     expectedProjectRevision: 2,
   });
