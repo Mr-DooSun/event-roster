@@ -2,7 +2,9 @@ import {
   BulkParticipantDuplicateDetailsSchema,
   type BulkRosterCreateResponse,
   type Organization,
+  type ParticipantRole,
   type Project,
+  type StudentGrade,
 } from "@event-roster/contracts";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Button } from "../../components/ui/Button";
@@ -48,6 +50,11 @@ interface RosterNotice {
   tone: "info" | "success" | "error";
 }
 
+interface EditingRosterParticipant {
+  participant: ParticipantView;
+  roster: RosterView;
+}
+
 function hasSameOrganizationIds(
   left: ReadonlySet<string>,
   right: ReadonlySet<string>,
@@ -70,7 +77,7 @@ export function ProjectRosterPage({
   const { api, auth } = useAuth();
   const [showAdd, setShowAdd] = useState(false);
   const [editingParticipant, setEditingParticipant] =
-    useState<ParticipantView | null>(null);
+    useState<EditingRosterParticipant | null>(null);
   const [notice, setNotice] = useState<RosterNotice | null>(null);
   const [busyRowIds, setBusyRowIds] = useState<ReadonlySet<string>>(
     () => new Set(),
@@ -227,23 +234,24 @@ export function ProjectRosterPage({
   }
 
   function edit(row: RosterView) {
-    setEditingParticipant(
-      participants.find(
-        (participant) => participant.id === row.participantId,
-      ) ?? null,
+    const participant = participants.find(
+      (item) => item.id === row.participantId,
     );
+    setEditingParticipant(participant ? { participant, roster: row } : null);
   }
 
   async function updateParticipant(input: {
     name: string;
     organizationId: string;
+    role: ParticipantRole;
+    grade: StudentGrade | null;
     expectedRevision: number;
   }) {
     if (!editingParticipant) return;
     const completed = await handleMutation(
       () =>
         api.patch(
-          `/projects/${project.id}/participants/${editingParticipant.id}`,
+          `/projects/${project.id}/participants/${editingParticipant.participant.id}`,
           { ...input, expectedProjectRevision: project.revision },
         ),
       () => setEditingParticipant(null),
@@ -339,7 +347,7 @@ export function ProjectRosterPage({
     }
     rememberOrganization(input.organizationId, recentOrganizationGeneration);
     setNotice({
-      text: `${input.names.length}명을 명단에 추가했습니다.`,
+      text: `${input.participants.length}명을 명단에 추가했습니다.`,
       tone: "success",
     });
     return { kind: "SUCCESS" };
@@ -438,7 +446,8 @@ export function ProjectRosterPage({
       ) : null}
       {editingParticipant && canMutate ? (
         <ParticipantEditDialog
-          participant={editingParticipant}
+          participant={editingParticipant.participant}
+          roster={editingParticipant.roster}
           organizations={organizations}
           allowOrganizationChange={
             project.status === "PRE_REGISTRATION" &&

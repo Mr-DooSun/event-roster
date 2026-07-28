@@ -34,6 +34,8 @@ const bulkDialogProps = {
       participantId: "P-001",
       name: "기존 참가자",
       organizationId: "org-1",
+      suggestedRole: "STUDENT" as const,
+      suggestedGrade: "M1" as const,
       revision: 0,
     },
   ],
@@ -42,20 +44,208 @@ const bulkDialogProps = {
   onClose: vi.fn(),
 };
 
+it("starts new mode empty and submits two structured participant profiles", async () => {
+  const onCreateAndAdd = vi.fn().mockResolvedValue({ kind: "SUCCESS" });
+  render(
+    <ParticipantDialog {...bulkDialogProps} onCreateAndAdd={onCreateAndAdd} />,
+  );
+
+  fireEvent.click(screen.getByRole("button", { name: "새 참가자" }));
+  expect(
+    screen.queryByRole("textbox", { name: /번 이름/ }),
+  ).not.toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "참가자 추가" }));
+  fireEvent.click(screen.getByRole("button", { name: "참가자 추가" }));
+  fireEvent.change(screen.getByRole("textbox", { name: "1번 이름" }), {
+    target: { value: "  홍길동  " },
+  });
+  fireEvent.change(screen.getByRole("combobox", { name: "1번 학년" }), {
+    target: { value: "M2" },
+  });
+  fireEvent.change(screen.getByRole("textbox", { name: "2번 이름" }), {
+    target: { value: "김\t민수" },
+  });
+  fireEvent.change(screen.getByRole("combobox", { name: "2번 참가자 구분" }), {
+    target: { value: "TEACHER" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "2명 명단에 추가" }));
+
+  await waitFor(() =>
+    expect(onCreateAndAdd).toHaveBeenCalledWith({
+      participants: [
+        { name: "홍길동", role: "STUDENT", grade: "M2" },
+        { name: "김 민수", role: "TEACHER", grade: null },
+      ],
+      organizationId: "org-1",
+      confirmDuplicateNames: false,
+    }),
+  );
+});
+
+it("keeps all structured rows and profiles after a duplicate response", async () => {
+  const onCreateAndAdd = vi.fn().mockResolvedValue({
+    kind: "DUPLICATES",
+    duplicates: [{ name: "홍길동", kinds: ["INPUT_DUPLICATE"] }],
+  });
+  render(
+    <ParticipantDialog {...bulkDialogProps} onCreateAndAdd={onCreateAndAdd} />,
+  );
+
+  fireEvent.click(screen.getByRole("button", { name: "새 참가자" }));
+  fireEvent.click(screen.getByRole("button", { name: "참가자 추가" }));
+  fireEvent.click(screen.getByRole("button", { name: "참가자 추가" }));
+  fireEvent.change(screen.getByRole("textbox", { name: "1번 이름" }), {
+    target: { value: "홍길동" },
+  });
+  fireEvent.change(screen.getByRole("combobox", { name: "1번 학년" }), {
+    target: { value: "H1" },
+  });
+  fireEvent.change(screen.getByRole("textbox", { name: "2번 이름" }), {
+    target: { value: "홍길동" },
+  });
+  fireEvent.change(screen.getByRole("combobox", { name: "2번 참가자 구분" }), {
+    target: { value: "TEACHER" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "2명 명단에 추가" }));
+
+  expect(
+    await screen.findByRole("checkbox", {
+      name: "중복 이름을 확인했습니다",
+    }),
+  ).toBeVisible();
+  expect(screen.getByRole("textbox", { name: "1번 이름" })).toHaveValue(
+    "홍길동",
+  );
+  expect(screen.getByRole("combobox", { name: "1번 학년" })).toHaveValue("H1");
+  expect(screen.getByRole("combobox", { name: "2번 참가자 구분" })).toHaveValue(
+    "TEACHER",
+  );
+  expect(screen.getByRole("combobox", { name: "2번 학년" })).toBeDisabled();
+});
+
+it("prefills a valid recent profile suggestion but waits for confirmation", async () => {
+  const onAdd = vi.fn().mockResolvedValue(undefined);
+  render(
+    <ParticipantDialog
+      {...bulkDialogProps}
+      participants={[
+        {
+          id: "person-1",
+          participantId: "P-001",
+          name: "기존 참가자",
+          organizationId: "org-1",
+          suggestedRole: "STUDENT",
+          suggestedGrade: "H2",
+          revision: 0,
+        },
+      ]}
+      onAdd={onAdd}
+      onCreateAndAdd={vi.fn().mockResolvedValue({ kind: "SUCCESS" })}
+    />,
+  );
+
+  expect(screen.getByRole("combobox", { name: "참가자 구분" })).toHaveValue(
+    "STUDENT",
+  );
+  expect(screen.getByRole("combobox", { name: "학년" })).toHaveValue("H2");
+  expect(onAdd).not.toHaveBeenCalled();
+
+  fireEvent.click(screen.getByRole("button", { name: "명단에 추가" }));
+  await waitFor(() =>
+    expect(onAdd).toHaveBeenCalledWith(
+      expect.objectContaining({ role: "STUDENT", grade: "H2" }),
+    ),
+  );
+});
+
+it("uses an unconfirmed student profile for absent legacy suggestions", () => {
+  render(
+    <ParticipantDialog
+      {...bulkDialogProps}
+      participants={[
+        {
+          id: "person-1",
+          participantId: "P-001",
+          name: "기존 참가자",
+          organizationId: "org-1",
+          suggestedRole: null,
+          suggestedGrade: null,
+          revision: 0,
+        },
+      ]}
+      onCreateAndAdd={vi.fn().mockResolvedValue({ kind: "SUCCESS" })}
+    />,
+  );
+
+  expect(screen.getByRole("combobox", { name: "참가자 구분" })).toHaveValue(
+    "STUDENT",
+  );
+  expect(screen.getByRole("combobox", { name: "학년" })).toHaveValue("");
+  expect(screen.getByRole("button", { name: "명단에 추가" })).toBeDisabled();
+});
+
+it("edits the selected roster profile and includes it in the save payload", async () => {
+  const onSave = vi.fn().mockResolvedValue(undefined);
+  render(
+    <ParticipantEditDialog
+      participant={{
+        id: "person-1",
+        participantId: "P-001",
+        name: "박민수",
+        organizationId: "org-1",
+        suggestedRole: null,
+        suggestedGrade: null,
+        revision: 4,
+      }}
+      roster={{
+        ...entry("ACTIVE"),
+        role: "STUDENT",
+        grade: "M2",
+      }}
+      organizations={[{ id: "org-1", name: "1팀", isActive: true }]}
+      allowOrganizationChange
+      onSave={onSave}
+      onClose={vi.fn()}
+    />,
+  );
+
+  expect(screen.getByRole("combobox", { name: "참가자 구분" })).toHaveValue(
+    "STUDENT",
+  );
+  expect(screen.getByRole("combobox", { name: "학년" })).toHaveValue("M2");
+  fireEvent.change(screen.getByRole("combobox", { name: "학년" }), {
+    target: { value: "M3" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "정보 저장" }));
+
+  await waitFor(() =>
+    expect(onSave).toHaveBeenCalledWith({
+      name: "박민수",
+      organizationId: "org-1",
+      role: "STUDENT",
+      grade: "M3",
+      expectedRevision: 4,
+    }),
+  );
+});
+
 it("submits normalized bulk names with one organization", async () => {
   const onCreateAndAdd = vi.fn().mockResolvedValue({ kind: "SUCCESS" });
   render(
     <ParticipantDialog {...bulkDialogProps} onCreateAndAdd={onCreateAndAdd} />,
   );
   fireEvent.click(screen.getByRole("button", { name: "새 참가자" }));
-  fireEvent.change(screen.getByLabelText("이름"), {
-    target: { value: "  홍길동  \n\n김\t민수" },
-  });
+  addStudentParticipantRow("  홍길동  ", "M1");
+  addStudentParticipantRow("김\t민수", "H2");
   fireEvent.click(screen.getByRole("button", { name: "2명 명단에 추가" }));
 
   await waitFor(() =>
     expect(onCreateAndAdd).toHaveBeenCalledWith({
-      names: ["홍길동", "김 민수"],
+      participants: [
+        { name: "홍길동", role: "STUDENT", grade: "M1" },
+        { name: "김 민수", role: "STUDENT", grade: "H2" },
+      ],
       organizationId: "org-1",
       confirmDuplicateNames: false,
     }),
@@ -69,9 +259,8 @@ it("prevents a second bulk submit while the first is pending", async () => {
     <ParticipantDialog {...bulkDialogProps} onCreateAndAdd={onCreateAndAdd} />,
   );
   fireEvent.click(screen.getByRole("button", { name: "새 참가자" }));
-  fireEvent.change(screen.getByLabelText("이름"), {
-    target: { value: "홍길동\n김민수" },
-  });
+  addStudentParticipantRow("홍길동");
+  addStudentParticipantRow("김민수");
   fireEvent.click(screen.getByRole("button", { name: "2명 명단에 추가" }));
   fireEvent.click(screen.getByRole("button", { name: "2명 등록 중…" }));
 
@@ -100,9 +289,8 @@ it("requires explicit confirmation after a duplicate response", async () => {
     />,
   );
   fireEvent.click(screen.getByRole("button", { name: "새 참가자" }));
-  fireEvent.change(screen.getByLabelText("이름"), {
-    target: { value: "홍길동\n홍길동" },
-  });
+  addStudentParticipantRow("홍길동", "M2");
+  addTeacherParticipantRow("홍길동");
   fireEvent.click(screen.getByRole("button", { name: "2명 명단에 추가" }));
 
   expect(
@@ -119,7 +307,10 @@ it("requires explicit confirmation after a duplicate response", async () => {
 
   await waitFor(() =>
     expect(onCreateAndAdd).toHaveBeenLastCalledWith({
-      names: ["홍길동", "홍길동"],
+      participants: [
+        { name: "홍길동", role: "STUDENT", grade: "M2" },
+        { name: "홍길동", role: "TEACHER", grade: null },
+      ],
       organizationId: "org-1",
       confirmDuplicateNames: true,
     }),
@@ -136,8 +327,8 @@ it("clears duplicate confirmation when names change", async () => {
     <ParticipantDialog {...bulkDialogProps} onCreateAndAdd={onCreateAndAdd} />,
   );
   fireEvent.click(screen.getByRole("button", { name: "새 참가자" }));
-  const nameField = screen.getByLabelText("이름");
-  fireEvent.change(nameField, { target: { value: "홍길동" } });
+  addStudentParticipantRow("홍길동");
+  const nameField = screen.getByRole("textbox", { name: "1번 이름" });
   fireEvent.click(screen.getByRole("button", { name: "1명 명단에 추가" }));
   await screen.findByRole("checkbox", {
     name: "중복 이름을 확인했습니다",
@@ -150,7 +341,7 @@ it("clears duplicate confirmation when names change", async () => {
   fireEvent.click(screen.getByRole("button", { name: "1명 명단에 추가" }));
   await waitFor(() =>
     expect(onCreateAndAdd).toHaveBeenLastCalledWith({
-      names: ["김민수"],
+      participants: [{ name: "김민수", role: "STUDENT", grade: "M1" }],
       organizationId: "org-1",
       confirmDuplicateNames: false,
     }),
@@ -174,9 +365,7 @@ it("clears duplicate confirmation when the selected organization becomes inactiv
   );
   const view = render(renderDialog(true));
   fireEvent.click(screen.getByRole("button", { name: "새 참가자" }));
-  fireEvent.change(screen.getByLabelText("이름"), {
-    target: { value: "홍길동" },
-  });
+  addStudentParticipantRow("홍길동");
   fireEvent.click(screen.getByRole("button", { name: "1명 명단에 추가" }));
   await screen.findByRole("checkbox", {
     name: "중복 이름을 확인했습니다",
@@ -201,6 +390,7 @@ it("keeps the current inactive organization while editing an existing participan
         organizationId: "org-inactive",
         revision: 1,
       }}
+      roster={{ ...entry("ACTIVE"), role: "STUDENT", grade: "M1" }}
       organizations={[
         { id: "org-inactive", name: "이전 조직", isActive: false },
         { id: "org-active", name: "현재 조직", isActive: true },
@@ -225,6 +415,8 @@ it("defaults reusable participants from an inactive master organization to an ac
           participantId: "P-001",
           name: "박민수",
           organizationId: "org-old-inactive",
+          suggestedRole: "STUDENT",
+          suggestedGrade: "M1",
           revision: 3,
         },
       ]}
@@ -240,6 +432,8 @@ it("defaults reusable participants from an inactive master organization to an ac
     participantId: "person-1",
     name: "박민수",
     organizationId: "org-active",
+    role: "STUDENT",
+    grade: "M1",
     expectedParticipantRevision: 3,
   });
 });
@@ -253,6 +447,8 @@ it("defaults a new participant to the newest valid recent organization", () => {
           participantId: "P-001",
           name: "박민수",
           organizationId: "org-1",
+          suggestedRole: "STUDENT",
+          suggestedGrade: "M1",
           revision: 3,
         },
       ]}
@@ -284,6 +480,8 @@ it("keeps an existing participant organization while ordering recent options", (
           participantId: "P-001",
           name: "박민수",
           organizationId: "org-1",
+          suggestedRole: "STUDENT",
+          suggestedGrade: "M1",
           revision: 3,
         },
       ]}
@@ -350,9 +548,10 @@ it("posts bulk names, reloads, and shows a success notice", async () => {
   await login();
 
   await openNewParticipantForm("황룡사");
-  fireEvent.change(screen.getByLabelText("이름"), {
-    target: { value: "홍길동\n김민수" },
+  fireEvent.change(screen.getByRole("textbox", { name: "1번 이름" }), {
+    target: { value: "홍길동" },
   });
+  addStudentParticipantRow("김민수", "H1");
   fireEvent.click(screen.getByRole("button", { name: "2명 명단에 추가" }));
 
   await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1));
@@ -363,7 +562,10 @@ it("posts bulk names, reloads, and shows a success notice", async () => {
   );
   expect(JSON.parse(String(write?.[1]?.body))).toEqual({
     organizationId: "org-2",
-    names: ["홍길동", "김민수"],
+    participants: [
+      { name: "홍길동", role: "STUDENT", grade: "M1" },
+      { name: "김민수", role: "STUDENT", grade: "H1" },
+    ],
     confirmDuplicateNames: false,
     expectedRevision: project().revision,
   });
@@ -397,7 +599,7 @@ it("keeps bulk input open for a structured duplicate conflict", async () => {
   await login();
 
   await openNewParticipantForm("성룡사");
-  fireEvent.change(screen.getByLabelText("이름"), {
+  fireEvent.change(screen.getByRole("textbox", { name: "1번 이름" }), {
     target: { value: "홍길동" },
   });
   fireEvent.click(screen.getByRole("button", { name: "1명 명단에 추가" }));
@@ -405,7 +607,9 @@ it("keeps bulk input open for a structured duplicate conflict", async () => {
   expect(
     await screen.findByText("이 조직에 같은 이름의 참가자가 있습니다."),
   ).toBeVisible();
-  expect(screen.getByLabelText("이름")).toHaveValue("홍길동");
+  expect(screen.getByRole("textbox", { name: "1번 이름" })).toHaveValue(
+    "홍길동",
+  );
   expect(onChanged).not.toHaveBeenCalled();
   expect(recentOrganizationValue("user-1", "project-1")).toBeNull();
 });
@@ -421,6 +625,8 @@ it("records the confirmed organization after an existing participant add succeed
         participantId: "P-001",
         name: "박민수",
         organizationId: "org-2",
+        suggestedRole: "STUDENT",
+        suggestedGrade: "M1",
         revision: 3,
       },
     ],
@@ -741,6 +947,8 @@ it("groups participant fields and actions with visible spacing hooks", () => {
           participantId: "P-001",
           name: "박민수",
           organizationId: "org-1",
+          suggestedRole: "STUDENT",
+          suggestedGrade: "M1",
           revision: 3,
         },
       ]}
@@ -755,6 +963,7 @@ it("groups participant fields and actions with visible spacing hooks", () => {
   );
 
   const dialog = screen.getByRole("dialog", { name: "참가자 추가" });
+  expect(dialog).toHaveClass("er-dialog--roster");
   expect(
     screen.getByRole("button", { name: "기존 참가자" }).parentElement,
   ).toHaveClass("er-participant-mode-actions");
@@ -767,6 +976,7 @@ it("groups participant fields and actions with visible spacing hooks", () => {
   expect(
     within(dialog).getByRole("button", { name: "명단에 추가" }).parentElement,
   ).toHaveClass("er-dialog-actions");
+  expect(within(dialog).getByRole("combobox", { name: "학년" })).toBeRequired();
 });
 
 it("uses dedicated responsive spacing for roster actions and filters", async () => {
@@ -827,6 +1037,8 @@ it("clears a selected organization when its search text changes", () => {
           participantId: "P-001",
           name: "박민수",
           organizationId: "org-1",
+          suggestedRole: "STUDENT",
+          suggestedGrade: "M1",
           revision: 3,
         },
       ]}
@@ -856,6 +1068,8 @@ it("preserves an edited participant name and clears a removed organization candi
     participantId: "P-001",
     name: "박민수",
     organizationId: "org-1",
+    suggestedRole: "STUDENT" as const,
+    suggestedGrade: "M1" as const,
     revision: 3,
   };
   const commonProps = {
@@ -916,6 +1130,8 @@ it("synchronizes a manager confirmation to the participant's refreshed read-only
           participantId: "P-001",
           name: "서버 이름",
           organizationId: "org-1",
+          suggestedRole: "STUDENT",
+          suggestedGrade: "M1",
           revision: 3,
         },
       ]}
@@ -934,6 +1150,8 @@ it("synchronizes a manager confirmation to the participant's refreshed read-only
           participantId: "P-001",
           name: "갱신된 서버 이름",
           organizationId: "org-2",
+          suggestedRole: "STUDENT",
+          suggestedGrade: "M1",
           revision: 4,
         },
       ]}
@@ -950,6 +1168,8 @@ it("synchronizes a manager confirmation to the participant's refreshed read-only
       participantId: "person-1",
       name: "조직장 확인 이름",
       organizationId: "org-2",
+      role: "STUDENT",
+      grade: "M1",
       expectedParticipantRevision: 4,
     }),
   );
@@ -965,6 +1185,8 @@ it("closes the organization listbox before a second Escape closes the participan
           participantId: "P-001",
           name: "박민수",
           organizationId: "org-1",
+          suggestedRole: "STUDENT",
+          suggestedGrade: "M1",
           revision: 3,
         },
       ]}
@@ -1167,6 +1389,8 @@ it("keeps an existing-participant dialog pending without submitting twice", asyn
           participantId: "P-001",
           name: "박민수",
           organizationId: "org-1",
+          suggestedRole: "STUDENT",
+          suggestedGrade: "M1",
           revision: 3,
         },
       ]}
@@ -1219,8 +1443,9 @@ it("keeps a new-participant dialog pending without submitting twice", async () =
     />,
   );
   fireEvent.click(screen.getByRole("button", { name: "새 참가자" }));
-  fireEvent.change(screen.getByLabelText("이름"), {
-    target: { value: "새 참가자 이름" },
+  addStudentParticipantRow("새 참가자 이름");
+  fireEvent.change(screen.getByRole("combobox", { name: "1번 참가자 구분" }), {
+    target: { value: "TEACHER" },
   });
 
   fireEvent.click(screen.getByRole("button", { name: "1명 명단에 추가" }));
@@ -1231,7 +1456,13 @@ it("keeps a new-participant dialog pending without submitting twice", async () =
   expect(pendingButton).toBeDisabled();
   fireEvent.click(pendingButton);
   expect(onCreateAndAdd).toHaveBeenCalledTimes(1);
-  expect(screen.getByLabelText("이름")).toHaveValue("새 참가자 이름");
+  expect(screen.getByRole("textbox", { name: "1번 이름" })).toHaveValue(
+    "새 참가자 이름",
+  );
+  expect(screen.getByRole("combobox", { name: "1번 참가자 구분" })).toHaveValue(
+    "TEACHER",
+  );
+  expect(screen.getByRole("combobox", { name: "1번 학년" })).toBeDisabled();
   fireEvent.click(screen.getByRole("button", { name: "닫기" }));
   fireEvent.keyDown(screen.getByRole("dialog", { name: "참가자 추가" }), {
     key: "Escape",
@@ -1244,7 +1475,13 @@ it("keeps a new-participant dialog pending without submitting twice", async () =
     await pendingCreate.promise.catch(() => undefined);
   });
   expect(screen.getByRole("dialog", { name: "참가자 추가" })).toBeVisible();
-  expect(screen.getByLabelText("이름")).toHaveValue("새 참가자 이름");
+  expect(screen.getByRole("textbox", { name: "1번 이름" })).toHaveValue(
+    "새 참가자 이름",
+  );
+  expect(screen.getByRole("combobox", { name: "1번 참가자 구분" })).toHaveValue(
+    "TEACHER",
+  );
+  expect(screen.getByRole("combobox", { name: "1번 학년" })).toBeDisabled();
 });
 
 it("keeps participant edits pending without submitting twice", async () => {
@@ -1259,6 +1496,7 @@ it("keeps participant edits pending without submitting twice", async () => {
         organizationId: "org-1",
         revision: 1,
       }}
+      roster={{ ...entry("ACTIVE"), role: "STUDENT", grade: "M1" }}
       organizations={[{ id: "org-1", name: "1팀", isActive: true }]}
       allowOrganizationChange
       onSave={onSave}
@@ -1267,6 +1505,9 @@ it("keeps participant edits pending without submitting twice", async () => {
   );
   fireEvent.change(screen.getByLabelText("이름"), {
     target: { value: "수정 이름" },
+  });
+  fireEvent.change(screen.getByRole("combobox", { name: "학년" }), {
+    target: { value: "H3" },
   });
 
   fireEvent.click(screen.getByRole("button", { name: "정보 저장" }));
@@ -1278,6 +1519,7 @@ it("keeps participant edits pending without submitting twice", async () => {
   fireEvent.click(pendingButton);
   expect(onSave).toHaveBeenCalledTimes(1);
   expect(screen.getByLabelText("이름")).toHaveValue("수정 이름");
+  expect(screen.getByRole("combobox", { name: "학년" })).toHaveValue("H3");
 
   await act(async () => {
     pendingSave.reject(new Error("save failed"));
@@ -1287,6 +1529,7 @@ it("keeps participant edits pending without submitting twice", async () => {
     screen.getByRole("dialog", { name: "참가자 정보 수정" }),
   ).toBeVisible();
   expect(screen.getByLabelText("이름")).toHaveValue("수정 이름");
+  expect(screen.getByRole("combobox", { name: "학년" })).toHaveValue("H3");
 });
 
 it("updates expected and actual totals after an in-progress cancellation", async () => {
@@ -1485,6 +1728,8 @@ it("preserves an existing-participant draft after a stale add reload", async () 
             participantId: "P-001",
             name: participantReads === 1 ? "서버 이름" : "갱신된 서버 이름",
             organizationId: "org-1",
+            suggestedRole: "STUDENT",
+            suggestedGrade: "M1",
             revision: participantReads === 1 ? 7 : 8,
           },
         ]),
@@ -1614,9 +1859,7 @@ it("creates and adds a participant with one atomic roster request", async () => 
   await openRosterTab();
   fireEvent.click(await screen.findByRole("button", { name: "참가자 추가" }));
   fireEvent.click(screen.getByRole("button", { name: "새 참가자" }));
-  fireEvent.change(screen.getByLabelText("이름"), {
-    target: { value: "김신규" },
-  });
+  addStudentParticipantRow("김신규");
   fireEvent.click(screen.getByRole("button", { name: "1명 명단에 추가" }));
 
   await vi.waitFor(() =>
@@ -1636,7 +1879,7 @@ it("creates and adds a participant with one atomic roster request", async () => 
   expect(rosterWrites).toHaveLength(1);
   expect(JSON.parse(String(rosterWrites[0]?.[1]?.body))).toEqual({
     organizationId: "org-1",
-    names: ["김신규"],
+    participants: [{ name: "김신규", role: "STUDENT", grade: "M1" }],
     confirmDuplicateNames: false,
     expectedRevision: 2,
   });
@@ -1668,6 +1911,8 @@ it("confirms reusable participant details in one existing-roster request", async
             participantId: "P-001",
             name: "이전 이름",
             organizationId: "org-old-inactive",
+            suggestedRole: "STUDENT",
+            suggestedGrade: "M1",
             revision: 7,
           },
         ]),
@@ -1746,6 +1991,8 @@ it("confirms reusable participant details in one existing-roster request", async
     confirmedParticipant: {
       name: "확정 이름",
       organizationId: "org-2",
+      role: "STUDENT",
+      grade: "M1",
     },
     expectedParticipantRevision: 7,
     expectedRevision: 2,
@@ -1786,6 +2033,8 @@ it("keeps a manager reuse confirmation in the participant master organization", 
             participantId: "P-001",
             name: "담당자 확인 전 이름",
             organizationId: "org-1",
+            suggestedRole: "STUDENT",
+            suggestedGrade: "M1",
             revision: 5,
           },
         ]),
@@ -1866,6 +2115,8 @@ it("keeps a manager reuse confirmation in the participant master organization", 
     confirmedParticipant: {
       name: "담당자 확인 이름",
       organizationId: "org-1",
+      role: "STUDENT",
+      grade: "M1",
     },
     expectedParticipantRevision: 5,
     expectedRevision: 2,
@@ -2182,6 +2433,8 @@ it("closes participant editing after a stale revision reload", async () => {
   expect(JSON.parse(String(participantWrite?.[1]?.body))).toEqual({
     name: "박민수 수정",
     organizationId: "org-1",
+    role: "STUDENT",
+    grade: "M1",
     expectedRevision: 1,
     expectedProjectRevision: 2,
   });
@@ -2330,6 +2583,8 @@ function entry(status: "ACTIVE" | "CANCELLED"): RosterView {
     organizationId: "org-1",
     participantName: "박민수",
     organizationName: "1팀",
+    role: "STUDENT",
+    grade: "M1",
     source: "PRE_REGISTRATION",
     status,
     wasExpectedAtStart: true,
@@ -2462,12 +2717,44 @@ function BlockedRender({ promise }: { promise: Promise<void> }): never {
   throw promise;
 }
 
+function addStudentParticipantRow(name: string, grade = "M1") {
+  const dialog = screen.getByRole("dialog", { name: "참가자 추가" });
+  fireEvent.click(within(dialog).getByRole("button", { name: "참가자 추가" }));
+  const rowNumber = within(dialog).getAllByRole("group", {
+    name: /번 참가자/,
+  }).length;
+  fireEvent.change(
+    within(dialog).getByRole("textbox", { name: `${rowNumber}번 이름` }),
+    { target: { value: name } },
+  );
+  fireEvent.change(
+    within(dialog).getByRole("combobox", { name: `${rowNumber}번 학년` }),
+    { target: { value: grade } },
+  );
+}
+
+function addTeacherParticipantRow(name: string) {
+  const dialog = screen.getByRole("dialog", { name: "참가자 추가" });
+  fireEvent.click(within(dialog).getByRole("button", { name: "참가자 추가" }));
+  const rowNumber = within(dialog).getAllByRole("group", {
+    name: /번 참가자/,
+  }).length;
+  fireEvent.change(
+    within(dialog).getByRole("textbox", { name: `${rowNumber}번 이름` }),
+    { target: { value: name } },
+  );
+  fireEvent.change(
+    within(dialog).getByRole("combobox", {
+      name: `${rowNumber}번 참가자 구분`,
+    }),
+    { target: { value: "TEACHER" } },
+  );
+}
+
 async function openNewParticipantForm(organizationName: string) {
   fireEvent.click(await screen.findByRole("button", { name: "참가자 추가" }));
   fireEvent.click(screen.getByRole("button", { name: "새 참가자" }));
-  fireEvent.change(screen.getByLabelText("이름"), {
-    target: { value: "김신규" },
-  });
+  addStudentParticipantRow("김신규");
   const organization = screen.getByRole("combobox", { name: "소속 조직" });
   fireEvent.change(organization, {
     target: { value: organizationName.slice(0, 1) },

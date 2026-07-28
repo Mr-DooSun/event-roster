@@ -22,7 +22,7 @@ export function Dialog({
   children: ReactNode;
   closeLabel?: string;
   hideDefaultCloseAction?: boolean;
-  size?: "default" | "wide";
+  size?: "default" | "wide" | "roster";
   onClose: () => void;
 }) {
   const dialogRef = useRef<HTMLElement>(null);
@@ -92,7 +92,7 @@ export function Dialog({
     <div className="er-dialog-backdrop" role="presentation">
       <section
         ref={dialogRef}
-        className={`er-dialog${size === "wide" ? " er-dialog--wide" : ""}`}
+        className={`er-dialog${size === "default" ? "" : ` er-dialog--${size}`}`}
         role="dialog"
         aria-modal="true"
         aria-label={title}

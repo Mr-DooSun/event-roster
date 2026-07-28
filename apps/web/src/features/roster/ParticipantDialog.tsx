@@ -1,16 +1,21 @@
 import type {
   BulkParticipantDuplicate,
   Organization,
+  ParticipantRole,
+  RosterParticipantInput,
+  StudentGrade,
 } from "@event-roster/contracts";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { normalizeParticipantName } from "@event-roster/contracts";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "../../components/ui/Button";
 import { Dialog } from "../../components/ui/Dialog";
 import { TextInput } from "../../components/ui/TextInput";
 import { orderOrganizationsByRecent } from "../../lib/recent-organizations";
 import {
-  BulkParticipantNameField,
-  parseBulkParticipantNames,
-} from "./BulkParticipantNameField";
+  type BulkParticipantDraft,
+  BulkParticipantRowsField,
+  isValidBulkParticipantDraft,
+} from "./BulkParticipantRowsField";
 import { OrganizationSelectCombobox } from "./OrganizationSelectCombobox";
 
 export interface ParticipantView {
@@ -18,6 +23,8 @@ export interface ParticipantView {
   participantId: string;
   name: string;
   organizationId: string;
+  suggestedRole?: ParticipantRole | null;
+  suggestedGrade?: StudentGrade | null;
   revision: number;
 }
 
@@ -25,11 +32,13 @@ export interface ExistingParticipantConfirmation {
   participantId: string;
   name: string;
   organizationId: string;
+  role: ParticipantRole;
+  grade: StudentGrade | null;
   expectedParticipantRevision: number;
 }
 
 export interface BulkParticipantSubmitInput {
-  names: string[];
+  participants: RosterParticipantInput[];
   organizationId: string;
   confirmDuplicateNames: boolean;
 }
@@ -71,6 +80,34 @@ function firstActiveOrganizationId(
   );
 }
 
+function suggestedProfile(participant: ParticipantView | undefined): {
+  role: ParticipantRole;
+  grade: StudentGrade | null;
+} {
+  if (
+    participant?.suggestedRole === "STUDENT" &&
+    participant.suggestedGrade != null
+  ) {
+    return {
+      role: "STUDENT",
+      grade: participant.suggestedGrade,
+    };
+  }
+  if (
+    participant?.suggestedRole === "TEACHER" &&
+    participant.suggestedGrade === null
+  ) {
+    return {
+      role: "TEACHER",
+      grade: null,
+    };
+  }
+  return {
+    role: "STUDENT",
+    grade: null,
+  };
+}
+
 export function ParticipantDialog({
   participants,
   organizations,
@@ -85,11 +122,9 @@ export function ParticipantDialog({
   organizations: Organization[];
   recentOrganizationIds?: readonly string[];
   onAdd: (input: ExistingParticipantConfirmation) => Promise<void>;
-  onCreateAndAdd: (input: {
-    names: string[];
-    organizationId: string;
-    confirmDuplicateNames: boolean;
-  }) => Promise<BulkParticipantSubmitOutcome>;
+  onCreateAndAdd: (
+    input: BulkParticipantSubmitInput,
+  ) => Promise<BulkParticipantSubmitOutcome>;
   allowExistingOrganizationChange?: boolean;
   initialParticipantId?: string | null;
   onClose: () => void;
@@ -103,8 +138,7 @@ export function ParticipantDialog({
   );
   const [mode, setMode] = useState<"EXISTING" | "NEW">("EXISTING");
   const [busy, setBusy] = useState<"EXISTING" | "NEW" | null>(null);
-  const [rawNames, setRawNames] = useState("");
-  const names = useMemo(() => parseBulkParticipantNames(rawNames), [rawNames]);
+  const [rows, setRows] = useState<BulkParticipantDraft[]>([]);
   const [duplicates, setDuplicates] = useState<BulkParticipantDuplicate[]>([]);
   const [duplicateNamesConfirmed, setDuplicateNamesConfirmed] = useState(false);
   const [confirmedName, setConfirmedName] = useState(
@@ -116,6 +150,13 @@ export function ParticipantDialog({
       organizations,
       allowExistingOrganizationChange,
     ),
+  );
+  const initialProfile = suggestedProfile(initialParticipant);
+  const [confirmedRole, setConfirmedRole] = useState<ParticipantRole>(
+    initialProfile.role,
+  );
+  const [confirmedGrade, setConfirmedGrade] = useState<StudentGrade | null>(
+    initialProfile.grade,
   );
   const [organizationId, setOrganizationId] = useState(
     firstActiveOrganizationId(organizations, recentOrganizationIds),
@@ -150,6 +191,9 @@ export function ParticipantDialog({
           context.allowExistingOrganizationChange,
         ),
       );
+      const profile = suggestedProfile(participant);
+      setConfirmedRole(profile.role);
+      setConfirmedGrade(profile.grade);
       setMode("EXISTING");
     }
   }, [initialParticipantId]);
@@ -208,16 +252,29 @@ export function ParticipantDialog({
         allowExistingOrganizationChange,
       ),
     );
+    const profile = suggestedProfile(participant);
+    setConfirmedRole(profile.role);
+    setConfirmedGrade(profile.grade);
   }
 
   async function addExisting() {
-    if (busy || !selectedParticipant) return;
+    if (
+      busy ||
+      !selectedParticipant ||
+      !confirmedName.trim() ||
+      !confirmedOrganizationId ||
+      (confirmedRole === "STUDENT" && confirmedGrade === null)
+    ) {
+      return;
+    }
     setBusy("EXISTING");
     try {
       await onAdd({
         participantId: selectedParticipant.id,
         name: confirmedName.trim(),
         organizationId: confirmedOrganizationId,
+        role: confirmedRole,
+        grade: confirmedGrade,
         expectedParticipantRevision: selectedParticipant.revision,
       });
     } catch {
@@ -228,11 +285,24 @@ export function ParticipantDialog({
   }
 
   async function createAndAdd() {
-    if (busy) return;
+    if (
+      busy ||
+      !organizationId ||
+      rows.length === 0 ||
+      rows.length > 30 ||
+      rows.some((row) => !isValidBulkParticipantDraft(row)) ||
+      (duplicates.length > 0 && !duplicateNamesConfirmed)
+    ) {
+      return;
+    }
     setBusy("NEW");
     try {
       const outcome = await onCreateAndAdd({
-        names,
+        participants: rows.map((row) => ({
+          name: normalizeParticipantName(row.name),
+          role: row.role,
+          grade: row.grade,
+        })),
         organizationId,
         confirmDuplicateNames: duplicateNamesConfirmed,
       });
@@ -252,15 +322,22 @@ export function ParticipantDialog({
   const close = () => {
     if (busy === null) onClose();
   };
-  const overLimit = names.length > 30;
-  const hasInvalidName = names.some(
-    (participantName) => participantName.length > 100,
-  );
+  const hasInvalidRow = rows.some((row) => !isValidBulkParticipantDraft(row));
 
-  function changeRawNames(value: string) {
-    setRawNames(value);
-    setDuplicates([]);
-    setDuplicateNamesConfirmed(false);
+  function changeRows(nextRows: BulkParticipantDraft[]) {
+    const currentNames = rows.map((row) => [
+      row.clientId,
+      normalizeParticipantName(row.name),
+    ]);
+    const nextNames = nextRows.map((row) => [
+      row.clientId,
+      normalizeParticipantName(row.name),
+    ]);
+    setRows(nextRows);
+    if (JSON.stringify(currentNames) !== JSON.stringify(nextNames)) {
+      setDuplicates([]);
+      setDuplicateNamesConfirmed(false);
+    }
   }
 
   function changeOrganization(nextOrganizationId: string) {
@@ -270,7 +347,12 @@ export function ParticipantDialog({
   }
 
   return (
-    <Dialog title="참가자 추가" hideDefaultCloseAction onClose={close}>
+    <Dialog
+      title="참가자 추가"
+      hideDefaultCloseAction
+      size="roster"
+      onClose={close}
+    >
       <div className="er-participant-mode-actions er-action-row">
         <Button
           type="button"
@@ -344,6 +426,45 @@ export function ParticipantDialog({
                 readOnly
               />
             )}
+            <label className="er-field">
+              <span>참가자 구분</span>
+              <select
+                value={confirmedRole}
+                disabled={busy !== null}
+                onChange={(event) => {
+                  const role = event.currentTarget.value as ParticipantRole;
+                  setConfirmedRole(role);
+                  if (role === "TEACHER") setConfirmedGrade(null);
+                }}
+              >
+                <option value="STUDENT">학생</option>
+                <option value="TEACHER">담당교사</option>
+              </select>
+            </label>
+            <label className="er-field">
+              <span>학년</span>
+              <select
+                value={confirmedGrade ?? ""}
+                disabled={busy !== null || confirmedRole === "TEACHER"}
+                required={confirmedRole === "STUDENT"}
+                aria-invalid={
+                  confirmedRole === "STUDENT" && confirmedGrade === null
+                }
+                onChange={(event) =>
+                  setConfirmedGrade(
+                    (event.currentTarget.value || null) as StudentGrade | null,
+                  )
+                }
+              >
+                <option value="">학년 선택</option>
+                <option value="M1">중1</option>
+                <option value="M2">중2</option>
+                <option value="M3">중3</option>
+                <option value="H1">고1</option>
+                <option value="H2">고2</option>
+                <option value="H3">고3</option>
+              </select>
+            </label>
             <div className="er-dialog-actions">
               <Button type="button" disabled={busy !== null} onClick={close}>
                 닫기
@@ -357,7 +478,8 @@ export function ParticipantDialog({
                   busy !== null ||
                   !selectedParticipant ||
                   !confirmedName.trim() ||
-                  !confirmedOrganizationId
+                  !confirmedOrganizationId ||
+                  (confirmedRole === "STUDENT" && confirmedGrade === null)
                 }
               >
                 명단에 추가
@@ -374,13 +496,12 @@ export function ParticipantDialog({
               disabled={busy !== null}
               onChange={changeOrganization}
             />
-            <BulkParticipantNameField
-              rawValue={rawNames}
-              names={names}
+            <BulkParticipantRowsField
+              rows={rows}
               duplicates={duplicates}
               duplicateNamesConfirmed={duplicateNamesConfirmed}
               disabled={busy !== null}
-              onRawValueChange={changeRawNames}
+              onRowsChange={changeRows}
               onDuplicateNamesConfirmedChange={setDuplicateNamesConfirmed}
             />
             <div className="er-dialog-actions">
@@ -391,18 +512,18 @@ export function ParticipantDialog({
                 type="submit"
                 variant="primary"
                 loading={busy === "NEW"}
-                loadingText={`${names.length}명 등록 중…`}
+                loadingText={`${rows.length}명 등록 중…`}
                 disabled={
                   busy !== null ||
                   !organizationId ||
-                  names.length === 0 ||
-                  overLimit ||
-                  hasInvalidName ||
+                  rows.length === 0 ||
+                  rows.length > 30 ||
+                  hasInvalidRow ||
                   (duplicates.length > 0 && !duplicateNamesConfirmed)
                 }
               >
-                {names.length > 0
-                  ? `${names.length}명 명단에 추가`
+                {rows.length > 0
+                  ? `${rows.length}명 명단에 추가`
                   : "명단에 추가"}
               </Button>
             </div>

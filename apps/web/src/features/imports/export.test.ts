@@ -86,6 +86,8 @@ it("keeps the roster and filters while an export fails", async () => {
       organizationId: "org-1",
       participantName: "박민수",
       organizationName: "1팀",
+      role: "STUDENT" as const,
+      grade: "M1" as const,
       source: "PRE_REGISTRATION" as const,
       status: "ACTIVE" as const,
       wasExpectedAtStart: true,

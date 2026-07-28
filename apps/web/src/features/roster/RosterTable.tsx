@@ -1,3 +1,4 @@
+import type { ParticipantRole, StudentGrade } from "@event-roster/contracts";
 import { useMemo, useState } from "react";
 import { Button } from "../../components/ui/Button";
 import { TextInput } from "../../components/ui/TextInput";
@@ -10,6 +11,8 @@ export interface RosterView {
   organizationId: string;
   participantName: string;
   organizationName: string;
+  role: ParticipantRole | null;
+  grade: StudentGrade | null;
   source: "PRE_REGISTRATION" | "IN_PROGRESS";
   status: "ACTIVE" | "CANCELLED";
   wasExpectedAtStart: boolean;
