@@ -369,7 +369,7 @@ async function findParticipant(db: D1Database, id: string) {
   return row ? mapParticipant(row) : null;
 }
 
-async function requireRosterMutableProject(
+export async function requireRosterMutableProject(
   env: Env,
   projectId: string,
   now: Date,
@@ -387,7 +387,7 @@ async function requireRosterMutableProject(
   return project;
 }
 
-function assertActorScope(
+export function assertActorScope(
   actor: Actor,
   organizationId: string,
   projectStatus: ProjectStatus,
@@ -401,7 +401,7 @@ function assertActorScope(
   }
 }
 
-function projectParticipantGuard(
+export function projectParticipantGuard(
   db: D1Database,
   guardId: string,
   actor: Actor,
@@ -473,7 +473,7 @@ async function assertActiveManagerMembership(
   }
 }
 
-function incrementProject(
+export function incrementProject(
   db: D1Database,
   projectId: string,
   timestamp: string,

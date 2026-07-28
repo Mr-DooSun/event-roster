@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import { beforeEach, expect, it } from "vitest";
 import type { Env } from "../src/env";
 import { requireActor } from "../src/middleware/authentication";
+import { createBulkParticipantsAndAddToProject } from "../src/services/bulk-participants";
 import { addRosterEntry } from "../src/services/roster";
 import {
   authedRequest,
@@ -489,6 +490,417 @@ it("creates a participant and roster entry atomically", async () => {
       ).first<{ count: number }>()
     )?.count,
   ).toBe(0);
+});
+
+it("warns about input and existing duplicates without writing rows", async () => {
+  const fixture = await setupPreRegistration();
+  const before = await env.DB.prepare(
+    "SELECT COUNT(*) AS count FROM participants",
+  ).first<{ count: number }>();
+  const response = await authedRequest(
+    fixture.operator,
+    `/api/v1/projects/${fixture.project.id}/roster/bulk`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        organizationId: "org-1",
+        names: ["첫 참가자", "새 이름", " 새   이름 "],
+        confirmDuplicateNames: false,
+        expectedRevision: fixture.project.revision,
+      }),
+    },
+  );
+
+  expect(response.status).toBe(409);
+  expect(await response.json()).toMatchObject({
+    code: "CONFLICT",
+    details: {
+      reason: "DUPLICATE_PARTICIPANT_NAMES",
+      duplicates: [
+        { name: "첫 참가자", kinds: ["EXISTING_PARTICIPANT"] },
+        { name: "새 이름", kinds: ["INPUT_DUPLICATE"] },
+      ],
+    },
+  });
+  expect(
+    (
+      await env.DB.prepare("SELECT COUNT(*) AS count FROM participants").first<{
+        count: number;
+      }>()
+    )?.count,
+  ).toBe(before?.count);
+});
+
+it.each([1, 30])(
+  "creates %i new participants atomically in input order",
+  async (participantCount) => {
+    const fixture = await setupPreRegistration();
+    const names = Array.from(
+      { length: participantCount },
+      (_, index) => `대량 참가자 ${index + 1}`,
+    );
+    const response = await authedRequest(
+      fixture.operator,
+      `/api/v1/projects/${fixture.project.id}/roster/bulk`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          organizationId: "org-1",
+          names,
+          confirmDuplicateNames: false,
+          expectedRevision: fixture.project.revision,
+        }),
+      },
+    );
+
+    expect(response.status).toBe(201);
+    const body = await response.json<{
+      batchId: string;
+      participants: Array<{
+        participant: { id: string; name: string };
+        rosterEntry: {
+          id: string;
+          source: string;
+          wasExpectedAtStart: boolean;
+        };
+      }>;
+      projectRevision: number;
+    }>();
+    expect(body.batchId).toBeTruthy();
+    expect(
+      body.participants.map(({ participant }) => participant.name),
+    ).toEqual(names);
+    expect(body.participants).toHaveLength(participantCount);
+    expect(body.participants[0]?.rosterEntry).toMatchObject({
+      source: "PRE_REGISTRATION",
+      wasExpectedAtStart: false,
+    });
+    expect(body.projectRevision).toBe(fixture.project.revision + 1);
+    expect(
+      (
+        await env.DB.prepare("SELECT revision FROM projects WHERE id = ?")
+          .bind(fixture.project.id)
+          .first<{ revision: number }>()
+      )?.revision,
+    ).toBe(fixture.project.revision + 1);
+    expect(
+      (
+        await env.DB.prepare(
+          `SELECT COUNT(*) AS count FROM participants
+           WHERE name LIKE '대량 참가자 %'`,
+        ).first<{ count: number }>()
+      )?.count,
+    ).toBe(participantCount);
+    expect(
+      (
+        await env.DB.prepare(
+          `SELECT COUNT(*) AS count FROM audit_logs
+           WHERE details_json LIKE ?`,
+        )
+          .bind(`%"batchId":"${body.batchId}"%`)
+          .first<{ count: number }>()
+      )?.count,
+    ).toBe(participantCount * 2);
+  },
+);
+
+it("uses the IN_PROGRESS source for operator bulk registration", async () => {
+  const fixture = await setupPreRegistration();
+  const transitioned = await authedRequest(
+    fixture.operator,
+    `/api/v1/projects/${fixture.project.id}/transition`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        targetStatus: "IN_PROGRESS",
+        expectedRevision: fixture.project.revision,
+      }),
+    },
+  );
+  const project = await transitioned.json<{ revision: number }>();
+  const response = await authedRequest(
+    fixture.operator,
+    `/api/v1/projects/${fixture.project.id}/roster/bulk`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        organizationId: "org-1",
+        names: ["당일 참가자"],
+        confirmDuplicateNames: false,
+        expectedRevision: project.revision,
+      }),
+    },
+  );
+
+  expect(response.status).toBe(201);
+  expect(await response.json()).toMatchObject({
+    participants: [{ rosterEntry: { source: "IN_PROGRESS" } }],
+  });
+});
+
+it("rejects stale, inactive, and out-of-scope bulk registration", async () => {
+  const fixture = await setupPreRegistration();
+  const stale = await authedRequest(
+    fixture.operator,
+    `/api/v1/projects/${fixture.project.id}/roster/bulk`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        organizationId: "org-1",
+        names: ["오래된 요청"],
+        confirmDuplicateNames: false,
+        expectedRevision: fixture.project.revision - 1,
+      }),
+    },
+  );
+  expect(stale.status).toBe(409);
+
+  const manager = await seedManager("org-1");
+  await seedOrganization("org-2", "2팀");
+  const outOfScope = await authedRequest(
+    manager,
+    `/api/v1/projects/${fixture.project.id}/roster/bulk`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        organizationId: "org-2",
+        names: ["다른 조직 참가자"],
+        confirmDuplicateNames: false,
+        expectedRevision: fixture.project.revision,
+      }),
+    },
+  );
+  expect(outOfScope.status).toBe(403);
+
+  await env.DB.prepare(
+    `UPDATE project_organizations SET is_active = 0
+     WHERE project_id = ? AND organization_id = 'org-1'`,
+  )
+    .bind(fixture.project.id)
+    .run();
+  const inactive = await authedRequest(
+    fixture.operator,
+    `/api/v1/projects/${fixture.project.id}/roster/bulk`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        organizationId: "org-1",
+        names: ["비활성 조직 참가자"],
+        confirmDuplicateNames: false,
+        expectedRevision: fixture.project.revision,
+      }),
+    },
+  );
+  expect(inactive.status).toBe(422);
+});
+
+it("rejects manager IN_PROGRESS writes and inactive organization masters", async () => {
+  const fixture = await setupPreRegistration();
+  const manager = await seedManager("org-1");
+  const transitioned = await authedRequest(
+    fixture.operator,
+    `/api/v1/projects/${fixture.project.id}/transition`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        targetStatus: "IN_PROGRESS",
+        expectedRevision: fixture.project.revision,
+      }),
+    },
+  );
+  const project = await transitioned.json<{ revision: number }>();
+  const managerResponse = await authedRequest(
+    manager,
+    `/api/v1/projects/${fixture.project.id}/roster/bulk`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        organizationId: "org-1",
+        names: ["담당자 당일 참가자"],
+        confirmDuplicateNames: false,
+        expectedRevision: project.revision,
+      }),
+    },
+  );
+  expect(managerResponse.status).toBe(403);
+
+  await env.DB.prepare(
+    "UPDATE organizations SET is_active = 0 WHERE id = 'org-1'",
+  ).run();
+  const inactiveMaster = await authedRequest(
+    fixture.operator,
+    `/api/v1/projects/${fixture.project.id}/roster/bulk`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        organizationId: "org-1",
+        names: ["비활성 마스터 참가자"],
+        confirmDuplicateNames: false,
+        expectedRevision: project.revision,
+      }),
+    },
+  );
+  expect(inactiveMaster.status).toBe(422);
+});
+
+it("creates duplicate names only after explicit confirmation", async () => {
+  const fixture = await setupPreRegistration();
+  const response = await authedRequest(
+    fixture.operator,
+    `/api/v1/projects/${fixture.project.id}/roster/bulk`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        organizationId: "org-1",
+        names: ["첫 참가자", "같은 이름", "같은 이름"],
+        confirmDuplicateNames: true,
+        expectedRevision: fixture.project.revision,
+      }),
+    },
+  );
+
+  expect(response.status).toBe(201);
+  expect(
+    (await response.json<{ participants: unknown[] }>()).participants,
+  ).toHaveLength(3);
+});
+
+it("rolls back every bulk row and audit when one insert fails", async () => {
+  const fixture = await setupPreRegistration();
+  const beforeParticipants = await env.DB.prepare(
+    "SELECT COUNT(*) AS count FROM participants",
+  ).first<{ count: number }>();
+  const beforeAudit = await env.DB.prepare(
+    "SELECT COUNT(*) AS count FROM audit_logs",
+  ).first<{ count: number }>();
+  await env.DB.prepare(
+    `CREATE TRIGGER IF NOT EXISTS reject_bulk_participant
+     BEFORE INSERT ON participants
+     WHEN NEW.name = '거부 대상'
+     BEGIN SELECT RAISE(ABORT, 'REJECT_BULK_TEST'); END`,
+  ).run();
+
+  try {
+    const response = await authedRequest(
+      fixture.operator,
+      `/api/v1/projects/${fixture.project.id}/roster/bulk`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          organizationId: "org-1",
+          names: ["정상 대상", "거부 대상"],
+          confirmDuplicateNames: false,
+          expectedRevision: fixture.project.revision,
+        }),
+      },
+    );
+
+    expect(response.status).toBe(500);
+    expect(
+      (
+        await env.DB.prepare(
+          "SELECT COUNT(*) AS count FROM participants",
+        ).first<{ count: number }>()
+      )?.count,
+    ).toBe(beforeParticipants?.count);
+    expect(
+      (
+        await env.DB.prepare("SELECT COUNT(*) AS count FROM audit_logs").first<{
+          count: number;
+        }>()
+      )?.count,
+    ).toBe(beforeAudit?.count);
+    expect(
+      (
+        await env.DB.prepare(
+          "SELECT COUNT(*) AS count FROM project_roster_entries",
+        ).first<{ count: number }>()
+      )?.count,
+    ).toBe(0);
+    expect(
+      (
+        await env.DB.prepare("SELECT revision FROM projects WHERE id = ?")
+          .bind(fixture.project.id)
+          .first<{ revision: number }>()
+      )?.revision,
+    ).toBe(fixture.project.revision);
+  } finally {
+    await env.DB.prepare("DROP TRIGGER reject_bulk_participant").run();
+  }
+});
+
+it("rejects a bulk write when participant state changes after its snapshot", async () => {
+  const fixture = await setupPreRegistration();
+  const actor = await requireActor(
+    new Request("https://event-roster.test", {
+      headers: authenticatedHeaders(fixture.operator),
+    }),
+    env as Env,
+  );
+
+  await expect(
+    createBulkParticipantsAndAddToProject(
+      env as Env,
+      actor,
+      fixture.project.id,
+      {
+        organizationId: "org-1",
+        names: ["경합 참가자"],
+        confirmDuplicateNames: false,
+        expectedRevision: fixture.project.revision,
+      },
+      new Date("2026-07-28T00:00:00.000Z"),
+      {
+        afterSnapshot: async () => {
+          await env.DB.prepare(
+            `UPDATE participants SET revision = revision + 1
+             WHERE id = 'participant-1'`,
+          ).run();
+        },
+      },
+    ),
+  ).rejects.toMatchObject({ code: "STALE_REVISION" });
+  expect(
+    (
+      await env.DB.prepare(
+        "SELECT COUNT(*) AS count FROM participants WHERE name = '경합 참가자'",
+      ).first<{ count: number }>()
+    )?.count,
+  ).toBe(0);
+});
+
+it("allows a confirmed duplicate request after participant snapshot changes", async () => {
+  const fixture = await setupPreRegistration();
+  const actor = await requireActor(
+    new Request("https://event-roster.test", {
+      headers: authenticatedHeaders(fixture.operator),
+    }),
+    env as Env,
+  );
+
+  const result = await createBulkParticipantsAndAddToProject(
+    env as Env,
+    actor,
+    fixture.project.id,
+    {
+      organizationId: "org-1",
+      names: ["첫 참가자"],
+      confirmDuplicateNames: true,
+      expectedRevision: fixture.project.revision,
+    },
+    new Date("2026-07-28T00:00:00.000Z"),
+    {
+      afterSnapshot: async () => {
+        await env.DB.prepare(
+          `UPDATE participants SET revision = revision + 1
+           WHERE id = 'participant-1'`,
+        ).run();
+      },
+    },
+  );
+
+  expect(result.participants).toHaveLength(1);
+  expect(result.participants[0]?.participant.name).toBe("첫 참가자");
 });
 
 it("preserves historical roster operations when a project membership becomes inactive", async () => {

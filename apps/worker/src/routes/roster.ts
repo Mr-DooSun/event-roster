@@ -1,4 +1,5 @@
 import {
+  BulkRosterCreateRequestSchema,
   RosterCreateRequestSchema,
   RosterPatchRequestSchema,
 } from "@event-roster/contracts";
@@ -9,6 +10,7 @@ import { assertExactOrigin } from "../http/origin";
 import { requireActor } from "../middleware/authentication";
 import { requireFullSession } from "../middleware/authorization";
 import { requireCsrf } from "../middleware/csrf";
+import { createBulkParticipantsAndAddToProject } from "../services/bulk-participants";
 import { createParticipantAndAddToProject } from "../services/participants";
 import {
   addRosterEntry,
@@ -60,6 +62,23 @@ rosterRoutes.post("/projects/:projectId/roster", async (c) => {
       input.expectedParticipantRevision,
     ),
     existing ? 200 : 201,
+  );
+});
+
+rosterRoutes.post("/projects/:projectId/roster/bulk", async (c) => {
+  assertExactOrigin(c.req.raw, c.env.APP_ORIGIN);
+  const actor = await requireActor(c.req.raw, c.env);
+  await requireCsrf(c.req.raw, actor);
+  requireFullSession(actor);
+  const input = BulkRosterCreateRequestSchema.parse(await c.req.json());
+  return c.json(
+    await createBulkParticipantsAndAddToProject(
+      c.env,
+      actor,
+      c.req.param("projectId"),
+      input,
+    ),
+    201,
   );
 });
 
