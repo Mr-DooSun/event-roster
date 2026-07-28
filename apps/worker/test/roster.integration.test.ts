@@ -71,6 +71,28 @@ it("adds, cancels, and reactivates one roster row with revisions", async () => {
   ).toBe(1);
 });
 
+it("returns null participant profiles for a legacy roster write", async () => {
+  const fixture = await setupPreRegistration();
+  const actor = await requireActor(
+    new Request("https://event-roster.test", {
+      headers: authenticatedHeaders(fixture.operator),
+    }),
+    env as Env,
+  );
+
+  const entry = await addRosterEntry(
+    env as Env,
+    actor,
+    fixture.project.id,
+    fixture.firstParticipant.id,
+    fixture.project.revision,
+    { name: "첫 참가자", organizationId: "org-1" },
+    fixture.firstParticipant.revision,
+  );
+
+  expect(entry).toMatchObject({ role: null, grade: null });
+});
+
 it("rolls back roster and audit when the project revision is stale", async () => {
   const fixture = await setupPreRegistration();
   const before = await env.DB.prepare(

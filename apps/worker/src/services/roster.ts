@@ -749,6 +749,8 @@ function mapReturnedRoster(
     organizationName: row.organization_name_snapshot,
     source: row.source,
     status: row.status,
+    role: null,
+    grade: null,
     wasExpectedAtStart: row.was_expected_at_start === 1,
     revision: row.revision,
     updatedAt,
