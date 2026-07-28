@@ -35,26 +35,31 @@ it("computes project totals from pre-registration and in-progress entries", () =
           organizationId: "org-a",
           source: "PRE_REGISTRATION",
           status: "ACTIVE",
+          role: "STUDENT",
         },
         {
           organizationId: "org-a",
           source: "PRE_REGISTRATION",
           status: "CANCELLED",
+          role: "STUDENT",
         },
         {
           organizationId: "org-a",
           source: "IN_PROGRESS",
           status: "ACTIVE",
+          role: "TEACHER",
         },
         {
           organizationId: "org-b",
           source: "PRE_REGISTRATION",
           status: "ACTIVE",
+          role: "STUDENT",
         },
         {
           organizationId: "org-b",
           source: "IN_PROGRESS",
           status: "CANCELLED",
+          role: "TEACHER",
         },
       ],
     }),
@@ -63,6 +68,8 @@ it("computes project totals from pre-registration and in-progress entries", () =
     expectedTotal: 3,
     finalTotal: 3,
     deltaTotal: 0,
+    studentTotal: 2,
+    teacherTotal: 1,
     organizations: [
       {
         organizationId: "org-a",
@@ -74,6 +81,8 @@ it("computes project totals from pre-registration and in-progress entries", () =
         inProgressCancelled: 1,
         final: 2,
         delta: 0,
+        studentCount: 1,
+        teacherCount: 1,
       },
       {
         organizationId: "org-b",
@@ -85,8 +94,51 @@ it("computes project totals from pre-registration and in-progress entries", () =
         inProgressCancelled: 0,
         final: 1,
         delta: 0,
+        studentCount: 1,
+        teacherCount: 0,
       },
     ],
+  });
+});
+
+it("counts only active student and teacher profiles without inferring legacy rows", () => {
+  expect(
+    calculateProjectSummary({
+      projectId: "project-roles",
+      organizations: [organization("org-1", "조직 1")],
+      expectedSnapshots: [{ organizationId: "org-1", expectedCount: 2 }],
+      rosterEntries: [
+        {
+          organizationId: "org-1",
+          source: "PRE_REGISTRATION",
+          status: "ACTIVE",
+          role: "STUDENT",
+        },
+        {
+          organizationId: "org-1",
+          source: "PRE_REGISTRATION",
+          status: "ACTIVE",
+          role: "TEACHER",
+        },
+        {
+          organizationId: "org-1",
+          source: "PRE_REGISTRATION",
+          status: "ACTIVE",
+          role: null,
+        },
+        {
+          organizationId: "org-1",
+          source: "PRE_REGISTRATION",
+          status: "CANCELLED",
+          role: "STUDENT",
+        },
+      ],
+    }),
+  ).toMatchObject({
+    studentTotal: 1,
+    teacherTotal: 1,
+    finalTotal: 3,
+    organizations: [{ studentCount: 1, teacherCount: 1 }],
   });
 });
 

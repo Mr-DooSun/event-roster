@@ -412,6 +412,12 @@ export async function getSummary(env: Env, actor: Actor, projectId: string) {
                         AND r.was_expected_at_start = 1
                   THEN 1 ELSE 0 END) AS in_progress_cancelled,
          SUM(CASE WHEN r.status = 'ACTIVE' THEN 1 ELSE 0 END) AS final
+         ,SUM(CASE WHEN r.status = 'ACTIVE'
+                        AND r.participant_role_snapshot = 'STUDENT'
+                    THEN 1 ELSE 0 END) AS student_count
+         ,SUM(CASE WHEN r.status = 'ACTIVE'
+                        AND r.participant_role_snapshot = 'TEACHER'
+                    THEN 1 ELSE 0 END) AS teacher_count
        FROM projects p
        JOIN project_organizations po ON po.project_id = p.id
        JOIN organizations o ON o.id = po.organization_id
@@ -434,6 +440,8 @@ export async function getSummary(env: Env, actor: Actor, projectId: string) {
         in_progress_added: number;
         in_progress_cancelled: number;
         final: number;
+        student_count: number;
+        teacher_count: number;
       }>()
   ).results;
   const organizations = rows
@@ -447,6 +455,8 @@ export async function getSummary(env: Env, actor: Actor, projectId: string) {
       inProgressCancelled: row.in_progress_cancelled,
       final: row.final,
       delta: row.final - row.expected,
+      studentCount: row.student_count,
+      teacherCount: row.teacher_count,
     }))
     .filter(shouldIncludeProjectSummaryOrganization);
   const expectedTotal = organizations.reduce(
@@ -454,11 +464,21 @@ export async function getSummary(env: Env, actor: Actor, projectId: string) {
     0,
   );
   const finalTotal = organizations.reduce((sum, row) => sum + row.final, 0);
+  const studentTotal = organizations.reduce(
+    (sum, row) => sum + row.studentCount,
+    0,
+  );
+  const teacherTotal = organizations.reduce(
+    (sum, row) => sum + row.teacherCount,
+    0,
+  );
   return {
     projectId,
     expectedTotal,
     finalTotal,
     deltaTotal: finalTotal - expectedTotal,
+    studentTotal,
+    teacherTotal,
     organizations,
   };
 }

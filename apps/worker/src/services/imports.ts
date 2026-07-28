@@ -1,4 +1,10 @@
-import type { NormalizedImportRow } from "@event-roster/contracts";
+import type {
+  NormalizedImportRow,
+  ParticipantRole,
+  RosterSource,
+  RosterStatus,
+  StudentGrade,
+} from "@event-roster/contracts";
 import {
   DomainError,
   toKstDate,
@@ -214,8 +220,10 @@ export async function getExportData(env: Env, actor: Actor, projectId: string) {
       "고유 ID": row.participantNumber,
       이름: row.participantName,
       조직: row.organizationName,
-      구분: row.source,
-      상태: row.status,
+      "참가자 구분": displayRole(row.role),
+      학년: displayGrade(row.grade, row.role),
+      "등록 시점": displaySource(row.source),
+      상태: displayStatus(row.status),
       "최종 수정": row.updatedAt,
     })),
     집계: summary.organizations.map((row) => ({
@@ -225,8 +233,42 @@ export async function getExportData(env: Env, actor: Actor, projectId: string) {
       "진행 중 취소": row.inProgressCancelled,
       최종: row.final,
       증감: row.delta,
+      학생: row.studentCount,
+      담당교사: row.teacherCount,
     })),
   };
+}
+
+function displayRole(role: ParticipantRole | null) {
+  if (role === "STUDENT") return "학생";
+  if (role === "TEACHER") return "담당교사";
+  return "미지정";
+}
+
+function displayGrade(
+  grade: StudentGrade | null,
+  role: ParticipantRole | null,
+) {
+  if (role === "TEACHER") return "";
+  if (grade === null) return "미지정";
+  return {
+    M1: "중1",
+    M2: "중2",
+    M3: "중3",
+    H1: "고1",
+    H2: "고2",
+    H3: "고3",
+  }[grade];
+}
+
+function displaySource(source: RosterSource) {
+  if (source === "PRE_REGISTRATION") return "사전";
+  return "진행 중";
+}
+
+function displayStatus(status: RosterStatus) {
+  if (status === "ACTIVE") return "참석";
+  return "취소";
 }
 
 async function resolveRows(

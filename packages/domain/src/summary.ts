@@ -1,4 +1,5 @@
 import type {
+  ParticipantRole,
   ProjectSummary,
   ProjectSummaryOrganization,
   RosterSource,
@@ -21,6 +22,7 @@ export interface ProjectSummaryInput {
     organizationId: string;
     source: RosterSource;
     status: RosterStatus;
+    role: ParticipantRole | null;
   }>;
 }
 
@@ -69,6 +71,12 @@ export function calculateProjectSummary(
           entry.source === "PRE_REGISTRATION" && entry.status === "CANCELLED",
       ).length;
       const final = entries.filter((entry) => entry.status === "ACTIVE").length;
+      const studentCount = entries.filter(
+        (entry) => entry.status === "ACTIVE" && entry.role === "STUDENT",
+      ).length;
+      const teacherCount = entries.filter(
+        (entry) => entry.status === "ACTIVE" && entry.role === "TEACHER",
+      ).length;
 
       return {
         ...organization,
@@ -77,6 +85,8 @@ export function calculateProjectSummary(
         inProgressCancelled,
         final,
         delta: final - expected,
+        studentCount,
+        teacherCount,
       };
     })
     .filter(shouldIncludeProjectSummaryOrganization);
@@ -88,11 +98,21 @@ export function calculateProjectSummary(
     (total, organization) => total + organization.final,
     0,
   );
+  const studentTotal = organizations.reduce(
+    (total, organization) => total + organization.studentCount,
+    0,
+  );
+  const teacherTotal = organizations.reduce(
+    (total, organization) => total + organization.teacherCount,
+    0,
+  );
   return {
     projectId: input.projectId,
     expectedTotal,
     finalTotal,
     deltaTotal: finalTotal - expectedTotal,
+    studentTotal,
+    teacherTotal,
     organizations,
   };
 }

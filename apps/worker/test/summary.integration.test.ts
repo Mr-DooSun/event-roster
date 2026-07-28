@@ -1,10 +1,74 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, expect, it } from "vitest";
-import { authedRequest, seedOrganization } from "./support/admin";
+import { authedRequest, seedManager, seedOrganization } from "./support/admin";
 import { resetAuthState } from "./support/auth";
 import { addRoster, setupPreRegistration } from "./support/roster";
 
 beforeEach(resetAuthState);
+
+it("summarizes active participant roles within each actor scope", async () => {
+  const fixture = await setupPreRegistration();
+  const student = await addRoster(fixture, fixture.firstParticipant.id);
+  const studentEntry = await student.json<{ projectRevision: number }>();
+  await addRoster(
+    {
+      ...fixture,
+      project: { ...fixture.project, revision: studentEntry.projectRevision },
+    },
+    fixture.secondParticipant.id,
+    undefined,
+    { role: "TEACHER", grade: null },
+  );
+  const now = "2026-07-21T00:00:00.000Z";
+  await seedOrganization("org-2", "2팀");
+  await env.DB.batch([
+    env.DB.prepare(
+      `INSERT INTO participants
+       (id, participant_id, name, organization_id, revision, created_at, updated_at)
+       VALUES ('org-2-teacher', 'P-ORG2', '다른 조직 교사', 'org-2', 0, ?, ?)`,
+    ).bind(now, now),
+    env.DB.prepare(
+      `INSERT INTO project_organizations
+       (project_id, organization_id, is_active, added_at, added_by, updated_by)
+       VALUES (?, 'org-2', 1, ?, 'user-1', 'user-1')`,
+    ).bind(fixture.project.id, now),
+    env.DB.prepare(
+      `INSERT INTO project_roster_entries
+       (id, project_id, participant_id, organization_id, participant_name_snapshot,
+        organization_name_snapshot, participant_role_snapshot, student_grade_snapshot,
+        source, status, was_expected_at_start, revision,
+        created_by, updated_by, created_at, updated_at)
+       VALUES ('org-2-teacher-entry', ?, 'org-2-teacher', 'org-2', '다른 조직 교사', '2팀',
+               'TEACHER', NULL, 'PRE_REGISTRATION', 'ACTIVE', 0, 0,
+               'user-1', 'user-1', ?, ?)`,
+    ).bind(fixture.project.id, now, now),
+  ]);
+
+  const manager = await seedManager("org-1");
+  const [operatorResponse, managerResponse] = await Promise.all([
+    authedRequest(
+      fixture.operator,
+      `/api/v1/projects/${fixture.project.id}/summary`,
+    ),
+    authedRequest(manager, `/api/v1/projects/${fixture.project.id}/summary`),
+  ]);
+
+  expect(await operatorResponse.json()).toMatchObject({
+    studentTotal: 1,
+    teacherTotal: 2,
+    organizations: [
+      { organizationId: "org-1", studentCount: 1, teacherCount: 1 },
+      { organizationId: "org-2", studentCount: 0, teacherCount: 1 },
+    ],
+  });
+  expect(await managerResponse.json()).toMatchObject({
+    studentTotal: 1,
+    teacherTotal: 1,
+    organizations: [
+      { organizationId: "org-1", studentCount: 1, teacherCount: 1 },
+    ],
+  });
+});
 
 it("uses the current active pre-registration roster as expected before IN_PROGRESS", async () => {
   const fixture = await setupPreRegistration();

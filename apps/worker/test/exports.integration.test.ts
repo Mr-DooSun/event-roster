@@ -8,7 +8,24 @@ beforeEach(resetAuthState);
 
 it("exports deterministic roster and complete summary arrays without auth fields", async () => {
   const fixture = await setupPreRegistration();
-  await addRoster(fixture, fixture.firstParticipant.id);
+  const student = await addRoster(fixture, fixture.firstParticipant.id);
+  const studentEntry = await student.json<{ projectRevision: number }>();
+  await env.DB.prepare(
+    `UPDATE project_roster_entries
+     SET student_grade_snapshot = 'M2'
+     WHERE project_id = ? AND participant_id = ?`,
+  )
+    .bind(fixture.project.id, fixture.firstParticipant.id)
+    .run();
+  await addRoster(
+    {
+      ...fixture,
+      project: { ...fixture.project, revision: studentEntry.projectRevision },
+    },
+    fixture.secondParticipant.id,
+    undefined,
+    { role: "TEACHER", grade: null },
+  );
   await env.DB.prepare(
     `INSERT INTO participants
        (id, participant_id, name, organization_id, revision, created_at, updated_at)
@@ -35,19 +52,48 @@ it("exports deterministic roster and complete summary arrays without auth fields
     `/api/v1/projects/${fixture.project.id}/exports/roster`,
   );
   const body = await response.json<{
-    명단: Array<{ "고유 ID": string; 이름: string; "최종 수정": string }>;
-    집계: Array<{ "진행 중 추가": number; "진행 중 취소": number }>;
+    명단: Array<{
+      "고유 ID": string;
+      이름: string;
+      "최종 수정": string;
+      "참가자 구분": string;
+      학년: string;
+      "등록 시점": string;
+      상태: string;
+    }>;
+    집계: Array<{
+      "진행 중 추가": number;
+      "진행 중 취소": number;
+      학생: number;
+      담당교사: number;
+    }>;
   }>();
   expect(response.status).toBe(200);
   expect(body.명단.map((row) => row["고유 ID"])).toEqual([
+    fixture.secondParticipant.participantId,
     "P-000",
     fixture.firstParticipant.participantId,
   ]);
+  expect(body.명단).toContainEqual(
+    expect.objectContaining({
+      "참가자 구분": "학생",
+      학년: "중2",
+      "등록 시점": "사전",
+      상태: "참석",
+    }),
+  );
+  expect(body.명단).toContainEqual(
+    expect.objectContaining({ "참가자 구분": "미지정", 학년: "미지정" }),
+  );
   expect(body.명단.every((row) => row["최종 수정"].length > 0)).toBe(true);
-  expect(body.집계[0]).toMatchObject({
-    "진행 중 추가": 0,
-    "진행 중 취소": 0,
-  });
+  expect(body.집계[0]).toEqual(
+    expect.objectContaining({
+      "진행 중 추가": 0,
+      "진행 중 취소": 0,
+      학생: 1,
+      담당교사: 1,
+    }),
+  );
   expect(JSON.stringify(body)).not.toMatch(/token|password|csrf|recovery/i);
 });
 
