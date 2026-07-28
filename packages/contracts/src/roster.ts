@@ -1,20 +1,27 @@
 import { z } from "zod";
 import { OrganizationIdSchema } from "./organizations";
 import { normalizeParticipantName } from "./participant-names";
+import {
+  type ParticipantRole,
+  ParticipantRoleSchema,
+  type StudentGrade,
+  StudentGradeSchema,
+} from "./participant-profile";
 import { ParticipantIdSchema } from "./participants";
 import { ProjectIdSchema } from "./projects";
+
+export {
+  type ParticipantRole,
+  ParticipantRoleSchema,
+  type StudentGrade,
+  StudentGradeSchema,
+} from "./participant-profile";
 
 export const RosterSourceSchema = z.enum(["PRE_REGISTRATION", "IN_PROGRESS"]);
 export type RosterSource = z.infer<typeof RosterSourceSchema>;
 
 export const RosterStatusSchema = z.enum(["ACTIVE", "CANCELLED"]);
 export type RosterStatus = z.infer<typeof RosterStatusSchema>;
-
-export const ParticipantRoleSchema = z.enum(["STUDENT", "TEACHER"]);
-export type ParticipantRole = z.infer<typeof ParticipantRoleSchema>;
-
-export const StudentGradeSchema = z.enum(["M1", "M2", "M3", "H1", "H2", "H3"]);
-export type StudentGrade = z.infer<typeof StudentGradeSchema>;
 
 const BulkParticipantNameSchema = z
   .string()

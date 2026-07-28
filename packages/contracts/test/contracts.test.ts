@@ -1,5 +1,10 @@
-import { describe, expect, it } from "vitest";
-import type { Project } from "../src";
+import { describe, expect, expectTypeOf, it } from "vitest";
+import type {
+  Participant,
+  ParticipantRole,
+  Project,
+  StudentGrade,
+} from "../src";
 import {
   AddProjectOrganizationSchema,
   BulkRosterCreateRequestSchema,
@@ -9,6 +14,7 @@ import {
   OrganizationManagerCreateRequestSchema,
   OrganizationPatchRequestSchema,
   OrganizationPrimaryPatchRequestSchema,
+  ParticipantSchema,
   PasswordSchema,
   ProjectOrganizationPatchSchema,
   ProjectParticipantPatchRequestSchema,
@@ -123,6 +129,49 @@ describe("organization contracts", () => {
 });
 
 describe("roster contracts", () => {
+  it("keeps participant profile suggestions nullable and enum constrained", () => {
+    expectTypeOf<
+      Participant["suggestedRole"]
+    >().toEqualTypeOf<ParticipantRole | null>();
+    expectTypeOf<
+      Participant["suggestedGrade"]
+    >().toEqualTypeOf<StudentGrade | null>();
+    expect(
+      ParticipantSchema.parse({
+        participantId: "participant-1",
+        name: "추천 참가자",
+        organizationId: "org-1",
+        suggestedRole: "STUDENT",
+        suggestedGrade: "H3",
+      }),
+    ).toMatchObject({
+      suggestedRole: "STUDENT",
+      suggestedGrade: "H3",
+    });
+    expect(
+      ParticipantSchema.safeParse({
+        participantId: "participant-2",
+        name: "기존 참가자",
+        organizationId: "org-1",
+        suggestedRole: null,
+        suggestedGrade: null,
+      }).success,
+    ).toBe(true);
+    for (const suggestions of [
+      { suggestedRole: "VOLUNTEER", suggestedGrade: "M1" },
+      { suggestedRole: "STUDENT", suggestedGrade: "E6" },
+    ]) {
+      expect(
+        ParticipantSchema.safeParse({
+          participantId: "participant-invalid",
+          name: "잘못된 추천",
+          organizationId: "org-1",
+          ...suggestions,
+        }).success,
+      ).toBe(false);
+    }
+  });
+
   it("uses project lifecycle sources and a strict participant creation union", () => {
     expect(RosterSourceSchema.options).toEqual([
       "PRE_REGISTRATION",

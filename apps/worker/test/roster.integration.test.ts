@@ -696,10 +696,10 @@ it("writes structured bulk profiles in order and increments the project once", a
       body: JSON.stringify({
         organizationId: "org-1",
         participants: [
-          { name: "중학생", role: "STUDENT", grade: "M2" },
-          { name: "담당 교사", role: "TEACHER", grade: null },
+          { name: "  중학생  ", role: "STUDENT", grade: "M2" },
+          { name: "중학생", role: "TEACHER", grade: null },
         ],
-        confirmDuplicateNames: false,
+        confirmDuplicateNames: true,
         expectedRevision: fixture.project.revision,
       }),
     },
@@ -721,7 +721,7 @@ it("writes structured bulk profiles in order and increments the project once", a
   }>();
   expect(body.participants.map((item) => item.rosterEntry)).toMatchObject([
     { participantName: "중학생", role: "STUDENT", grade: "M2" },
-    { participantName: "담당 교사", role: "TEACHER", grade: null },
+    { participantName: "중학생", role: "TEACHER", grade: null },
   ]);
   expect(body.projectRevision).toBe(fixture.project.revision + 1);
   expect(
@@ -733,38 +733,77 @@ it("writes structured bulk profiles in order and increments the project once", a
   ).toBe(fixture.project.revision + 1);
   const profileAuditRows = (
     await env.DB.prepare(
-      `SELECT entity_id, details_json FROM audit_logs
+      `SELECT action, entity_type, entity_id, details_json FROM audit_logs
        WHERE details_json LIKE ?`,
     )
       .bind(`%"batchId":"${body.batchId}"%`)
-      .all<{ entity_id: string; details_json: string }>()
+      .all<{
+        action: string;
+        entity_type: string;
+        entity_id: string;
+        details_json: string;
+      }>()
   ).results.map((row) => ({
+    action: row.action,
+    entityType: row.entity_type,
     entityId: row.entity_id,
-    ...JSON.parse(row.details_json),
+    details: JSON.parse(row.details_json),
   }));
   expect(profileAuditRows).toHaveLength(4);
   expect(profileAuditRows).toEqual(
     expect.arrayContaining([
-      expect.objectContaining({
+      {
+        action: "PARTICIPANT_CREATED",
+        entityType: "PARTICIPANT",
         entityId: body.participants[0]?.participant.id,
-        participantRole: "STUDENT",
-        studentGrade: "M2",
-      }),
-      expect.objectContaining({
+        details: {
+          batchId: body.batchId,
+          projectId: fixture.project.id,
+          organizationId: "org-1",
+          participantName: "중학생",
+          participantRole: "STUDENT",
+          studentGrade: "M2",
+        },
+      },
+      {
+        action: "ROSTER_ADDED",
+        entityType: "ROSTER_ENTRY",
         entityId: body.participants[0]?.rosterEntry.id,
-        participantRole: "STUDENT",
-        studentGrade: "M2",
-      }),
-      expect.objectContaining({
+        details: {
+          batchId: body.batchId,
+          projectId: fixture.project.id,
+          organizationId: "org-1",
+          participantName: "중학생",
+          participantRole: "STUDENT",
+          studentGrade: "M2",
+        },
+      },
+      {
+        action: "PARTICIPANT_CREATED",
+        entityType: "PARTICIPANT",
         entityId: body.participants[1]?.participant.id,
-        participantRole: "TEACHER",
-        studentGrade: null,
-      }),
-      expect.objectContaining({
+        details: {
+          batchId: body.batchId,
+          projectId: fixture.project.id,
+          organizationId: "org-1",
+          participantName: "중학생",
+          participantRole: "TEACHER",
+          studentGrade: null,
+        },
+      },
+      {
+        action: "ROSTER_ADDED",
+        entityType: "ROSTER_ENTRY",
         entityId: body.participants[1]?.rosterEntry.id,
-        participantRole: "TEACHER",
-        studentGrade: null,
-      }),
+        details: {
+          batchId: body.batchId,
+          projectId: fixture.project.id,
+          organizationId: "org-1",
+          participantName: "중학생",
+          participantRole: "TEACHER",
+          studentGrade: null,
+        },
+      },
     ]),
   );
 });
