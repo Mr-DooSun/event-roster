@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Project } from "../src";
 import {
   AddProjectOrganizationSchema,
+  BulkRosterCreateRequestSchema,
   CreateProjectRequestSchema,
   LoginIdSchema,
   OrganizationManagerCreateRequestSchema,
@@ -153,6 +154,60 @@ describe("roster contracts", () => {
       expectedParticipantRevision: 2,
       expectedRevision: 3,
     });
+  });
+
+  it("accepts 1 to 30 normalized bulk participant names", () => {
+    expect(
+      BulkRosterCreateRequestSchema.parse({
+        organizationId: "org-1",
+        names: ["  홍길동  ", "김\t민수"],
+        confirmDuplicateNames: false,
+        expectedRevision: 4,
+      }),
+    ).toEqual({
+      organizationId: "org-1",
+      names: ["홍길동", "김 민수"],
+      confirmDuplicateNames: false,
+      expectedRevision: 4,
+    });
+    expect(
+      BulkRosterCreateRequestSchema.safeParse({
+        organizationId: "org-1",
+        names: [],
+        confirmDuplicateNames: false,
+        expectedRevision: 4,
+      }).success,
+    ).toBe(false);
+    expect(
+      BulkRosterCreateRequestSchema.safeParse({
+        organizationId: "org-1",
+        names: Array.from({ length: 31 }, (_, index) => `참가자 ${index}`),
+        confirmDuplicateNames: false,
+        expectedRevision: 4,
+      }).success,
+    ).toBe(false);
+  });
+
+  it("rejects invalid names and unknown bulk fields", () => {
+    for (const names of [["   "], ["가".repeat(101)]]) {
+      expect(
+        BulkRosterCreateRequestSchema.safeParse({
+          organizationId: "org-1",
+          names,
+          confirmDuplicateNames: false,
+          expectedRevision: 0,
+        }).success,
+      ).toBe(false);
+    }
+    expect(
+      BulkRosterCreateRequestSchema.safeParse({
+        organizationId: "org-1",
+        names: ["홍길동"],
+        confirmDuplicateNames: false,
+        expectedRevision: 0,
+        ignored: true,
+      }).success,
+    ).toBe(false);
   });
 });
 
