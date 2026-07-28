@@ -10,40 +10,87 @@ export type RosterSource = z.infer<typeof RosterSourceSchema>;
 export const RosterStatusSchema = z.enum(["ACTIVE", "CANCELLED"]);
 export type RosterStatus = z.infer<typeof RosterStatusSchema>;
 
+export const ParticipantRoleSchema = z.enum(["STUDENT", "TEACHER"]);
+export type ParticipantRole = z.infer<typeof ParticipantRoleSchema>;
+
+export const StudentGradeSchema = z.enum(["M1", "M2", "M3", "H1", "H2", "H3"]);
+export type StudentGrade = z.infer<typeof StudentGradeSchema>;
+
 const BulkParticipantNameSchema = z
   .string()
   .transform(normalizeParticipantName)
   .pipe(z.string().min(1).max(100));
 
+const rosterParticipantProfileFields = {
+  role: ParticipantRoleSchema,
+  grade: StudentGradeSchema.nullable(),
+};
+
+function validateRosterParticipantProfile(
+  value: { role: ParticipantRole; grade: StudentGrade | null },
+  context: z.RefinementCtx,
+) {
+  if (value.role === "STUDENT" && value.grade === null) {
+    context.addIssue({
+      code: "custom",
+      path: ["grade"],
+      message: "학생은 학년이 필요합니다.",
+    });
+  }
+  if (value.role === "TEACHER" && value.grade !== null) {
+    context.addIssue({
+      code: "custom",
+      path: ["grade"],
+      message: "담당교사는 학년을 입력하지 않습니다.",
+    });
+  }
+}
+
+export const RosterParticipantProfileSchema = z
+  .object(rosterParticipantProfileFields)
+  .strict()
+  .superRefine(validateRosterParticipantProfile);
+
+export const RosterParticipantInputSchema = z
+  .object({
+    name: BulkParticipantNameSchema,
+    ...rosterParticipantProfileFields,
+  })
+  .strict()
+  .superRefine(validateRosterParticipantProfile);
+
+export type RosterParticipantInput = z.infer<
+  typeof RosterParticipantInputSchema
+>;
+
 const ExpectedProjectRevisionSchema = z.object({
   expectedRevision: z.number().int().nonnegative(),
 });
 
+const RosterParticipantDetailsSchema = z
+  .object({
+    name: z.string().trim().min(1).max(100),
+    organizationId: OrganizationIdSchema,
+    ...rosterParticipantProfileFields,
+  })
+  .strict()
+  .superRefine(validateRosterParticipantProfile);
+
 export const RosterCreateRequestSchema = z.union([
   ExpectedProjectRevisionSchema.extend({
     participantId: ParticipantIdSchema,
-    confirmedParticipant: z
-      .object({
-        name: z.string().trim().min(1).max(100),
-        organizationId: OrganizationIdSchema,
-      })
-      .strict(),
+    confirmedParticipant: RosterParticipantDetailsSchema,
     expectedParticipantRevision: z.number().int().nonnegative(),
   }).strict(),
   ExpectedProjectRevisionSchema.extend({
-    newParticipant: z
-      .object({
-        name: z.string().trim().min(1).max(100),
-        organizationId: OrganizationIdSchema,
-      })
-      .strict(),
+    newParticipant: RosterParticipantDetailsSchema,
   }).strict(),
 ]);
 
 export const BulkRosterCreateRequestSchema = z
   .object({
     organizationId: OrganizationIdSchema,
-    names: z.array(BulkParticipantNameSchema).min(1).max(30),
+    participants: z.array(RosterParticipantInputSchema).min(1).max(30),
     confirmDuplicateNames: z.boolean(),
     expectedRevision: z.number().int().nonnegative(),
   })
@@ -110,6 +157,8 @@ export const BulkRosterCreateResponseSchema = z
               organizationName: z.string().min(1),
               source: RosterSourceSchema,
               status: RosterStatusSchema,
+              role: ParticipantRoleSchema.nullable(),
+              grade: StudentGradeSchema.nullable(),
               wasExpectedAtStart: z.boolean(),
               revision: z.number().int().nonnegative(),
               updatedAt: z.string().datetime(),
@@ -138,13 +187,46 @@ export const ProjectParticipantPatchRequestSchema = z
   .object({
     name: z.string().trim().min(1).max(100).optional(),
     organizationId: OrganizationIdSchema.optional(),
+    role: ParticipantRoleSchema.optional(),
+    grade: StudentGradeSchema.nullable().optional(),
     expectedRevision: z.number().int().nonnegative(),
     expectedProjectRevision: z.number().int().nonnegative(),
   })
   .strict()
   .refine(
-    (value) => value.name !== undefined || value.organizationId !== undefined,
-  );
+    (value) =>
+      value.name !== undefined ||
+      value.organizationId !== undefined ||
+      value.role !== undefined ||
+      value.grade !== undefined,
+  )
+  .superRefine((value, context) => {
+    const rolePresent = value.role !== undefined;
+    const gradePresent = value.grade !== undefined;
+    if (rolePresent !== gradePresent) {
+      context.addIssue({
+        code: "custom",
+        path: rolePresent ? ["grade"] : ["role"],
+        message: "참가자 구분과 학년을 함께 전송해 주세요.",
+      });
+      return;
+    }
+    if (rolePresent && gradePresent) {
+      const parsed = RosterParticipantProfileSchema.safeParse({
+        role: value.role,
+        grade: value.grade,
+      });
+      if (!parsed.success) {
+        for (const issue of parsed.error.issues) {
+          context.addIssue({
+            code: "custom",
+            path: issue.path,
+            message: issue.message,
+          });
+        }
+      }
+    }
+  });
 
 export const RosterEntrySchema = z.object({
   projectId: ProjectIdSchema,
@@ -152,7 +234,14 @@ export const RosterEntrySchema = z.object({
   organizationId: OrganizationIdSchema,
   source: RosterSourceSchema,
   status: RosterStatusSchema,
+  role: ParticipantRoleSchema.nullable(),
+  grade: StudentGradeSchema.nullable(),
   revision: z.number().int().nonnegative(),
 });
+
+export type RosterRecordProfile = {
+  role: ParticipantRole | null;
+  grade: StudentGrade | null;
+};
 
 export type RosterEntry = z.infer<typeof RosterEntrySchema>;

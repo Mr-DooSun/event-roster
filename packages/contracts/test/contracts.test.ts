@@ -5,13 +5,16 @@ import {
   BulkRosterCreateRequestSchema,
   CreateProjectRequestSchema,
   LoginIdSchema,
+  NormalizedImportRowSchema,
   OrganizationManagerCreateRequestSchema,
   OrganizationPatchRequestSchema,
   OrganizationPrimaryPatchRequestSchema,
   PasswordSchema,
+  ProjectParticipantPatchRequestSchema,
   ProjectOrganizationPatchSchema,
   ProjectStatusSchema,
   RosterCreateRequestSchema,
+  RosterParticipantProfileSchema,
   RosterSourceSchema,
   UpdateProjectRequestSchema,
 } from "../src";
@@ -144,36 +147,73 @@ describe("roster contracts", () => {
     expect(
       RosterCreateRequestSchema.parse({
         participantId: "participant-1",
-        confirmedParticipant: { name: "확인된 이름", organizationId: "org-1" },
+        confirmedParticipant: {
+          name: "확인된 이름",
+          organizationId: "org-1",
+          role: "STUDENT",
+          grade: "M1",
+        },
         expectedParticipantRevision: 2,
         expectedRevision: 3,
       }),
     ).toEqual({
       participantId: "participant-1",
-      confirmedParticipant: { name: "확인된 이름", organizationId: "org-1" },
+      confirmedParticipant: {
+        name: "확인된 이름",
+        organizationId: "org-1",
+        role: "STUDENT",
+        grade: "M1",
+      },
       expectedParticipantRevision: 2,
       expectedRevision: 3,
     });
   });
 
-  it("accepts 1 to 30 normalized bulk participant names", () => {
+  it("accepts only valid participant role and grade profiles", () => {
+    const validProfiles = [
+      { role: "STUDENT", grade: "M1" },
+      { role: "STUDENT", grade: "H3" },
+      { role: "TEACHER", grade: null },
+    ] as const;
+    for (const profile of validProfiles) {
+      expect(RosterParticipantProfileSchema.safeParse(profile).success).toBe(
+        true,
+      );
+    }
+    for (const profile of [
+      { role: "STUDENT", grade: null },
+      { role: "TEACHER", grade: "H1" },
+    ]) {
+      expect(RosterParticipantProfileSchema.safeParse(profile).success).toBe(
+        false,
+      );
+    }
+  });
+
+  it("accepts 1 to 30 structured bulk participant rows", () => {
     expect(
       BulkRosterCreateRequestSchema.parse({
         organizationId: "org-1",
-        names: ["  홍길동  ", "김\t민수"],
+        participants: [
+          { name: "  홍길동  ", role: "STUDENT", grade: "M2" },
+          { name: "김\t민수", role: "TEACHER", grade: null },
+        ],
         confirmDuplicateNames: false,
         expectedRevision: 4,
       }),
     ).toEqual({
       organizationId: "org-1",
-      names: ["홍길동", "김 민수"],
+      participants: [
+        { name: "홍길동", role: "STUDENT", grade: "M2" },
+        { name: "김 민수", role: "TEACHER", grade: null },
+      ],
       confirmDuplicateNames: false,
       expectedRevision: 4,
     });
     expect(
       BulkRosterCreateRequestSchema.safeParse({
         organizationId: "org-1",
-        names: [],
+        participants: [],
         confirmDuplicateNames: false,
         expectedRevision: 4,
       }).success,
@@ -181,19 +221,28 @@ describe("roster contracts", () => {
     expect(
       BulkRosterCreateRequestSchema.safeParse({
         organizationId: "org-1",
-        names: Array.from({ length: 31 }, (_, index) => `참가자 ${index}`),
+        participants: Array.from({ length: 31 }, (_, index) => ({
+          name: `참가자 ${index}`,
+          role: "STUDENT" as const,
+          grade: "M1" as const,
+        })),
         confirmDuplicateNames: false,
         expectedRevision: 4,
       }).success,
     ).toBe(false);
   });
 
-  it("rejects invalid names and unknown bulk fields", () => {
-    for (const names of [["   "], ["가".repeat(101)]]) {
+  it("rejects invalid participant rows and unknown bulk fields", () => {
+    for (const participants of [
+      [{ name: "   ", role: "STUDENT", grade: "M1" }],
+      [{ name: "가".repeat(101), role: "STUDENT", grade: "M1" }],
+      [{ name: "학생", role: "STUDENT", grade: null }],
+      [{ name: "교사", role: "TEACHER", grade: "H1" }],
+    ]) {
       expect(
         BulkRosterCreateRequestSchema.safeParse({
           organizationId: "org-1",
-          names,
+          participants,
           confirmDuplicateNames: false,
           expectedRevision: 0,
         }).success,
@@ -202,12 +251,32 @@ describe("roster contracts", () => {
     expect(
       BulkRosterCreateRequestSchema.safeParse({
         organizationId: "org-1",
-        names: ["홍길동"],
+        participants: [{ name: "홍길동", role: "STUDENT", grade: "M1" }],
         confirmDuplicateNames: false,
         expectedRevision: 0,
         ignored: true,
       }).success,
     ).toBe(false);
+  });
+
+  it("requires a valid profile on import rows and accepts optional profile patches", () => {
+    expect(
+      NormalizedImportRowSchema.safeParse({
+        rowNumber: 2,
+        name: "학생 1",
+        organizationName: "성룡사",
+        role: "STUDENT",
+        grade: null,
+      }).success,
+    ).toBe(false);
+    expect(
+      ProjectParticipantPatchRequestSchema.safeParse({
+        role: "TEACHER",
+        grade: null,
+        expectedRevision: 1,
+        expectedProjectRevision: 2,
+      }).success,
+    ).toBe(true);
   });
 });
 

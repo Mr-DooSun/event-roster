@@ -81,6 +81,8 @@ export interface ProjectSummaryOrganization {
   inProgressCancelled: number;
   final: number;
   delta: number;
+  studentCount: number;
+  teacherCount: number;
 }
 
 export interface ProjectSummary {
@@ -88,5 +90,7 @@ export interface ProjectSummary {
   expectedTotal: number;
   finalTotal: number;
   deltaTotal: number;
+  studentTotal: number;
+  teacherTotal: number;
   organizations: ProjectSummaryOrganization[];
 }
