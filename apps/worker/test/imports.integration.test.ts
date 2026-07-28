@@ -13,12 +13,15 @@ import { setupPreRegistration } from "./support/roster";
 
 beforeEach(resetAuthState);
 
+const studentProfile = { role: "STUDENT" as const, grade: "M1" as const };
+
 it("commits 130 valid normalized rows atomically", async () => {
   const fixture = await setupPreRegistration();
   const rows = Array.from({ length: 130 }, (_, index) => ({
     rowNumber: index + 2,
     name: `가져온 참가자 ${String(index + 1).padStart(3, "0")}`,
     organizationName: "1팀",
+    ...studentProfile,
   }));
   const response = await authedRequest(
     fixture.operator,
@@ -50,6 +53,150 @@ it("commits 130 valid normalized rows atomically", async () => {
         .first<{ count: number }>()
     )?.count,
   ).toBe(1);
+});
+
+it("validates and imports exact mixed roster profiles with profile audit details", async () => {
+  const fixture = await setupPreRegistration();
+  const rows = [
+    {
+      rowNumber: 2,
+      name: "혼합 학생",
+      organizationName: "1팀",
+      role: "STUDENT" as const,
+      grade: "H2" as const,
+    },
+    {
+      rowNumber: 3,
+      name: "혼합 교사",
+      organizationName: "1팀",
+      role: "TEACHER" as const,
+      grade: null,
+    },
+  ];
+  const validation = await authedRequest(
+    fixture.operator,
+    `/api/v1/projects/${fixture.project.id}/imports/validate`,
+    { method: "POST", body: JSON.stringify(rows) },
+  );
+  expect(validation.status).toBe(200);
+  expect(await validation.json()).toMatchObject({
+    rows: [
+      { rowNumber: 2, role: "STUDENT", grade: "H2" },
+      { rowNumber: 3, role: "TEACHER", grade: null },
+    ],
+  });
+
+  const committed = await authedRequest(
+    fixture.operator,
+    `/api/v1/projects/${fixture.project.id}/imports/commit`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        rows,
+        expectedProjectRevision: fixture.project.revision,
+      }),
+    },
+  );
+  expect(committed.status).toBe(201);
+  const imported = (
+    await env.DB.prepare(
+      `SELECT participant_name_snapshot AS name,
+              participant_role_snapshot AS role,
+              student_grade_snapshot AS grade
+       FROM project_roster_entries
+       WHERE project_id = ?
+       ORDER BY participant_name_snapshot`,
+    )
+      .bind(fixture.project.id)
+      .all<{ name: string; role: string; grade: string | null }>()
+  ).results;
+  expect(imported).toEqual([
+    { name: "혼합 교사", role: "TEACHER", grade: null },
+    { name: "혼합 학생", role: "STUDENT", grade: "H2" },
+  ]);
+  const auditDetails = (
+    await env.DB.prepare(
+      `SELECT details_json
+       FROM audit_logs
+       WHERE action = 'ROSTER_IMPORTED'
+       ORDER BY details_json`,
+    ).all<{ details_json: string }>()
+  ).results.map(({ details_json }) => JSON.parse(details_json));
+  expect(auditDetails).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ role: "STUDENT", grade: "H2" }),
+      expect.objectContaining({ role: "TEACHER", grade: null }),
+    ]),
+  );
+});
+
+it("rejects a legacy-shaped import request without mutating data", async () => {
+  const fixture = await setupPreRegistration();
+  const response = await authedRequest(
+    fixture.operator,
+    `/api/v1/projects/${fixture.project.id}/imports/commit`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        rows: [{ rowNumber: 2, name: "레거시", organizationName: "1팀" }],
+        expectedProjectRevision: fixture.project.revision,
+      }),
+    },
+  );
+  expect(response.status).toBe(422);
+  expect(
+    (
+      await env.DB.prepare(
+        "SELECT COUNT(*) AS count FROM participants WHERE name = '레거시'",
+      ).first<{ count: number }>()
+    )?.count,
+  ).toBe(0);
+});
+
+it("rolls back every row when one import profile pairing is invalid", async () => {
+  const fixture = await setupPreRegistration();
+  const response = await authedRequest(
+    fixture.operator,
+    `/api/v1/projects/${fixture.project.id}/imports/commit`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        rows: [
+          {
+            rowNumber: 2,
+            name: "원자 정상",
+            organizationName: "1팀",
+            ...studentProfile,
+          },
+          {
+            rowNumber: 3,
+            name: "원자 오류",
+            organizationName: "1팀",
+            role: "TEACHER",
+            grade: "H1",
+          },
+        ],
+        expectedProjectRevision: fixture.project.revision,
+      }),
+    },
+  );
+  expect(response.status).toBe(422);
+  expect(
+    (
+      await env.DB.prepare(
+        "SELECT COUNT(*) AS count FROM participants WHERE name IN ('원자 정상', '원자 오류')",
+      ).first<{ count: number }>()
+    )?.count,
+  ).toBe(0);
+  expect(
+    (
+      await env.DB.prepare(
+        "SELECT COUNT(*) AS count FROM project_import_runs WHERE project_id = ?",
+      )
+        .bind(fixture.project.id)
+        .first<{ count: number }>()
+    )?.count,
+  ).toBe(0);
 });
 
 it("protects import validation with the same exact-origin and CSRF checks as commit", async () => {
@@ -85,8 +232,18 @@ it("leaves no rows when one organization is unknown", async () => {
       body: JSON.stringify({
         expectedProjectRevision: fixture.project.revision,
         rows: [
-          { rowNumber: 2, name: "정상", organizationName: "1팀" },
-          { rowNumber: 3, name: "오류", organizationName: "없는 팀" },
+          {
+            rowNumber: 2,
+            name: "정상",
+            organizationName: "1팀",
+            ...studentProfile,
+          },
+          {
+            rowNumber: 3,
+            name: "오류",
+            organizationName: "없는 팀",
+            ...studentProfile,
+          },
         ],
       }),
     },
@@ -124,7 +281,14 @@ it("requires PRE_REGISTRATION for validation and commit", async () => {
     },
   );
   expect(inProgress.status).toBe(200);
-  const rows = [{ rowNumber: 2, name: "신규", organizationName: "1팀" }];
+  const rows = [
+    {
+      rowNumber: 2,
+      name: "신규",
+      organizationName: "1팀",
+      ...studentProfile,
+    },
+  ];
   const validation = await authedRequest(
     fixture.operator,
     `/api/v1/projects/${fixture.project.id}/imports/validate`,
@@ -149,7 +313,14 @@ it("returns ambiguous candidates and commits only an explicitly selected candida
   };
   const first = await duplicate();
   const second = await duplicate();
-  const rows = [{ rowNumber: 2, name: "동명이인", organizationName: "1팀" }];
+  const rows = [
+    {
+      rowNumber: 2,
+      name: "동명이인",
+      organizationName: "1팀",
+      ...studentProfile,
+    },
+  ];
   const validation = await authedRequest(
     fixture.operator,
     `/api/v1/projects/${fixture.project.id}/imports/validate`,
@@ -217,6 +388,7 @@ it("rejects an invalid resolved candidate and a stale project revision", async (
             rowNumber: 2,
             name: "첫 참가자",
             organizationName: "1팀",
+            ...studentProfile,
             resolvedParticipantId: "missing-participant",
           },
         ],
@@ -232,7 +404,14 @@ it("rejects an invalid resolved candidate and a stale project revision", async (
     {
       method: "POST",
       body: JSON.stringify({
-        rows: [{ rowNumber: 2, name: "신규", organizationName: "1팀" }],
+        rows: [
+          {
+            rowNumber: 2,
+            name: "신규",
+            organizationName: "1팀",
+            ...studentProfile,
+          },
+        ],
         expectedProjectRevision: fixture.project.revision + 1,
       }),
     },
@@ -249,7 +428,11 @@ it("treats an active selected participant as a no-op and reactivates a selected 
       method: "POST",
       body: JSON.stringify({
         participantId: fixture.firstParticipant.id,
-        confirmedParticipant: { name: "첫 참가자", organizationId: "org-1" },
+        confirmedParticipant: {
+          name: "첫 참가자",
+          organizationId: "org-1",
+          ...studentProfile,
+        },
         expectedParticipantRevision: 0,
         expectedRevision: fixture.project.revision,
       }),
@@ -264,6 +447,7 @@ it("treats an active selected participant as a no-op and reactivates a selected 
     rowNumber: 2,
     name: "첫 참가자",
     organizationName: "1팀",
+    ...studentProfile,
     resolvedParticipantId: fixture.firstParticipant.id,
   };
   const noOp = await authedRequest(
@@ -311,7 +495,7 @@ it("treats an active selected participant as a no-op and reactivates a selected 
     {
       method: "POST",
       body: JSON.stringify({
-        rows: [row],
+        rows: [{ ...row, role: "TEACHER", grade: null }],
         expectedProjectRevision: cancelledBody.projectRevision,
       }),
     },
@@ -319,11 +503,23 @@ it("treats an active selected participant as a no-op and reactivates a selected 
   expect(reactivated.status).toBe(201);
   expect(
     await env.DB.prepare(
-      "SELECT status, revision FROM project_roster_entries WHERE id = ?",
+      `SELECT status, revision, participant_role_snapshot AS role,
+              student_grade_snapshot AS grade
+       FROM project_roster_entries WHERE id = ?`,
     )
       .bind(active.id)
-      .first<{ status: string; revision: number }>(),
-  ).toMatchObject({ status: "ACTIVE", revision: cancelledBody.revision + 1 });
+      .first<{
+        status: string;
+        revision: number;
+        role: string;
+        grade: string | null;
+      }>(),
+  ).toMatchObject({
+    status: "ACTIVE",
+    revision: cancelledBody.revision + 1,
+    role: "TEACHER",
+    grade: null,
+  });
 });
 
 it("forbids organization managers from import endpoints", async () => {
@@ -366,7 +562,14 @@ it("rolls back when a same-name candidate appears after the set reads", async ()
       { ...(env as Env), DB: raceDb },
       actor,
       fixture.project.id,
-      [{ rowNumber: 2, name: "경쟁 참가자", organizationName: "1팀" }],
+      [
+        {
+          rowNumber: 2,
+          name: "경쟁 참가자",
+          organizationName: "1팀",
+          ...studentProfile,
+        },
+      ],
       fixture.project.revision,
     ),
   ).rejects.toMatchObject({ code: "STALE_REVISION" });
@@ -400,7 +603,14 @@ it("rolls back when the resolved organization is renamed after the set reads", a
       { ...(env as Env), DB: raceDb },
       actor,
       fixture.project.id,
-      [{ rowNumber: 2, name: "조직 경쟁", organizationName: "1팀" }],
+      [
+        {
+          rowNumber: 2,
+          name: "조직 경쟁",
+          organizationName: "1팀",
+          ...studentProfile,
+        },
+      ],
       fixture.project.revision,
     ),
   ).rejects.toMatchObject({ code: "STALE_REVISION" });
@@ -439,6 +649,7 @@ it("rolls back when a selected participant changes after the set reads", async (
           rowNumber: 2,
           name: "첫 참가자",
           organizationName: "1팀",
+          ...studentProfile,
           resolvedParticipantId: fixture.firstParticipant.id,
         },
       ],
@@ -466,7 +677,14 @@ it("serializes import commit against the IN_PROGRESS snapshot transition", async
     {
       method: "POST",
       body: JSON.stringify({
-        rows: [{ rowNumber: 2, name: "경쟁 입력", organizationName: "1팀" }],
+        rows: [
+          {
+            rowNumber: 2,
+            name: "경쟁 입력",
+            organizationName: "1팀",
+            ...studentProfile,
+          },
+        ],
         expectedProjectRevision: fixture.project.revision,
       }),
     },
@@ -521,7 +739,14 @@ it("commits a case-insensitive match using the selected master name", async () =
     {
       method: "POST",
       body: JSON.stringify({
-        rows: [{ rowNumber: 2, name: "alice", organizationName: "1팀" }],
+        rows: [
+          {
+            rowNumber: 2,
+            name: "alice",
+            organizationName: "1팀",
+            ...studentProfile,
+          },
+        ],
         expectedProjectRevision: fixture.project.revision,
       }),
     },
@@ -547,7 +772,11 @@ it("revalidates active no-op rows when organization state changes", async () => 
       method: "POST",
       body: JSON.stringify({
         participantId: fixture.firstParticipant.id,
-        confirmedParticipant: { name: "첫 참가자", organizationId: "org-1" },
+        confirmedParticipant: {
+          name: "첫 참가자",
+          organizationId: "org-1",
+          ...studentProfile,
+        },
         expectedParticipantRevision: 0,
         expectedRevision: fixture.project.revision,
       }),
@@ -575,6 +804,7 @@ it("revalidates active no-op rows when organization state changes", async () => 
           rowNumber: 2,
           name: "첫 참가자",
           organizationName: "1팀",
+          ...studentProfile,
           resolvedParticipantId: fixture.firstParticipant.id,
         },
       ],
@@ -592,7 +822,11 @@ it("rejects imports for an inactive project organization membership", async () =
       method: "POST",
       body: JSON.stringify({
         participantId: fixture.firstParticipant.id,
-        confirmedParticipant: { name: "첫 참가자", organizationId: "org-1" },
+        confirmedParticipant: {
+          name: "첫 참가자",
+          organizationId: "org-1",
+          ...studentProfile,
+        },
         expectedParticipantRevision: 0,
         expectedRevision: fixture.project.revision,
       }),
@@ -619,7 +853,14 @@ it("rejects imports for an inactive project organization membership", async () =
     {
       method: "POST",
       body: JSON.stringify({
-        rows: [{ rowNumber: 2, name: "차단 참가자", organizationName: "1팀" }],
+        rows: [
+          {
+            rowNumber: 2,
+            name: "차단 참가자",
+            organizationName: "1팀",
+            ...studentProfile,
+          },
+        ],
         expectedProjectRevision: deactivatedBody.projectRevision,
       }),
     },

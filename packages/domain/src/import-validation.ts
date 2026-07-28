@@ -33,6 +33,16 @@ export function validateNormalizedRows(
       });
     }
 
+    if (
+      (normalized.role === "STUDENT" && normalized.grade === null) ||
+      (normalized.role === "TEACHER" && normalized.grade !== null)
+    ) {
+      throw new DomainError("VALIDATION_FAILED", {
+        rowNumber: normalized.rowNumber,
+        field: "grade",
+      });
+    }
+
     const key = duplicateKey(normalized);
     if (seen.has(key)) {
       throw new DomainError("VALIDATION_FAILED", {

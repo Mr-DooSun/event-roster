@@ -19,7 +19,7 @@ import { closeExpiredProject } from "./project-expiration";
 import { getRoster, getSummary } from "./roster";
 
 const PARTICIPANT_CHUNK_SIZE = 15;
-const ROSTER_CHUNK_SIZE = 11;
+const ROSTER_CHUNK_SIZE = 9;
 const AUDIT_CHUNK_SIZE = 45;
 
 interface ResolvedImportRow {
@@ -36,6 +36,8 @@ interface ResolvedImportRow {
   organizationParticipantCountAfterInsert: number;
   organizationParticipantRevisionSum: number;
   mutateRoster: boolean;
+  role: ParticipantRole;
+  grade: StudentGrade | null;
 }
 
 export function buildImportQueryPlan(rows: NormalizedImportRow[]) {
@@ -51,7 +53,7 @@ export function buildImportQueryPlan(rows: NormalizedImportRow[]) {
       0,
       1,
       6 * Math.min(PARTICIPANT_CHUNK_SIZE, rows.length),
-      8 * Math.min(ROSTER_CHUNK_SIZE, rows.length) + 6,
+      10 * Math.min(ROSTER_CHUNK_SIZE, rows.length) + 6,
       2 * Math.min(AUDIT_CHUNK_SIZE, rows.length) + 2,
       2,
       5,
@@ -74,6 +76,8 @@ export async function validateImport(
       rowNumber: row.input.rowNumber,
       name: row.input.name,
       organizationName: row.input.organizationName,
+      role: row.input.role,
+      grade: row.input.grade,
       issues: row.issues,
       candidates: row.candidates.map((candidate) => ({
         participantId: candidate.id,
@@ -133,6 +137,8 @@ export async function commitImport(
       organizationParticipantRevisionSum:
         row.organizationParticipantRevisionSum,
       mutateRoster: selected?.entry_status !== "ACTIVE",
+      role: row.input.role,
+      grade: row.input.grade,
     };
   });
   const now = currentTime.toISOString();
@@ -399,18 +405,19 @@ function rosterUpsert(
   actorId: string,
   now: string,
 ) {
-  const values = rows.map(() => "(?, ?, ?, ?, ?, ?, ?, ?)").join(",");
+  const values = rows.map(() => "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").join(",");
   return db
     .prepare(
       `WITH incoming(
          entry_id, participant_id, expected_name, expected_organization_id,
          expected_revision, expected_organization_canonical,
          expected_organization_participant_count,
-         expected_organization_revision_sum
+         expected_organization_revision_sum, participant_role, student_grade
        ) AS (VALUES ${values})
        INSERT INTO project_roster_entries
          (id, project_id, participant_id, organization_id, participant_name_snapshot,
-          organization_name_snapshot, source, status, was_expected_at_start, revision,
+          organization_name_snapshot, participant_role_snapshot,
+          student_grade_snapshot, source, status, was_expected_at_start, revision,
           created_by, updated_by, created_at, updated_at)
        SELECT i.entry_id, ?, p.id,
               CASE WHEN p.name = i.expected_name
@@ -431,7 +438,7 @@ function rosterUpsert(
                               WHERE candidate.organization_id = i.expected_organization_id)
                              = i.expected_organization_revision_sum
                    THEN p.organization_id ELSE NULL END,
-              p.name, o.name,
+              p.name, o.name, i.participant_role, i.student_grade,
               'PRE_REGISTRATION', 'ACTIVE', 0, 0, ?, ?, ?, ?
        FROM incoming i JOIN participants p ON p.id = i.participant_id
        JOIN organizations o ON o.id = p.organization_id
@@ -439,6 +446,14 @@ function rosterUpsert(
        ON CONFLICT(project_id, participant_id) DO UPDATE SET
          status = CASE WHEN project_roster_entries.status = 'CANCELLED'
                        THEN 'ACTIVE' ELSE project_roster_entries.status END,
+         participant_role_snapshot =
+           CASE WHEN project_roster_entries.status = 'CANCELLED'
+                THEN excluded.participant_role_snapshot
+                ELSE project_roster_entries.participant_role_snapshot END,
+         student_grade_snapshot =
+           CASE WHEN project_roster_entries.status = 'CANCELLED'
+                THEN excluded.student_grade_snapshot
+                ELSE project_roster_entries.student_grade_snapshot END,
          updated_by = CASE WHEN project_roster_entries.status = 'CANCELLED'
                            THEN excluded.updated_by ELSE project_roster_entries.updated_by END,
          updated_at = CASE WHEN project_roster_entries.status = 'CANCELLED'
@@ -456,6 +471,8 @@ function rosterUpsert(
         row.organizationCanonicalName,
         row.organizationParticipantCountAfterInsert,
         row.organizationParticipantRevisionSum,
+        row.role,
+        row.grade,
       ]),
       projectId,
       projectId,
@@ -486,7 +503,12 @@ function importAuditInsert(
     .bind(
       ...rows.flatMap((row) => [
         row.entryId,
-        JSON.stringify({ projectId, organizationId: row.organizationId }),
+        JSON.stringify({
+          projectId,
+          organizationId: row.organizationId,
+          role: row.role,
+          grade: row.grade,
+        }),
       ]),
       actorId,
       now,

@@ -674,7 +674,13 @@ it("globally deactivates an organization with audit and blocks only new usage", 
     {
       method: "POST",
       body: JSON.stringify([
-        { rowNumber: 2, name: "신규", organizationName: "1팀" },
+        {
+          rowNumber: 2,
+          name: "신규",
+          organizationName: "1팀",
+          role: "STUDENT",
+          grade: "M1",
+        },
       ]),
     },
   );
@@ -688,7 +694,15 @@ it("globally deactivates an organization with audit and blocks only new usage", 
     {
       method: "POST",
       body: JSON.stringify({
-        rows: [{ rowNumber: 2, name: "신규", organizationName: "1팀" }],
+        rows: [
+          {
+            rowNumber: 2,
+            name: "신규",
+            organizationName: "1팀",
+            role: "STUDENT",
+            grade: "M1",
+          },
+        ],
         expectedProjectRevision: cancelledBody.projectRevision + 1,
       }),
     },
