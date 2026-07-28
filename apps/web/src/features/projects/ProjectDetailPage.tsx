@@ -103,6 +103,8 @@ const EMPTY_SUMMARY = (projectId: string): ProjectSummary => ({
   expectedTotal: 0,
   finalTotal: 0,
   deltaTotal: 0,
+  studentTotal: 0,
+  teacherTotal: 0,
   organizations: [],
 });
 

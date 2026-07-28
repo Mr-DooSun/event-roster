@@ -107,6 +107,8 @@ it("marks inactive historical organizations in the overview summary", async () =
         expectedTotal: 2,
         finalTotal: 1,
         deltaTotal: -1,
+        studentTotal: 3,
+        teacherTotal: 2,
         organizations: [
           {
             organizationId: "org-history",
@@ -118,6 +120,8 @@ it("marks inactive historical organizations in the overview summary", async () =
             inProgressCancelled: 1,
             final: 1,
             delta: -1,
+            studentCount: 3,
+            teacherCount: 2,
           },
         ],
       };
@@ -132,6 +136,10 @@ it("marks inactive historical organizations in the overview summary", async () =
   expect(within(row as HTMLElement).getByText("비활성")).toHaveClass(
     "er-badge--inactive",
   );
+  expect(screen.getByText("학생 3명")).toBeVisible();
+  expect(screen.getByText("담당교사 2명")).toBeVisible();
+  expect(screen.getByRole("columnheader", { name: "학생" })).toBeVisible();
+  expect(screen.getByRole("columnheader", { name: "담당교사" })).toBeVisible();
 });
 
 it("shows a project header skeleton while the project shell is loading", async () => {
@@ -2309,6 +2317,8 @@ function emptySummary(projectId: string) {
     expectedTotal: 0,
     finalTotal: 0,
     deltaTotal: 0,
+    studentTotal: 0,
+    teacherTotal: 0,
     organizations: [],
   };
 }

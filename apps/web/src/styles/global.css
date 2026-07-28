@@ -660,7 +660,7 @@ a {
 }
 .er-roster-filters {
   display: grid;
-  grid-template-columns: minmax(16rem, 2fr) repeat(2, minmax(10rem, 1fr));
+  grid-template-columns: minmax(16rem, 2fr) repeat(4, minmax(9rem, 1fr));
   align-items: end;
   gap: var(--er-space-4);
 }

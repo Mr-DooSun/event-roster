@@ -2,6 +2,7 @@ import type { ParticipantRole, StudentGrade } from "@event-roster/contracts";
 import { useMemo, useState } from "react";
 import { Button } from "../../components/ui/Button";
 import { TextInput } from "../../components/ui/TextInput";
+import { GRADE_LABEL, ROLE_LABEL } from "./participant-profile-labels";
 
 export interface RosterView {
   id: string;
@@ -43,6 +44,12 @@ export function RosterTable({
   const [query, setQuery] = useState("");
   const [organization, setOrganization] = useState("ALL");
   const [status, setStatus] = useState<"ALL" | RosterView["status"]>("ALL");
+  const [role, setRole] = useState<"ALL" | ParticipantRole | "UNSPECIFIED">(
+    "ALL",
+  );
+  const [grade, setGrade] = useState<"ALL" | StudentGrade | "UNSPECIFIED">(
+    "ALL",
+  );
   const organizations = useMemo(
     () => [...new Set(rows.slice(0, 130).map((row) => row.organizationName))],
     [rows],
@@ -58,9 +65,21 @@ export function RosterTable({
       const matchesOrganization =
         organization === "ALL" || row.organizationName === organization;
       const matchesStatus = status === "ALL" || row.status === status;
-      return matchesQuery && matchesOrganization && matchesStatus;
+      const matchesRole =
+        role === "ALL" ||
+        (role === "UNSPECIFIED" ? row.role === null : row.role === role);
+      const matchesGrade =
+        grade === "ALL" ||
+        (grade === "UNSPECIFIED" ? row.grade === null : row.grade === grade);
+      return (
+        matchesQuery &&
+        matchesOrganization &&
+        matchesStatus &&
+        matchesRole &&
+        matchesGrade
+      );
     });
-  }, [organization, query, rows, status]);
+  }, [grade, organization, query, role, rows, status]);
   return (
     <div className="er-page-stack">
       <div className="er-roster-filters">
@@ -97,6 +116,37 @@ export function RosterTable({
             <option value="CANCELLED">취소</option>
           </select>
         </label>
+        <label className="er-field">
+          <span>참가자 구분 필터</span>
+          <select
+            value={role}
+            onChange={(event) =>
+              setRole(event.currentTarget.value as typeof role)
+            }
+          >
+            <option value="ALL">전체 구분</option>
+            <option value="STUDENT">{ROLE_LABEL.STUDENT}</option>
+            <option value="TEACHER">{ROLE_LABEL.TEACHER}</option>
+            <option value="UNSPECIFIED">미지정</option>
+          </select>
+        </label>
+        <label className="er-field">
+          <span>학년 필터</span>
+          <select
+            value={grade}
+            onChange={(event) =>
+              setGrade(event.currentTarget.value as typeof grade)
+            }
+          >
+            <option value="ALL">전체 학년</option>
+            {Object.entries(GRADE_LABEL).map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+            <option value="UNSPECIFIED">미지정</option>
+          </select>
+        </label>
       </div>
       {rows.length > 130 ? (
         <p className="er-status er-status--error" role="alert">
@@ -110,7 +160,9 @@ export function RosterTable({
               <th>고유 ID</th>
               <th>이름</th>
               <th>조직</th>
-              <th>구분</th>
+              <th>참가자 구분</th>
+              <th>학년</th>
+              <th>등록 시점</th>
               <th>상태</th>
               <th>작업</th>
             </tr>
@@ -121,6 +173,14 @@ export function RosterTable({
                 <td>{row.participantNumber}</td>
                 <td>{row.participantName}</td>
                 <td>{row.organizationName}</td>
+                <td>{row.role ? ROLE_LABEL[row.role] : "미지정"}</td>
+                <td>
+                  {row.role === "TEACHER"
+                    ? "-"
+                    : row.grade
+                      ? GRADE_LABEL[row.grade]
+                      : "미지정"}
+                </td>
                 <td>
                   {row.source === "PRE_REGISTRATION" ? "사전" : "진행 중 추가"}
                 </td>

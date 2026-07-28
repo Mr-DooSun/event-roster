@@ -1220,6 +1220,92 @@ it("closes the organization listbox before a second Escape closes the participan
   expect(onClose).toHaveBeenCalledTimes(1);
 });
 
+it("shows participant profiles and combines role and grade filters with existing filters", () => {
+  const matchingRow: RosterView = {
+    ...entry("ACTIVE"),
+    participantName: "중2 학생",
+    participantNumber: "P-002",
+    role: "STUDENT",
+    grade: "M2",
+  };
+  const rows: RosterView[] = [
+    matchingRow,
+    {
+      ...entry("ACTIVE"),
+      id: "entry-student-other-grade",
+      participantId: "person-student-other-grade",
+      participantName: "중1 학생",
+      participantNumber: "P-003",
+      role: "STUDENT",
+      grade: "M1",
+    },
+    {
+      ...entry("ACTIVE"),
+      id: "entry-teacher",
+      participantId: "person-teacher",
+      participantName: "담당 교사",
+      participantNumber: "P-004",
+      role: "TEACHER",
+      grade: null,
+    },
+    {
+      ...entry("CANCELLED"),
+      id: "entry-legacy",
+      participantId: "person-legacy",
+      participantName: "기존 참가자",
+      participantNumber: "P-005",
+      organizationId: "org-2",
+      organizationName: "2팀",
+      role: null,
+      grade: null,
+    },
+  ];
+  render(
+    <RosterTable
+      rows={rows}
+      canMutate={false}
+      onStatusChange={vi.fn().mockResolvedValue(undefined)}
+      onEdit={vi.fn()}
+    />,
+  );
+
+  expect(screen.getByRole("columnheader", { name: "등록 시점" })).toBeVisible();
+  const studentRow = screen.getByText("중2 학생").closest("tr");
+  const teacherRow = screen.getByText("담당 교사").closest("tr");
+  const legacyRow = screen.getByText("기존 참가자").closest("tr");
+  expect(studentRow).not.toBeNull();
+  expect(teacherRow).not.toBeNull();
+  expect(legacyRow).not.toBeNull();
+  expect(within(studentRow as HTMLElement).getByText("학생")).toBeVisible();
+  expect(within(studentRow as HTMLElement).getByText("중2")).toBeVisible();
+  expect(within(teacherRow as HTMLElement).getByText("담당교사")).toBeVisible();
+  expect(within(teacherRow as HTMLElement).getByText("-")).toBeVisible();
+  expect(within(legacyRow as HTMLElement).getAllByText("미지정")).toHaveLength(
+    2,
+  );
+
+  fireEvent.change(screen.getByRole("textbox", { name: "명단 검색" }), {
+    target: { value: "학생" },
+  });
+  fireEvent.change(screen.getByRole("combobox", { name: "조직 필터" }), {
+    target: { value: "1팀" },
+  });
+  fireEvent.change(screen.getByRole("combobox", { name: "상태 필터" }), {
+    target: { value: "ACTIVE" },
+  });
+  fireEvent.change(screen.getByRole("combobox", { name: "참가자 구분 필터" }), {
+    target: { value: "STUDENT" },
+  });
+  fireEvent.change(screen.getByRole("combobox", { name: "학년 필터" }), {
+    target: { value: "M2" },
+  });
+
+  expect(screen.getByText("중2 학생")).toBeVisible();
+  expect(screen.queryByText("중1 학생")).not.toBeInTheDocument();
+  expect(screen.queryByText("담당 교사")).not.toBeInTheDocument();
+  expect(screen.queryByText("기존 참가자")).not.toBeInTheDocument();
+});
+
 it("shows the pending roster row without removing the table", async () => {
   const pendingStatus = deferred<void>();
 
@@ -2631,6 +2717,8 @@ function summary(final: number) {
     expectedTotal: 100,
     finalTotal: final,
     deltaTotal: final - 100,
+    studentTotal: final,
+    teacherTotal: 0,
     organizations: [
       {
         organizationId: "org-1",
@@ -2642,6 +2730,8 @@ function summary(final: number) {
         inProgressCancelled: 100 - final,
         final,
         delta: final - 100,
+        studentCount: final,
+        teacherCount: 0,
       },
     ],
   };
