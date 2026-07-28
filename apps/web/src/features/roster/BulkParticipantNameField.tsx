@@ -49,7 +49,9 @@ export function BulkParticipantNameField({
           className="er-bulk-participant-textarea"
           value={rawValue}
           disabled={disabled}
-          aria-describedby="bulk-participant-help bulk-participant-count"
+          aria-describedby={`bulk-participant-help bulk-participant-count${
+            duplicates.length > 0 ? " bulk-participant-duplicate-summary" : ""
+          }`}
           onChange={(event) => onRawValueChange(event.currentTarget.value)}
         />
       </label>
@@ -66,6 +68,15 @@ export function BulkParticipantNameField({
       </p>
       {hasInvalidName ? (
         <p className="er-form-error">이름은 100자 이하여야 합니다.</p>
+      ) : null}
+      {duplicates.length > 0 ? (
+        <p
+          id="bulk-participant-duplicate-summary"
+          className="er-bulk-participant-duplicate"
+          role="alert"
+        >
+          중복 이름이 있습니다. 내용을 확인한 후 다시 제출하세요.
+        </p>
       ) : null}
       {names.length > 0 ? (
         <ol className="er-bulk-participant-list" aria-label="등록 예정 참가자">
@@ -105,6 +116,7 @@ export function BulkParticipantNameField({
             type="checkbox"
             checked={duplicateNamesConfirmed}
             disabled={disabled}
+            aria-describedby="bulk-participant-duplicate-summary"
             onChange={(event) =>
               onDuplicateNamesConfirmedChange(event.currentTarget.checked)
             }

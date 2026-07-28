@@ -13,7 +13,10 @@ import { afterEach, expect, it, vi } from "vitest";
 import { AuthProvider, useAuth } from "../auth/AuthProvider";
 import { LoginPage } from "../auth/LoginPage";
 import { ProjectDetailPage } from "../projects/ProjectDetailPage";
-import { ParticipantDialog } from "./ParticipantDialog";
+import {
+  type BulkParticipantSubmitOutcome,
+  ParticipantDialog,
+} from "./ParticipantDialog";
 import { ParticipantEditDialog } from "./ParticipantEditDialog";
 import { ProjectRosterPage } from "./ProjectRosterPage";
 import { RosterTable, type RosterView } from "./RosterTable";
@@ -22,6 +25,170 @@ afterEach(() => {
   cleanup();
   window.localStorage.clear();
   vi.unstubAllGlobals();
+});
+
+const bulkDialogProps = {
+  participants: [
+    {
+      id: "person-1",
+      participantId: "P-001",
+      name: "기존 참가자",
+      organizationId: "org-1",
+      revision: 0,
+    },
+  ],
+  organizations: [{ id: "org-1", name: "1팀", isActive: true }],
+  onAdd: vi.fn().mockResolvedValue(undefined),
+  onClose: vi.fn(),
+};
+
+it("submits normalized bulk names with one organization", async () => {
+  const onCreateAndAdd = vi.fn().mockResolvedValue({ kind: "SUCCESS" });
+  render(
+    <ParticipantDialog {...bulkDialogProps} onCreateAndAdd={onCreateAndAdd} />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "새 참가자" }));
+  fireEvent.change(screen.getByLabelText("이름"), {
+    target: { value: "  홍길동  \n\n김\t민수" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "2명 명단에 추가" }));
+
+  await waitFor(() =>
+    expect(onCreateAndAdd).toHaveBeenCalledWith({
+      names: ["홍길동", "김 민수"],
+      organizationId: "org-1",
+      confirmDuplicateNames: false,
+    }),
+  );
+});
+
+it("prevents a second bulk submit while the first is pending", async () => {
+  const pending = deferred<BulkParticipantSubmitOutcome>();
+  const onCreateAndAdd = vi.fn(() => pending.promise);
+  render(
+    <ParticipantDialog {...bulkDialogProps} onCreateAndAdd={onCreateAndAdd} />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "새 참가자" }));
+  fireEvent.change(screen.getByLabelText("이름"), {
+    target: { value: "홍길동\n김민수" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "2명 명단에 추가" }));
+  fireEvent.click(screen.getByRole("button", { name: "2명 등록 중…" }));
+
+  expect(onCreateAndAdd).toHaveBeenCalledTimes(1);
+});
+
+it("requires explicit confirmation after a duplicate response", async () => {
+  const onCreateAndAdd = vi
+    .fn()
+    .mockResolvedValueOnce({
+      kind: "DUPLICATES",
+      duplicates: [
+        {
+          name: "홍길동",
+          kinds: ["INPUT_DUPLICATE", "EXISTING_PARTICIPANT"],
+        },
+      ],
+    })
+    .mockResolvedValueOnce({ kind: "SUCCESS" });
+  const onClose = vi.fn();
+  render(
+    <ParticipantDialog
+      {...bulkDialogProps}
+      onCreateAndAdd={onCreateAndAdd}
+      onClose={onClose}
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "새 참가자" }));
+  fireEvent.change(screen.getByLabelText("이름"), {
+    target: { value: "홍길동\n홍길동" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "2명 명단에 추가" }));
+
+  expect(
+    await screen.findAllByText("입력 목록에 같은 이름이 있습니다."),
+  ).toHaveLength(2);
+  expect(onClose).not.toHaveBeenCalled();
+  const submit = screen.getByRole("button", { name: "2명 명단에 추가" });
+  expect(submit).toBeDisabled();
+  fireEvent.click(
+    screen.getByRole("checkbox", { name: "중복 이름을 확인했습니다" }),
+  );
+  expect(submit).toBeEnabled();
+  fireEvent.click(submit);
+
+  await waitFor(() =>
+    expect(onCreateAndAdd).toHaveBeenLastCalledWith({
+      names: ["홍길동", "홍길동"],
+      organizationId: "org-1",
+      confirmDuplicateNames: true,
+    }),
+  );
+  expect(onClose).toHaveBeenCalledTimes(1);
+});
+
+it("clears duplicate confirmation when names change", async () => {
+  const onCreateAndAdd = vi.fn().mockResolvedValue({
+    kind: "DUPLICATES",
+    duplicates: [{ name: "홍길동", kinds: ["EXISTING_PARTICIPANT"] }],
+  });
+  render(
+    <ParticipantDialog {...bulkDialogProps} onCreateAndAdd={onCreateAndAdd} />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "새 참가자" }));
+  const nameField = screen.getByLabelText("이름");
+  fireEvent.change(nameField, { target: { value: "홍길동" } });
+  fireEvent.click(screen.getByRole("button", { name: "1명 명단에 추가" }));
+  await screen.findByRole("checkbox", {
+    name: "중복 이름을 확인했습니다",
+  });
+  fireEvent.change(nameField, { target: { value: "김민수" } });
+
+  expect(
+    screen.queryByRole("checkbox", { name: "중복 이름을 확인했습니다" }),
+  ).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "1명 명단에 추가" }));
+  await waitFor(() =>
+    expect(onCreateAndAdd).toHaveBeenLastCalledWith({
+      names: ["김민수"],
+      organizationId: "org-1",
+      confirmDuplicateNames: false,
+    }),
+  );
+});
+
+it("clears duplicate confirmation when the selected organization becomes inactive", async () => {
+  const onCreateAndAdd = vi.fn().mockResolvedValue({
+    kind: "DUPLICATES",
+    duplicates: [{ name: "홍길동", kinds: ["EXISTING_PARTICIPANT"] }],
+  });
+  const renderDialog = (orgOneActive: boolean) => (
+    <ParticipantDialog
+      {...bulkDialogProps}
+      organizations={[
+        { id: "org-1", name: "1팀", isActive: orgOneActive },
+        { id: "org-2", name: "2팀", isActive: true },
+      ]}
+      onCreateAndAdd={onCreateAndAdd}
+    />
+  );
+  const view = render(renderDialog(true));
+  fireEvent.click(screen.getByRole("button", { name: "새 참가자" }));
+  fireEvent.change(screen.getByLabelText("이름"), {
+    target: { value: "홍길동" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "1명 명단에 추가" }));
+  await screen.findByRole("checkbox", {
+    name: "중복 이름을 확인했습니다",
+  });
+
+  view.rerender(renderDialog(false));
+
+  await waitFor(() =>
+    expect(
+      screen.queryByRole("checkbox", { name: "중복 이름을 확인했습니다" }),
+    ).not.toBeInTheDocument(),
+  );
 });
 
 it("keeps the current inactive organization while editing an existing participant", () => {
@@ -152,13 +319,13 @@ it("records a new participant organization only after POST and reload succeed", 
   await login();
 
   await openNewParticipantForm("황룡사");
-  fireEvent.click(screen.getByRole("button", { name: "참가자 생성 후 추가" }));
+  fireEvent.click(screen.getByRole("button", { name: "1명 명단에 추가" }));
 
   await waitFor(() =>
     expect(
       fetchMock.mock.calls.some(
         ([url, init]) =>
-          String(url).endsWith("/projects/project-1/roster") &&
+          String(url).endsWith("/projects/project-1/roster/bulk") &&
           init?.method === "POST",
       ),
     ).toBe(true),
@@ -173,6 +340,74 @@ it("records a new participant organization only after POST and reload succeed", 
   await waitFor(() =>
     expect(recentOrganizationValue("user-1", "project-1")).toEqual(["org-2"]),
   );
+});
+
+it("posts bulk names, reloads, and shows a success notice", async () => {
+  const onChanged = vi.fn().mockResolvedValue(undefined);
+  const fetchMock = rosterAddFetch();
+  vi.stubGlobal("fetch", fetchMock);
+  renderRosterForRecentOrganizations({ onChanged });
+  await login();
+
+  await openNewParticipantForm("황룡사");
+  fireEvent.change(screen.getByLabelText("이름"), {
+    target: { value: "홍길동\n김민수" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "2명 명단에 추가" }));
+
+  await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1));
+  const write = fetchMock.mock.calls.find(
+    ([url, init]) =>
+      String(url).endsWith("/projects/project-1/roster/bulk") &&
+      init?.method === "POST",
+  );
+  expect(JSON.parse(String(write?.[1]?.body))).toEqual({
+    organizationId: "org-2",
+    names: ["홍길동", "김민수"],
+    confirmDuplicateNames: false,
+    expectedRevision: project().revision,
+  });
+  expect(
+    screen.queryByRole("dialog", { name: "참가자 추가" }),
+  ).not.toBeInTheDocument();
+  expect(screen.getByText("2명을 명단에 추가했습니다.")).toBeVisible();
+  expect(recentOrganizationValue("user-1", "project-1")).toEqual(["org-2"]);
+});
+
+it("keeps bulk input open for a structured duplicate conflict", async () => {
+  const onChanged = vi.fn().mockResolvedValue(undefined);
+  const fetchMock = rosterAddFetch("user-1", () =>
+    Promise.resolve(
+      Response.json(
+        {
+          code: "CONFLICT",
+          message: "duplicate names",
+          requestId: "request-duplicate",
+          details: {
+            reason: "DUPLICATE_PARTICIPANT_NAMES",
+            duplicates: [{ name: "홍길동", kinds: ["EXISTING_PARTICIPANT"] }],
+          },
+        },
+        { status: 409 },
+      ),
+    ),
+  );
+  vi.stubGlobal("fetch", fetchMock);
+  renderRosterForRecentOrganizations({ onChanged });
+  await login();
+
+  await openNewParticipantForm("성룡사");
+  fireEvent.change(screen.getByLabelText("이름"), {
+    target: { value: "홍길동" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "1명 명단에 추가" }));
+
+  expect(
+    await screen.findByText("이 조직에 같은 이름의 참가자가 있습니다."),
+  ).toBeVisible();
+  expect(screen.getByLabelText("이름")).toHaveValue("홍길동");
+  expect(onChanged).not.toHaveBeenCalled();
+  expect(recentOrganizationValue("user-1", "project-1")).toBeNull();
 });
 
 it("records the confirmed organization after an existing participant add succeeds", async () => {
@@ -237,7 +472,7 @@ it("skips recency side effects when the project changes during reload", async ()
   await login();
 
   await openNewParticipantForm("황룡사");
-  fireEvent.click(screen.getByRole("button", { name: "참가자 생성 후 추가" }));
+  fireEvent.click(screen.getByRole("button", { name: "1명 명단에 추가" }));
   await waitForRosterPost(fetchMock);
 
   view.rerender(
@@ -285,7 +520,7 @@ it("skips recency side effects when the chosen organization becomes inactive dur
   await login();
 
   await openNewParticipantForm("황룡사");
-  fireEvent.click(screen.getByRole("button", { name: "참가자 생성 후 추가" }));
+  fireEvent.click(screen.getByRole("button", { name: "1명 명단에 추가" }));
   await waitForRosterPost(fetchMock);
 
   view.rerender(
@@ -337,7 +572,7 @@ it("records recency when a speculative project render is discarded during reload
   await login();
 
   await openNewParticipantForm("황룡사");
-  fireEvent.click(screen.getByRole("button", { name: "참가자 생성 후 추가" }));
+  fireEvent.click(screen.getByRole("button", { name: "1명 명단에 추가" }));
   await waitForRosterPost(fetchMock);
 
   fireEvent.click(
@@ -390,12 +625,6 @@ it.each([
       ),
     onChanged: () => Promise.resolve(),
   },
-  {
-    name: "reload rejection",
-    post: () =>
-      Promise.resolve(Response.json({ id: "entry-new" }, { status: 201 })),
-    onChanged: () => Promise.reject(new Error("reload failed")),
-  },
 ])(
   "does not record a recent organization after $name",
   async ({ post, onChanged }) => {
@@ -407,18 +636,40 @@ it.each([
     await login();
 
     await openNewParticipantForm("황룡사");
-    fireEvent.click(
-      screen.getByRole("button", { name: "참가자 생성 후 추가" }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: "1명 명단에 추가" }));
 
     await waitFor(() =>
       expect(
-        screen.getByRole("button", { name: "참가자 생성 후 추가" }),
+        screen.getByRole("button", { name: "1명 명단에 추가" }),
       ).toBeEnabled(),
     );
     expect(recentOrganizationValue("user-1", "project-1")).toBeNull();
   },
 );
+
+it("closes the dialog without recording recency when reload fails after bulk POST", async () => {
+  const fetchMock = rosterAddFetch();
+  vi.stubGlobal("fetch", fetchMock);
+  renderRosterForRecentOrganizations({
+    onChanged: vi.fn().mockRejectedValue(new Error("reload failed")),
+  });
+  await login();
+
+  await openNewParticipantForm("황룡사");
+  fireEvent.click(screen.getByRole("button", { name: "1명 명단에 추가" }));
+
+  await waitFor(() =>
+    expect(
+      screen.queryByRole("dialog", { name: "참가자 추가" }),
+    ).not.toBeInTheDocument(),
+  );
+  expect(
+    screen.getByText(
+      "참가자는 등록됐지만 최신 명단을 불러오지 못했습니다. 페이지를 새로고침해 주세요.",
+    ),
+  ).toBeVisible();
+  expect(recentOrganizationValue("user-1", "project-1")).toBeNull();
+});
 
 it("isolates recent defaults by project and authenticated user while ignoring invalid IDs", async () => {
   window.localStorage.setItem(
@@ -955,7 +1206,7 @@ it("keeps an existing-participant dialog pending without submitting twice", asyn
 });
 
 it("keeps a new-participant dialog pending without submitting twice", async () => {
-  const pendingCreate = deferred<void>();
+  const pendingCreate = deferred<BulkParticipantSubmitOutcome>();
   const onCreateAndAdd = vi.fn(() => pendingCreate.promise);
   const onClose = vi.fn();
   render(
@@ -972,10 +1223,10 @@ it("keeps a new-participant dialog pending without submitting twice", async () =
     target: { value: "새 참가자 이름" },
   });
 
-  fireEvent.click(screen.getByRole("button", { name: "참가자 생성 후 추가" }));
+  fireEvent.click(screen.getByRole("button", { name: "1명 명단에 추가" }));
 
   const pendingButton = screen.getByRole("button", {
-    name: "참가자 만드는 중…",
+    name: "1명 등록 중…",
   });
   expect(pendingButton).toBeDisabled();
   fireEvent.click(pendingButton);
@@ -1341,9 +1592,12 @@ it("creates and adds a participant with one atomic roster request", async () => 
     if (url.includes("/audit")) {
       return Promise.resolve(Response.json({ items: [], nextCursor: null }));
     }
-    if (url.endsWith("/roster") && init?.method === "POST") {
+    if (url.endsWith("/roster/bulk") && init?.method === "POST") {
       return Promise.resolve(
-        Response.json({ id: "entry-new" }, { status: 201 }),
+        Response.json(
+          { batchId: "batch-1", participants: [], projectRevision: 3 },
+          { status: 201 },
+        ),
       );
     }
     throw new Error(`unexpected request: ${url}`);
@@ -1363,25 +1617,27 @@ it("creates and adds a participant with one atomic roster request", async () => 
   fireEvent.change(screen.getByLabelText("이름"), {
     target: { value: "김신규" },
   });
-  fireEvent.click(screen.getByRole("button", { name: "참가자 생성 후 추가" }));
+  fireEvent.click(screen.getByRole("button", { name: "1명 명단에 추가" }));
 
   await vi.waitFor(() =>
     expect(
       fetchMock.mock.calls.filter(
         ([url, init]) =>
-          String(url).endsWith("/projects/project-1/roster") &&
+          String(url).endsWith("/projects/project-1/roster/bulk") &&
           init?.method === "POST",
       ),
     ).toHaveLength(1),
   );
   const rosterWrites = fetchMock.mock.calls.filter(
     ([url, init]) =>
-      String(url).endsWith("/projects/project-1/roster") &&
+      String(url).endsWith("/projects/project-1/roster/bulk") &&
       init?.method === "POST",
   );
   expect(rosterWrites).toHaveLength(1);
   expect(JSON.parse(String(rosterWrites[0]?.[1]?.body))).toEqual({
-    newParticipant: { name: "김신규", organizationId: "org-1" },
+    organizationId: "org-1",
+    names: ["김신규"],
+    confirmDuplicateNames: false,
     expectedRevision: 2,
   });
   expect(
@@ -2132,7 +2388,11 @@ function rosterAddFetch(
     if (url.endsWith("/auth/login")) {
       return Promise.resolve(Response.json(auth("OPERATOR", [], userId)));
     }
-    if (url.endsWith("/projects/project-1/roster") && init?.method === "POST") {
+    if (
+      (url.endsWith("/projects/project-1/roster") ||
+        url.endsWith("/projects/project-1/roster/bulk")) &&
+      init?.method === "POST"
+    ) {
       return post();
     }
     throw new Error(`unexpected request: ${url}`);
@@ -2220,7 +2480,7 @@ async function waitForRosterPost(fetchMock: ReturnType<typeof rosterAddFetch>) {
     expect(
       fetchMock.mock.calls.some(
         ([url, init]) =>
-          String(url).endsWith("/projects/project-1/roster") &&
+          String(url).endsWith("/projects/project-1/roster/bulk") &&
           init?.method === "POST",
       ),
     ).toBe(true),

@@ -83,6 +83,9 @@ it("renders duplicate kinds and an explicit confirmation checkbox", () => {
   expect(
     screen.getByText(/이 조직에 같은 이름의 참가자가 있습니다/),
   ).toBeVisible();
+  expect(screen.getByRole("alert")).toHaveTextContent(
+    "중복 이름이 있습니다. 내용을 확인한 후 다시 제출하세요.",
+  );
   fireEvent.click(
     screen.getByRole("checkbox", {
       name: "중복 이름을 확인했습니다",

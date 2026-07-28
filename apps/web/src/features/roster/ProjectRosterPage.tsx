@@ -1,4 +1,9 @@
-import type { Organization, Project } from "@event-roster/contracts";
+import {
+  BulkParticipantDuplicateDetailsSchema,
+  type BulkRosterCreateResponse,
+  type Organization,
+  type Project,
+} from "@event-roster/contracts";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Button } from "../../components/ui/Button";
 import { Card } from "../../components/ui/Card";
@@ -12,6 +17,8 @@ import {
 } from "../../lib/recent-organizations";
 import { useAuth } from "../auth/AuthProvider";
 import {
+  type BulkParticipantSubmitInput,
+  type BulkParticipantSubmitOutcome,
   type ExistingParticipantConfirmation,
   ParticipantDialog,
   type ParticipantView,
@@ -34,6 +41,11 @@ interface RecentOrganizationContext {
   userId: string;
   projectId: string;
   validOrganizationIds: ReadonlySet<string>;
+}
+
+interface RosterNotice {
+  text: string;
+  tone: "info" | "success" | "error";
 }
 
 function hasSameOrganizationIds(
@@ -59,7 +71,7 @@ export function ProjectRosterPage({
   const [showAdd, setShowAdd] = useState(false);
   const [editingParticipant, setEditingParticipant] =
     useState<ParticipantView | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
+  const [notice, setNotice] = useState<RosterNotice | null>(null);
   const [busyRowIds, setBusyRowIds] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
@@ -158,7 +170,7 @@ export function ProjectRosterPage({
     operation: () => Promise<unknown>,
     onStale?: () => void,
   ) {
-    setMessage(null);
+    setNotice(null);
     try {
       await operation();
       await onChanged();
@@ -169,16 +181,25 @@ export function ProjectRosterPage({
         error.problem?.code === "STALE_REVISION"
       ) {
         onStale?.();
-        setMessage("다른 변경이 먼저 반영되어 최신 명단을 다시 불러왔습니다.");
+        setNotice({
+          text: "다른 변경이 먼저 반영되어 최신 명단을 다시 불러왔습니다.",
+          tone: "info",
+        });
         await onChanged();
       } else if (
         error instanceof ApiError &&
         error.problem?.code === "PROJECT_CLOSED"
       ) {
-        setMessage("프로젝트가 종료되어 변경할 수 없습니다.");
+        setNotice({
+          text: "프로젝트가 종료되어 변경할 수 없습니다.",
+          tone: "error",
+        });
         await onChanged();
       } else {
-        setMessage("명단 변경을 반영하지 못했습니다.");
+        setNotice({
+          text: "명단 변경을 반영하지 못했습니다.",
+          tone: "error",
+        });
       }
       return false;
     }
@@ -252,26 +273,83 @@ export function ProjectRosterPage({
     }
   }
 
-  async function createAndAdd(input: { name: string; organizationId: string }) {
+  async function createAndAdd(
+    input: BulkParticipantSubmitInput,
+  ): Promise<BulkParticipantSubmitOutcome> {
     const recentOrganizationGeneration =
       recentOrganizationContextRef.current.generation;
-    const completed = await handleMutation(() =>
-      api.post(`/projects/${project.id}/roster`, {
-        newParticipant: input,
-        expectedRevision: project.revision,
-      }),
-    );
-    if (completed) {
-      rememberOrganization(input.organizationId, recentOrganizationGeneration);
-      setShowAdd(false);
+    setNotice(null);
+    try {
+      await api.post<BulkRosterCreateResponse>(
+        `/projects/${project.id}/roster/bulk`,
+        {
+          ...input,
+          expectedRevision: project.revision,
+        },
+      );
+    } catch (error) {
+      const duplicateDetails = BulkParticipantDuplicateDetailsSchema.safeParse(
+        error instanceof ApiError ? error.problem?.details : undefined,
+      );
+      if (
+        error instanceof ApiError &&
+        error.status === 409 &&
+        error.problem?.code === "CONFLICT" &&
+        duplicateDetails.success
+      ) {
+        return {
+          kind: "DUPLICATES",
+          duplicates: duplicateDetails.data.duplicates,
+        };
+      }
+      if (
+        error instanceof ApiError &&
+        error.problem?.code === "STALE_REVISION"
+      ) {
+        setNotice({
+          text: "다른 변경이 먼저 반영되어 최신 명단을 다시 불러왔습니다.",
+          tone: "info",
+        });
+        await onChanged();
+      } else if (
+        error instanceof ApiError &&
+        error.problem?.code === "PROJECT_CLOSED"
+      ) {
+        setNotice({
+          text: "프로젝트가 종료되어 변경할 수 없습니다.",
+          tone: "error",
+        });
+        await onChanged();
+      } else {
+        setNotice({
+          text: "명단 변경을 반영하지 못했습니다.",
+          tone: "error",
+        });
+      }
+      return { kind: "FAILED" };
     }
+    try {
+      await onChanged();
+    } catch {
+      setNotice({
+        text: "참가자는 등록됐지만 최신 명단을 불러오지 못했습니다. 페이지를 새로고침해 주세요.",
+        tone: "error",
+      });
+      return { kind: "SUCCESS" };
+    }
+    rememberOrganization(input.organizationId, recentOrganizationGeneration);
+    setNotice({
+      text: `${input.names.length}명을 명단에 추가했습니다.`,
+      tone: "success",
+    });
+    return { kind: "SUCCESS" };
   }
 
   async function exportRoster() {
     if (exportingRef.current) return;
     exportingRef.current = true;
     setExporting(true);
-    setMessage(null);
+    setNotice(null);
     try {
       const data = await api.get<ExportData>(
         `/projects/${project.id}/exports/roster`,
@@ -282,7 +360,10 @@ export function ProjectRosterPage({
       const filename = projectRosterFilename(project.name);
       downloadExportWorkbook(data, filename);
     } catch {
-      setMessage("엑셀 명단을 내보내지 못했습니다.");
+      setNotice({
+        text: "엑셀 명단을 내보내지 못했습니다.",
+        tone: "error",
+      });
     } finally {
       exportingRef.current = false;
       setExporting(false);
@@ -291,10 +372,8 @@ export function ProjectRosterPage({
 
   return (
     <div className="er-page-stack">
-      {message ? (
-        <StatusMessage tone={message.includes("최신") ? "info" : "error"}>
-          {message}
-        </StatusMessage>
+      {notice ? (
+        <StatusMessage tone={notice.tone}>{notice.text}</StatusMessage>
       ) : null}
       <div className="er-roster-actions er-action-row er-action-row--wrap">
         {auth?.session.user.role === "OPERATOR" &&

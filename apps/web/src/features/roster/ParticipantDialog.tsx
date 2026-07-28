@@ -1,9 +1,16 @@
-import type { Organization } from "@event-roster/contracts";
-import { useEffect, useRef, useState } from "react";
+import type {
+  BulkParticipantDuplicate,
+  Organization,
+} from "@event-roster/contracts";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "../../components/ui/Button";
 import { Dialog } from "../../components/ui/Dialog";
 import { TextInput } from "../../components/ui/TextInput";
 import { orderOrganizationsByRecent } from "../../lib/recent-organizations";
+import {
+  BulkParticipantNameField,
+  parseBulkParticipantNames,
+} from "./BulkParticipantNameField";
 import { OrganizationSelectCombobox } from "./OrganizationSelectCombobox";
 
 export interface ParticipantView {
@@ -20,6 +27,17 @@ export interface ExistingParticipantConfirmation {
   organizationId: string;
   expectedParticipantRevision: number;
 }
+
+export interface BulkParticipantSubmitInput {
+  names: string[];
+  organizationId: string;
+  confirmDuplicateNames: boolean;
+}
+
+export type BulkParticipantSubmitOutcome =
+  | { kind: "SUCCESS" }
+  | { kind: "DUPLICATES"; duplicates: BulkParticipantDuplicate[] }
+  | { kind: "FAILED" };
 
 function initialConfirmedOrganizationId(
   participant: ParticipantView | undefined,
@@ -68,9 +86,10 @@ export function ParticipantDialog({
   recentOrganizationIds?: readonly string[];
   onAdd: (input: ExistingParticipantConfirmation) => Promise<void>;
   onCreateAndAdd: (input: {
-    name: string;
+    names: string[];
     organizationId: string;
-  }) => Promise<void>;
+    confirmDuplicateNames: boolean;
+  }) => Promise<BulkParticipantSubmitOutcome>;
   allowExistingOrganizationChange?: boolean;
   initialParticipantId?: string | null;
   onClose: () => void;
@@ -84,7 +103,10 @@ export function ParticipantDialog({
   );
   const [mode, setMode] = useState<"EXISTING" | "NEW">("EXISTING");
   const [busy, setBusy] = useState<"EXISTING" | "NEW" | null>(null);
-  const [name, setName] = useState("");
+  const [rawNames, setRawNames] = useState("");
+  const names = useMemo(() => parseBulkParticipantNames(rawNames), [rawNames]);
+  const [duplicates, setDuplicates] = useState<BulkParticipantDuplicate[]>([]);
+  const [duplicateNamesConfirmed, setDuplicateNamesConfirmed] = useState(false);
   const [confirmedName, setConfirmedName] = useState(
     initialParticipant?.name ?? "",
   );
@@ -168,6 +190,8 @@ export function ParticipantDialog({
       )
     ) {
       setOrganizationId("");
+      setDuplicates([]);
+      setDuplicateNamesConfirmed(false);
     }
   }, [organizationId, organizations]);
 
@@ -207,7 +231,17 @@ export function ParticipantDialog({
     if (busy) return;
     setBusy("NEW");
     try {
-      await onCreateAndAdd({ name: name.trim(), organizationId });
+      const outcome = await onCreateAndAdd({
+        names,
+        organizationId,
+        confirmDuplicateNames: duplicateNamesConfirmed,
+      });
+      if (outcome.kind === "SUCCESS") {
+        onClose();
+      } else if (outcome.kind === "DUPLICATES") {
+        setDuplicates(outcome.duplicates);
+        setDuplicateNamesConfirmed(false);
+      }
     } catch {
       // The parent owns mutation feedback; keep this dialog and its input.
     } finally {
@@ -218,6 +252,22 @@ export function ParticipantDialog({
   const close = () => {
     if (busy === null) onClose();
   };
+  const overLimit = names.length > 30;
+  const hasInvalidName = names.some(
+    (participantName) => participantName.length > 100,
+  );
+
+  function changeRawNames(value: string) {
+    setRawNames(value);
+    setDuplicates([]);
+    setDuplicateNamesConfirmed(false);
+  }
+
+  function changeOrganization(nextOrganizationId: string) {
+    setOrganizationId(nextOrganizationId);
+    setDuplicates([]);
+    setDuplicateNamesConfirmed(false);
+  }
 
   return (
     <Dialog title="참가자 추가" hideDefaultCloseAction onClose={close}>
@@ -316,20 +366,22 @@ export function ParticipantDialog({
           </>
         ) : (
           <>
-            <TextInput
-              label="이름"
-              required
-              value={name}
-              disabled={busy !== null}
-              onChange={(event) => setName(event.currentTarget.value)}
-            />
             <OrganizationSelectCombobox
               label="소속 조직"
               organizations={organizations}
               recentOrganizationIds={recentOrganizationIds}
               value={organizationId}
               disabled={busy !== null}
-              onChange={setOrganizationId}
+              onChange={changeOrganization}
+            />
+            <BulkParticipantNameField
+              rawValue={rawNames}
+              names={names}
+              duplicates={duplicates}
+              duplicateNamesConfirmed={duplicateNamesConfirmed}
+              disabled={busy !== null}
+              onRawValueChange={changeRawNames}
+              onDuplicateNamesConfirmedChange={setDuplicateNamesConfirmed}
             />
             <div className="er-dialog-actions">
               <Button type="button" disabled={busy !== null} onClick={close}>
@@ -339,10 +391,19 @@ export function ParticipantDialog({
                 type="submit"
                 variant="primary"
                 loading={busy === "NEW"}
-                loadingText="참가자 만드는 중…"
-                disabled={busy !== null || !name.trim() || !organizationId}
+                loadingText={`${names.length}명 등록 중…`}
+                disabled={
+                  busy !== null ||
+                  !organizationId ||
+                  names.length === 0 ||
+                  overLimit ||
+                  hasInvalidName ||
+                  (duplicates.length > 0 && !duplicateNamesConfirmed)
+                }
               >
-                참가자 생성 후 추가
+                {names.length > 0
+                  ? `${names.length}명 명단에 추가`
+                  : "명단에 추가"}
               </Button>
             </div>
           </>
