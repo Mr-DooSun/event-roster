@@ -69,14 +69,70 @@
    artifact, 격리 config, export 시점 ledger 중 하나라도 없으면 이 유형의
    복원은 **BLOCKED**이며 운영 binding을 전환하지 않는다. 임의 SQL로 ledger를
    만들거나 현재 checkout에서 `0003`과 `0004`를 함께 적용하지 않는다.
-9. 운영 D1의 행을 수동으로 되돌리거나 역방향 migration으로 복구하지 않는다.
+9. **`0001`~`0004`가 적용되고 `0005` 적용 전인 export**는 운영 D1에
+   덮어쓰지 않고 새 격리 D1에 import한다. 운영 config를 재사용하지 말고
+   격리 D1의 `DB` binding과 `database_id`만 포함한 검토된 mode 0600
+   recovery config를 사용한다. import 직후 아래 ledger와 pending 목록을
+   배포 당시 기록과 대조한다.
+
+   ```bash
+   set -euo pipefail
+   test -n "${EVENT_ROSTER_RECOVERY_CONFIG:?격리 D1 recovery config가 필요합니다}"
+   test -n "${EVENT_ROSTER_PRE_0005_EXPORT:?pre-0005 export가 필요합니다}"
+   test -f "$EVENT_ROSTER_RECOVERY_CONFIG"
+   test ! -L "$EVENT_ROSTER_RECOVERY_CONFIG"
+   test -s "$EVENT_ROSTER_PRE_0005_EXPORT"
+   test -f "$EVENT_ROSTER_PRE_0005_EXPORT"
+   test ! -L "$EVENT_ROSTER_PRE_0005_EXPORT"
+   test -f "${EVENT_ROSTER_PRE_0005_EXPORT}.sha256"
+   test ! -L "${EVENT_ROSTER_PRE_0005_EXPORT}.sha256"
+   test "$(stat -c '%a' "$EVENT_ROSTER_RECOVERY_CONFIG" 2>/dev/null ||
+     stat -f '%Lp' "$EVENT_ROSTER_RECOVERY_CONFIG")" = "600"
+   test "$(stat -c '%a' "$EVENT_ROSTER_PRE_0005_EXPORT" 2>/dev/null ||
+     stat -f '%Lp' "$EVENT_ROSTER_PRE_0005_EXPORT")" = "600"
+   test "$(stat -c '%a' "${EVENT_ROSTER_PRE_0005_EXPORT}.sha256" 2>/dev/null ||
+     stat -f '%Lp' "${EVENT_ROSTER_PRE_0005_EXPORT}.sha256")" = "600"
+   shasum -a 256 -c "${EVENT_ROSTER_PRE_0005_EXPORT}.sha256"
+   corepack pnpm@10.28.1 --filter @event-roster/worker exec \
+     wrangler d1 execute DB --remote --config "$EVENT_ROSTER_RECOVERY_CONFIG" \
+     --file "$EVENT_ROSTER_PRE_0005_EXPORT"
+   corepack pnpm@10.28.1 --filter @event-roster/worker exec \
+     wrangler d1 execute DB --remote --config "$EVENT_ROSTER_RECOVERY_CONFIG" \
+     --command "SELECT id, name, applied_at FROM d1_migrations ORDER BY id"
+   corepack pnpm@10.28.1 --filter @event-roster/worker exec \
+     wrangler d1 migrations list DB --remote \
+     --config "$EVENT_ROSTER_RECOVERY_CONFIG"
+   ```
+
+   ledger에는 `0001`~`0004`가 정확히 적용되어 있고 pending에는
+   `0005_roster_participant_profiles.sql` 하나만 있어야 한다. 다르면
+   import가 완전하지 않거나 export 유형이 다른 것이므로 중단한다.
+
+   이어 [0005 전용 적용 gate](deployment.md#roster-participant-profiles-0005-gate)를
+   격리 D1에 그대로 적용한다. gate의 모든 D1 명령 대상은
+   `event-roster --remote`가 아니라
+   `DB --remote --config "$EVENT_ROSTER_RECOVERY_CONFIG"`로 바꾸고, 외부
+   mode 0700 디렉터리의 mode 0600 export/checksum, schema-first 사전 기록,
+   세 수량 일치, invalid 0, foreign-key 0행 조건을 동일하게 유지한다.
+   운영 config나 운영 database ID가 명령에 남아 있으면 실행하지 않는다.
+
+   gate 통과 후 격리 D1에만 연결된 local 또는 preview Worker로 health,
+   로그인, 전체 명단 조회, legacy profile 표시, 학생/담당교사 생성·수정,
+   정확한 role/grade 필터, 취소 행을 포함한 Excel 내보내기를 smoke test한다.
+   smoke가 모두 통과하고 사용자 승인과 binding 대조가 끝나기 전에는 운영
+   Worker binding을 전환하거나 배포하지 않는다.
+10. 운영 D1의 행을 수동으로 되돌리거나 역방향 migration으로 복구하지 않는다.
+   특히 production의 `participant_role_snapshot`,
+   `student_grade_snapshot` 열을 수동 삭제하지 않는다. pre-0005 export는
+   오직 격리 D1에 복원하고 검증하며, 실패한 운영 schema를 reverse migration
+   또는 `ALTER TABLE`로 되돌리지 않는다.
    격리 D1에서 `PRAGMA foreign_key_check`가 0행인지 확인하고,
    `user_organizations.assignment_role`별 수량 합계가 복원 전 배정 수와
    같은지 확인한다. 조직별 `PRIMARY_LEADER`가 둘 이상인 조회도 0행이어야
    한다.
-10. 조직, 계정, 전역 역할, 조직별 역할, 프로젝트 revision/status, 프로젝트 조직, 참가자, 명단, snapshot, 감사, session 폐기 상태를 표본 검증한다.
-11. 운영자·대표 조직장·추가 관리자·미배정 조직 담당자 표본으로 [월간 점검](monthly-check.md)의 권한 matrix를 검증한다.
-12. 사용자 승인과 점검 결과를 확보한 뒤에만 Worker의 D1 binding을 검증 D1 또는 승인된 복원 D1으로 전환하고 배포한다.
+11. 조직, 계정, 전역 역할, 조직별 역할, 프로젝트 revision/status, 프로젝트 조직, 참가자, 명단, snapshot, 감사, session 폐기 상태를 표본 검증한다.
+12. 운영자·대표 조직장·추가 관리자·미배정 조직 담당자 표본으로 [월간 점검](monthly-check.md)의 권한 matrix를 검증한다.
+13. 사용자 승인과 점검 결과를 확보한 뒤에만 Worker의 D1 binding을 검증 D1 또는 승인된 복원 D1으로 전환하고 배포한다.
 
 `0003` 전 export 복원 후 사용하는 검증 조회:
 

@@ -1,10 +1,10 @@
 import {
-  ParticipantRoleSchema,
   type ParticipantRole,
+  ParticipantRoleSchema,
   type RosterSource,
   type RosterStatus,
-  StudentGradeSchema,
   type StudentGrade,
+  StudentGradeSchema,
 } from "@event-roster/contracts";
 
 export interface RosterRecord {

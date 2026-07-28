@@ -1,5 +1,122 @@
-import { expect, test } from "@playwright/test";
+import { expect, request, test } from "@playwright/test";
 import { fixture, login } from "./support";
+
+test("participant profile rows support exact editing and filtering", async ({
+  page,
+}) => {
+  const data = fixture();
+  const api = await request.newContext({
+    baseURL: data.baseUrl,
+    ignoreHTTPSErrors: true,
+    extraHTTPHeaders: { Origin: data.baseUrl },
+  });
+  const loginResponse = await api.post("/api/v1/auth/login", {
+    data: {
+      loginId: data.operator.loginId,
+      password: data.operator.password,
+    },
+  });
+  expect(loginResponse.ok()).toBe(true);
+  const auth = (await loginResponse.json()) as {
+    accessToken: string;
+    csrfToken: string;
+  };
+  const headers = {
+    Authorization: `Bearer ${auth.accessToken}`,
+    "X-ER-CSRF": auth.csrfToken,
+  };
+  const created = await api.post("/api/v1/projects", {
+    headers,
+    data: { name: "E2E 참가자 프로필 프로젝트" },
+  });
+  expect(created.ok()).toBe(true);
+  const project = (await created.json()) as { id: string; revision: number };
+  const linked = await api.post(
+    `/api/v1/projects/${project.id}/organizations`,
+    {
+      headers,
+      data: {
+        organizationId: data.organizationId,
+        expectedProjectRevision: project.revision,
+      },
+    },
+  );
+  expect(linked.ok()).toBe(true);
+  await api.dispose();
+
+  await login(page, data.operator.loginId, data.operator.password);
+  await page.goto(`/projects/${project.id}`);
+  await page.getByRole("tab", { name: "참가 명단" }).click();
+  await page.getByRole("button", { name: "참가자 추가" }).click();
+  await page.getByRole("button", { name: "새 참가자" }).click();
+  await page
+    .getByRole("dialog", { name: "참가자 추가" })
+    .getByRole("button", { name: "참가자 추가" })
+    .click();
+  await page
+    .getByRole("textbox", { name: "1번 이름" })
+    .fill("E2E 프로필 중학생");
+  await page
+    .getByRole("combobox", { name: "1번 학년" })
+    .selectOption({ label: "중2" });
+  await page
+    .getByRole("dialog", { name: "참가자 추가" })
+    .getByRole("button", { name: "참가자 추가" })
+    .click();
+  await page
+    .getByRole("textbox", { name: "2번 이름" })
+    .fill("E2E 프로필 담당교사");
+  await page
+    .getByRole("combobox", { name: "2번 참가자 구분" })
+    .selectOption({ label: "담당교사" });
+  await expect(page.getByRole("combobox", { name: "2번 학년" })).toBeDisabled();
+  await page.getByRole("button", { name: "2명 명단에 추가" }).click();
+
+  const studentRow = page.getByRole("row", { name: /E2E 프로필 중학생/ });
+  const teacherRow = page.getByRole("row", { name: /E2E 프로필 담당교사/ });
+  await expect(
+    studentRow.getByRole("cell", { name: "학생", exact: true }),
+  ).toBeVisible();
+  await expect(
+    studentRow.getByRole("cell", { name: "중2", exact: true }),
+  ).toBeVisible();
+  await expect(
+    teacherRow.getByRole("cell", { name: "담당교사", exact: true }),
+  ).toBeVisible();
+  await expect(
+    teacherRow.getByRole("cell", { name: "-", exact: true }),
+  ).toBeVisible();
+
+  await studentRow.getByRole("button", { name: "정보 수정" }).click();
+  await page
+    .getByRole("dialog", { name: "참가자 정보 수정" })
+    .getByRole("combobox", { name: "학년" })
+    .selectOption({ label: "중3" });
+  await page.getByRole("button", { name: "정보 저장" }).click();
+  await expect(
+    studentRow.getByRole("cell", { name: "중3", exact: true }),
+  ).toBeVisible();
+
+  await teacherRow
+    .getByRole("button", { name: "E2E 프로필 담당교사 취소" })
+    .click();
+  await expect(
+    teacherRow.getByRole("cell", { name: "취소", exact: true }),
+  ).toBeVisible();
+
+  await page
+    .getByRole("combobox", { name: "참가자 구분 필터" })
+    .selectOption("TEACHER");
+  await expect(studentRow).toBeHidden();
+  await expect(teacherRow).toBeVisible();
+
+  await page
+    .getByRole("combobox", { name: "참가자 구분 필터" })
+    .selectOption("ALL");
+  await page.getByRole("combobox", { name: "학년 필터" }).selectOption("M3");
+  await expect(studentRow).toBeVisible();
+  await expect(teacherRow).toBeHidden();
+});
 
 test("operator moves a pre-registration project in progress and updates its roster summary", async ({
   page,
@@ -42,7 +159,22 @@ test("operator moves a pre-registration project in progress and updates its rost
   await page.getByRole("tab", { name: "참가 명단" }).click();
   await page.getByRole("button", { name: "참가자 추가" }).click();
   await page.getByRole("button", { name: "새 참가자" }).click();
-  await page.getByLabel("이름").fill("E2E 일괄 참가자 A\nE2E 일괄 참가자 B");
+  await page
+    .getByRole("dialog", { name: "참가자 추가" })
+    .getByRole("button", { name: "참가자 추가" })
+    .click();
+  await page
+    .getByRole("textbox", { name: "1번 이름" })
+    .fill("E2E 일괄 참가자 A");
+  await page.getByRole("combobox", { name: "1번 학년" }).selectOption("M1");
+  await page
+    .getByRole("dialog", { name: "참가자 추가" })
+    .getByRole("button", { name: "참가자 추가" })
+    .click();
+  await page
+    .getByRole("textbox", { name: "2번 이름" })
+    .fill("E2E 일괄 참가자 B");
+  await page.getByRole("combobox", { name: "2번 학년" }).selectOption("M1");
   await expect(page.getByText("등록 예정 2명 / 최대 30명")).toBeVisible();
   await page.getByRole("button", { name: "2명 명단에 추가" }).click();
   await expect(
@@ -55,7 +187,18 @@ test("operator moves a pre-registration project in progress and updates its rost
 
   await page.getByRole("button", { name: "참가자 추가" }).click();
   await page.getByRole("button", { name: "새 참가자" }).click();
-  await page.getByLabel("이름").fill("E2E 동명이인\nE2E 동명이인");
+  await page
+    .getByRole("dialog", { name: "참가자 추가" })
+    .getByRole("button", { name: "참가자 추가" })
+    .click();
+  await page.getByRole("textbox", { name: "1번 이름" }).fill("E2E 동명이인");
+  await page.getByRole("combobox", { name: "1번 학년" }).selectOption("M1");
+  await page
+    .getByRole("dialog", { name: "참가자 추가" })
+    .getByRole("button", { name: "참가자 추가" })
+    .click();
+  await page.getByRole("textbox", { name: "2번 이름" }).fill("E2E 동명이인");
+  await page.getByRole("combobox", { name: "2번 학년" }).selectOption("M1");
   await page.getByRole("button", { name: "2명 명단에 추가" }).click();
   await expect(
     page.getByText("입력 목록에 같은 이름이 있습니다.").first(),
@@ -75,7 +218,12 @@ test("operator moves a pre-registration project in progress and updates its rost
   await expect(page.getByRole("button", { name: "참가자 추가" })).toBeVisible();
   await page.getByRole("button", { name: "참가자 추가" }).click();
   await page.getByRole("button", { name: "새 참가자" }).click();
-  await page.getByLabel("이름").fill("E2E 진행 참가자");
+  await page
+    .getByRole("dialog", { name: "참가자 추가" })
+    .getByRole("button", { name: "참가자 추가" })
+    .click();
+  await page.getByRole("textbox", { name: "1번 이름" }).fill("E2E 진행 참가자");
+  await page.getByRole("combobox", { name: "1번 학년" }).selectOption("M1");
   await page.getByRole("button", { name: "1명 명단에 추가" }).click();
   await expect(
     page.getByRole("cell", { name: "E2E 진행 참가자", exact: true }),
@@ -102,6 +250,10 @@ test("operator moves a pre-registration project in progress and updates its rost
   await page.setViewportSize({ width: 900, height: 480 });
   await page.getByRole("button", { name: "참가자 추가" }).click();
   await page.getByRole("button", { name: "새 참가자" }).click();
+  await page
+    .getByRole("dialog", { name: "참가자 추가" })
+    .getByRole("button", { name: "참가자 추가" })
+    .click();
   const organization = page.getByRole("combobox", { name: "소속 조직" });
   await organization.fill("황룡사");
   await expect(page.getByRole("listbox")).toBeVisible();
@@ -128,7 +280,10 @@ test("operator moves a pre-registration project in progress and updates its rost
     Math.abs(geometry.top - (anchorGeometry.bottom + 4)),
   ).toBeLessThanOrEqual(1);
   await page.getByRole("option", { name: "황룡사" }).click();
-  await page.getByLabel("이름").fill("최근 조직 참가자");
+  await page
+    .getByRole("textbox", { name: "1번 이름" })
+    .fill("최근 조직 참가자");
+  await page.getByRole("combobox", { name: "1번 학년" }).selectOption("M1");
   await page.getByRole("button", { name: "1명 명단에 추가" }).click();
   await expect(
     page.getByRole("cell", { name: "최근 조직 참가자", exact: true }),

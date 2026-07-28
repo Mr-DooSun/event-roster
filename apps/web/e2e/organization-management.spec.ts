@@ -175,7 +175,12 @@ test("operator delegates pre-registration roster entry to an organization leader
   ).toHaveCount(0);
   await page.getByRole("button", { name: "참가자 추가" }).click();
   await page.getByRole("button", { name: "새 참가자" }).click();
-  await page.getByLabel("이름").fill("E2E 조직 참가자");
+  await page
+    .getByRole("dialog", { name: "참가자 추가" })
+    .getByRole("button", { name: "참가자 추가" })
+    .click();
+  await page.getByRole("textbox", { name: "1번 이름" }).fill("E2E 조직 참가자");
+  await page.getByRole("combobox", { name: "1번 학년" }).selectOption("M1");
   await page.getByRole("button", { name: "1명 명단에 추가" }).click();
   await expect(
     page.getByText("E2E 조직 참가자", { exact: true }),

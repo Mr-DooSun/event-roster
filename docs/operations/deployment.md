@@ -588,8 +588,160 @@ corepack pnpm@10.28.1 --filter @event-roster/worker exec \
 ```
 
 `0004`가 pending인 경우에는 위 전용 block만 실행한다. 아래 일반 block은
-`migrations list`에 `0004`가 없고, 표시된 모든 pending migration에 각각
-승인된 검증 절차가 있을 때만 실행한다.
+`migrations list`에 `0004`와 `0005`가 없고, 표시된 모든 pending migration에
+각각 승인된 검증 절차가 있을 때만 실행한다.
+
+`0005_roster_participant_profiles.sql`이 목록에 있으면 `0001`~`0004`와 다른
+pending migration은 모두 없어야 한다. 정확히 `0005` 하나만 pending인 기존
+운영 D1은 아래 7.3.2 전용 gate로 이동한다. `0005`와 다른 migration이 함께
+있거나, `0005` 전용 백업·사전 기록을 완료하지 못한 경우 migration과 Worker
+배포를 모두 중단한다.
+
+<a id="roster-participant-profiles-0005-gate"></a>
+
+### 7.3.2 `0005_roster_participant_profiles.sql` 적용 게이트
+
+이 gate는 기존 운영 D1에만 사용한다. 먼저 pending 출력을 접근 제한된 배포
+기록에 저장하고, migration 파일명이 정확히 하나이며 그 값이
+`0005_roster_participant_profiles.sql`인지 확인한다.
+
+```bash
+set -euo pipefail
+EVENT_ROSTER_0005_PENDING="$(
+  corepack pnpm@10.28.1 --filter @event-roster/worker exec \
+    wrangler d1 migrations list event-roster --remote
+)"
+printf '%s\n' "$EVENT_ROSTER_0005_PENDING"
+test "$(printf '%s\n' "$EVENT_ROSTER_0005_PENDING" |
+  grep -c '0005_roster_participant_profiles.sql')" -eq 1
+test "$(printf '%s\n' "$EVENT_ROSTER_0005_PENDING" |
+  grep -Ec '[0-9]{4}_[[:alnum:]_]+\.sql')" -eq 1
+```
+
+출력 형식 변경 등으로 위 검사가 확실하지 않으면 통과로 간주하지 않는다.
+Cloudflare Dashboard와 migration ledger를 함께 확인하고 gate를 중단한다.
+
+백업은 저장소와 모든 linked worktree 밖의, 운영자가 미리 만든 실행별 전용
+디렉터리만 사용한다. 그 디렉터리는 symbolic link가 아닌 절대 경로이며 mode
+0700이어야 한다. 아래 명령은 export와 checksum이 이미 있거나 symbolic
+link이면 실패하며, 두 파일을 mode 0600으로 고정하고 checksum을 즉시
+검증한다.
+
+```bash
+set -euo pipefail
+umask 077
+test -n "${EVENT_ROSTER_0005_BACKUP_DIR:?외부 0005 백업 디렉터리가 필요합니다}"
+case "$EVENT_ROSTER_0005_BACKUP_DIR" in
+  /*) ;;
+  *) echo "백업 디렉터리는 절대 경로여야 합니다." >&2; exit 1 ;;
+esac
+test -d "$EVENT_ROSTER_0005_BACKUP_DIR"
+test ! -L "$EVENT_ROSTER_0005_BACKUP_DIR"
+EVENT_ROSTER_0005_BACKUP_DIR="$(
+  cd "$EVENT_ROSTER_0005_BACKUP_DIR"
+  pwd -P
+)"
+EVENT_ROSTER_0005_BACKUP_MODE="$(
+  stat -c '%a' "$EVENT_ROSTER_0005_BACKUP_DIR" 2>/dev/null ||
+    stat -f '%Lp' "$EVENT_ROSTER_0005_BACKUP_DIR"
+)"
+test "$EVENT_ROSTER_0005_BACKUP_MODE" = "700"
+
+EVENT_ROSTER_0005_WORKTREES="$(
+  git -c core.quotePath=false worktree list --porcelain
+)"
+while IFS= read -r EVENT_ROSTER_0005_WORKTREE_LINE; do
+  case "$EVENT_ROSTER_0005_WORKTREE_LINE" in
+    "worktree "*)
+      EVENT_ROSTER_0005_WORKTREE="$(
+        cd "${EVENT_ROSTER_0005_WORKTREE_LINE#worktree }"
+        pwd -P
+      )"
+      case "${EVENT_ROSTER_0005_BACKUP_DIR}/" in
+        "${EVENT_ROSTER_0005_WORKTREE}/"*)
+          echo "0005 백업은 모든 Git worktree 밖에 있어야 합니다." >&2
+          exit 1
+          ;;
+      esac
+      ;;
+  esac
+done <<EOF
+$EVENT_ROSTER_0005_WORKTREES
+EOF
+
+EVENT_ROSTER_0005_EXPORT="${EVENT_ROSTER_0005_BACKUP_DIR}/event-roster-pre-0005.sql"
+EVENT_ROSTER_0005_CHECKSUM="${EVENT_ROSTER_0005_EXPORT}.sha256"
+test ! -e "$EVENT_ROSTER_0005_EXPORT"
+test ! -L "$EVENT_ROSTER_0005_EXPORT"
+test ! -e "$EVENT_ROSTER_0005_CHECKSUM"
+test ! -L "$EVENT_ROSTER_0005_CHECKSUM"
+corepack pnpm@10.28.1 --filter @event-roster/worker exec \
+  wrangler d1 export event-roster --remote \
+  --output "$EVENT_ROSTER_0005_EXPORT"
+test -s "$EVENT_ROSTER_0005_EXPORT"
+chmod 600 "$EVENT_ROSTER_0005_EXPORT"
+(set -C; shasum -a 256 "$EVENT_ROSTER_0005_EXPORT" \
+  > "$EVENT_ROSTER_0005_CHECKSUM")
+chmod 600 "$EVENT_ROSTER_0005_CHECKSUM"
+test "$(stat -c '%a' "$EVENT_ROSTER_0005_EXPORT" 2>/dev/null ||
+  stat -f '%Lp' "$EVENT_ROSTER_0005_EXPORT")" = "600"
+test "$(stat -c '%a' "$EVENT_ROSTER_0005_CHECKSUM" 2>/dev/null ||
+  stat -f '%Lp' "$EVENT_ROSTER_0005_CHECKSUM")" = "600"
+shasum -a 256 -c "$EVENT_ROSTER_0005_CHECKSUM"
+```
+
+migration 전에는 아래 순서를 바꾸지 않는다. 먼저 현재 schema를 기록하고
+`participant_role_snapshot`, `student_grade_snapshot` 열이 아직 없음을
+`PRAGMA table_info` 결과로 확인한다. 그 확인 전에는 두 열을 참조하는 쿼리를
+실행하지 않는다. 그 다음 roster 수를 기록한다.
+
+```bash
+corepack pnpm@10.28.1 --filter @event-roster/worker exec \
+  wrangler d1 execute event-roster --remote --command \
+  "PRAGMA table_info(project_roster_entries)"
+corepack pnpm@10.28.1 --filter @event-roster/worker exec \
+  wrangler d1 execute event-roster --remote --command \
+  "SELECT COUNT(*) AS roster_count FROM project_roster_entries"
+```
+
+schema, 사전 `roster_count`, export 절대 경로, checksum을 배포 기록에
+남긴 뒤에만 migration을 적용한다.
+
+```bash
+corepack pnpm@10.28.1 --filter @event-roster/worker exec \
+  wrangler d1 migrations apply event-roster --remote
+
+corepack pnpm@10.28.1 --filter @event-roster/worker exec \
+  wrangler d1 execute event-roster --remote --command \
+  "SELECT COUNT(*) AS roster_count FROM project_roster_entries"
+corepack pnpm@10.28.1 --filter @event-roster/worker exec \
+  wrangler d1 execute event-roster --remote --command \
+  "SELECT COUNT(*) AS legacy_profile_count
+   FROM project_roster_entries
+   WHERE participant_role_snapshot IS NULL
+     AND student_grade_snapshot IS NULL"
+corepack pnpm@10.28.1 --filter @event-roster/worker exec \
+  wrangler d1 execute event-roster --remote --command \
+  "SELECT COUNT(*) AS invalid_profile_count
+   FROM project_roster_entries
+   WHERE NOT (
+     (participant_role_snapshot IS NULL AND student_grade_snapshot IS NULL)
+     OR (participant_role_snapshot = 'STUDENT'
+         AND student_grade_snapshot IN ('M1','M2','M3','H1','H2','H3'))
+     OR (participant_role_snapshot = 'TEACHER'
+         AND student_grade_snapshot IS NULL)
+   )"
+corepack pnpm@10.28.1 --filter @event-roster/worker exec \
+  wrangler d1 execute event-roster --remote --command \
+  "PRAGMA foreign_key_check"
+```
+
+사전 `roster_count`, 사후 `roster_count`, 사후 `legacy_profile_count` 세 값은
+모두 같아야 한다. `invalid_profile_count`는 0이어야 하고,
+`PRAGMA foreign_key_check`는 행을 반환하지 않아야 한다. pending 목록에서
+`0005`가 사라지고 ledger에 적용 기록이 생겼는지도 확인한다. 이 조건 중
+하나라도 충족하지 않으면 성공으로 기록하거나 Worker를 배포하지 않는다.
+[복구 절차](recovery.md)의 pre-0005 export 격리 복원으로 이동한다.
 
 ```bash
 set -euo pipefail

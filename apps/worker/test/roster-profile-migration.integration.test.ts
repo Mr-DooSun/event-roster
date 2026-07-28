@@ -119,8 +119,12 @@ it("preserves legacy roster profiles and validates new participant profile snaps
       .run();
   }
 
-  await expect(insertProfile("student-ok", "STUDENT", "M1")).resolves.toBeDefined();
-  await expect(insertProfile("teacher-ok", "TEACHER", null)).resolves.toBeDefined();
+  await expect(
+    insertProfile("student-ok", "STUDENT", "M1"),
+  ).resolves.toBeDefined();
+  await expect(
+    insertProfile("teacher-ok", "TEACHER", null),
+  ).resolves.toBeDefined();
   await expect(insertProfile("student-bad", "STUDENT", null)).rejects.toThrow(
     /INVALID_ROSTER_PROFILE/,
   );
@@ -144,7 +148,9 @@ it("preserves legacy roster profiles and validates new participant profile snaps
       grade: null,
     }),
   ]);
-  await expect(listRoster(env.MIGRATION_DB, "profile-project")).resolves.toEqual([
+  await expect(
+    listRoster(env.MIGRATION_DB, "profile-project"),
+  ).resolves.toEqual([
     expect.objectContaining({ id: "student-ok", role: "STUDENT", grade: "M1" }),
     expect.objectContaining({ id: "teacher-ok", role: "TEACHER", grade: null }),
   ]);
