@@ -66,6 +66,10 @@ export async function addRoster(
   fixture: RosterFixture,
   participantId: string,
   expectedRevision = fixture.project.revision,
+  profile: { role: "STUDENT" | "TEACHER"; grade: "M1" | null } = {
+    role: "STUDENT",
+    grade: "M1",
+  },
 ) {
   const participant = await env.DB.prepare(
     "SELECT name, organization_id, revision FROM participants WHERE id = ?",
@@ -83,6 +87,7 @@ export async function addRoster(
         confirmedParticipant: {
           name: participant.name,
           organizationId: participant.organization_id,
+          ...profile,
         },
         expectedParticipantRevision: participant.revision,
         expectedRevision,

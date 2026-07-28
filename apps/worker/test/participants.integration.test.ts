@@ -33,7 +33,132 @@ it("keeps global participants read-only", async () => {
   expect(update.status).toBe(404);
 });
 
-it("updates the participant master organization without rewriting past snapshots", async () => {
+it("returns the newest roster profile as a suggestion without writing the master", async () => {
+  const fixture = await setupPreRegistration();
+  const newestProject = await seedProject(fixture.operator, {
+    name: "최신 추천 프로젝트",
+  });
+  const now = "2026-07-28T00:00:00.000Z";
+  await env.DB.batch([
+    env.DB.prepare(
+      `INSERT INTO project_roster_entries
+       (id, project_id, participant_id, organization_id,
+        participant_name_snapshot, organization_name_snapshot,
+        participant_role_snapshot, student_grade_snapshot, source, status,
+        was_expected_at_start, revision, created_by, updated_by, created_at, updated_at)
+       VALUES ('suggestion-old', ?, ?, 'org-1', '첫 참가자', '1팀',
+               'STUDENT', 'M2', 'PRE_REGISTRATION', 'ACTIVE',
+               0, 0, ?, ?, '2026-07-27T00:00:00.000Z', '2026-07-27T00:00:00.000Z')`,
+    ).bind(
+      newestProject.id,
+      fixture.firstParticipant.id,
+      fixture.operator.userId,
+      fixture.operator.userId,
+    ),
+    env.DB.prepare(
+      `INSERT INTO project_roster_entries
+       (id, project_id, participant_id, organization_id,
+        participant_name_snapshot, organization_name_snapshot,
+        participant_role_snapshot, student_grade_snapshot, source, status,
+        was_expected_at_start, revision, created_by, updated_by, created_at, updated_at)
+       VALUES ('suggestion-new', ?, ?, 'org-1', '첫 참가자', '1팀',
+               'TEACHER', NULL, 'PRE_REGISTRATION', 'ACTIVE',
+               0, 0, ?, ?, ?, ?)`,
+    ).bind(
+      fixture.project.id,
+      fixture.firstParticipant.id,
+      fixture.operator.userId,
+      fixture.operator.userId,
+      now,
+      now,
+    ),
+  ]);
+
+  const response = await authedRequest(
+    fixture.operator,
+    "/api/v1/participants",
+  );
+  expect(response.status).toBe(200);
+  const participants =
+    await response.json<
+      Array<{
+        participantId: string;
+        suggestedRole: string | null;
+        suggestedGrade: string | null;
+      }>
+    >();
+  expect(
+    participants.find((item) => item.participantId === "P-FIRST"),
+  ).toMatchObject({ suggestedRole: "TEACHER", suggestedGrade: null });
+  expect(
+    participants.find((item) => item.participantId === "P-SECOND"),
+  ).toMatchObject({ suggestedRole: null, suggestedGrade: null });
+  expect(
+    await env.DB.prepare(
+      `SELECT COUNT(*) AS count FROM participants
+       WHERE id = ? AND name = '첫 참가자' AND revision = 0`,
+    )
+      .bind(fixture.firstParticipant.id)
+      .first<{ count: number }>(),
+  ).toEqual({ count: 1 });
+});
+
+it("never suggests a roster profile outside an organization manager scope", async () => {
+  const fixture = await setupPreRegistration();
+  const manager = await seedManager("org-1");
+  await seedOrganization("org-2", "2팀");
+  const outOfScopeProject = await seedProject(fixture.operator, {
+    name: "범위 밖 추천 프로젝트",
+  });
+  await env.DB.batch([
+    env.DB.prepare(
+      `INSERT INTO project_roster_entries
+       (id, project_id, participant_id, organization_id,
+        participant_name_snapshot, organization_name_snapshot,
+        participant_role_snapshot, student_grade_snapshot, source, status,
+        was_expected_at_start, revision, created_by, updated_by, created_at, updated_at)
+       VALUES ('manager-suggestion-in-scope', ?, ?, 'org-1', '첫 참가자', '1팀',
+               'STUDENT', 'M3', 'PRE_REGISTRATION', 'ACTIVE',
+               0, 0, ?, ?, '2026-07-27T00:00:00.000Z', '2026-07-27T00:00:00.000Z')`,
+    ).bind(
+      outOfScopeProject.id,
+      fixture.firstParticipant.id,
+      fixture.operator.userId,
+      fixture.operator.userId,
+    ),
+    env.DB.prepare(
+      `INSERT INTO project_roster_entries
+       (id, project_id, participant_id, organization_id,
+        participant_name_snapshot, organization_name_snapshot,
+        participant_role_snapshot, student_grade_snapshot, source, status,
+        was_expected_at_start, revision, created_by, updated_by, created_at, updated_at)
+       VALUES ('manager-suggestion-out-of-scope', ?, ?, 'org-2', '첫 참가자', '2팀',
+               'TEACHER', NULL, 'PRE_REGISTRATION', 'ACTIVE',
+               0, 0, ?, ?, '2026-07-28T00:00:00.000Z', '2026-07-28T00:00:00.000Z')`,
+    ).bind(
+      fixture.project.id,
+      fixture.firstParticipant.id,
+      fixture.operator.userId,
+      fixture.operator.userId,
+    ),
+  ]);
+
+  const response = await authedRequest(manager, "/api/v1/participants");
+  expect(response.status).toBe(200);
+  const participants =
+    await response.json<
+      Array<{
+        participantId: string;
+        suggestedRole: string | null;
+        suggestedGrade: string | null;
+      }>
+    >();
+  expect(
+    participants.find((item) => item.participantId === "P-FIRST"),
+  ).toMatchObject({ suggestedRole: "STUDENT", suggestedGrade: "M3" });
+});
+
+it("updates only the current project snapshot and replaces its legacy profile", async () => {
   const fixture = await setupPreRegistration();
   const secondOrganization = await seedOrganization("org-2", "2팀");
   const otherProject = await seedProject(fixture.operator, {
@@ -84,46 +209,89 @@ it("updates the participant master organization without rewriting past snapshots
     {
       method: "PATCH",
       body: JSON.stringify({
-        name: "첫 참가자",
+        name: "수정 참가자",
         organizationId: secondOrganization.id,
+        role: "STUDENT",
+        grade: "H2",
         expectedRevision: fixture.firstParticipant.revision,
         expectedProjectRevision: fixtureProjectRevision,
       }),
     },
   );
   expect(response.status).toBe(200);
+  const updatedBody = await response.json<{
+    name: string;
+    organizationId: string;
+    role: string | null;
+    grade: string | null;
+    suggestedRole?: string | null;
+    suggestedGrade?: string | null;
+  }>();
+  expect(updatedBody).toMatchObject({
+    name: "수정 참가자",
+    organizationId: secondOrganization.id,
+    role: "STUDENT",
+    grade: "H2",
+  });
+  expect(updatedBody).not.toHaveProperty("suggestedRole");
+  expect(updatedBody).not.toHaveProperty("suggestedGrade");
   const master = await env.DB.prepare(
-    "SELECT organization_id FROM participants WHERE id=?",
+    "SELECT name, organization_id FROM participants WHERE id=?",
   )
     .bind(fixture.firstParticipant.id)
-    .first<{ organization_id: string }>();
+    .first<{ name: string; organization_id: string }>();
   const snapshots = (
     await env.DB.prepare(
-      `SELECT project_id, organization_id, organization_name_snapshot
+      `SELECT project_id, participant_name_snapshot, organization_id,
+              organization_name_snapshot, participant_role_snapshot,
+              student_grade_snapshot
        FROM project_roster_entries WHERE participant_id=? ORDER BY project_id`,
     )
       .bind(fixture.firstParticipant.id)
       .all<{
         project_id: string;
+        participant_name_snapshot: string;
         organization_id: string;
         organization_name_snapshot: string;
+        participant_role_snapshot: string | null;
+        student_grade_snapshot: string | null;
       }>()
   ).results;
-  expect(master?.organization_id).toBe(secondOrganization.id);
+  expect(master).toEqual({
+    name: "수정 참가자",
+    organization_id: secondOrganization.id,
+  });
   expect(snapshots).toEqual(
     [
       {
         project_id: otherProject.id,
+        participant_name_snapshot: "첫 참가자",
         organization_id: "org-1",
         organization_name_snapshot: "1팀",
+        participant_role_snapshot: null,
+        student_grade_snapshot: null,
       },
       {
         project_id: fixture.project.id,
-        organization_id: "org-1",
-        organization_name_snapshot: "1팀",
+        participant_name_snapshot: "수정 참가자",
+        organization_id: secondOrganization.id,
+        organization_name_snapshot: "2팀",
+        participant_role_snapshot: "STUDENT",
+        student_grade_snapshot: "H2",
       },
     ].sort((left, right) => left.project_id.localeCompare(right.project_id)),
   );
+  const audit = await env.DB.prepare(
+    `SELECT details_json FROM audit_logs
+     WHERE action = 'PARTICIPANT_UPDATED' AND entity_id = ?
+     ORDER BY occurred_at DESC, id DESC LIMIT 1`,
+  )
+    .bind(fixture.firstParticipant.id)
+    .first<{ details_json: string }>();
+  expect(JSON.parse(audit?.details_json ?? "{}")).toMatchObject({
+    before: { role: null, grade: null },
+    after: { role: "STUDENT", grade: "H2" },
+  });
 });
 
 it.each(["PRIMARY_LEADER", "MANAGER"] as const)(

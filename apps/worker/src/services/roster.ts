@@ -1,7 +1,13 @@
 import type {
+  ParticipantRole,
   ProjectStatus,
   RosterSource,
   RosterStatus,
+  StudentGrade,
+} from "@event-roster/contracts";
+import {
+  ParticipantRoleSchema,
+  StudentGradeSchema,
 } from "@event-roster/contracts";
 import {
   DomainError,
@@ -51,7 +57,12 @@ export async function addRosterEntry(
   projectId: string,
   participantId: string,
   expectedRevision: number,
-  confirmedParticipant: { name: string; organizationId: string },
+  confirmedParticipant: {
+    name: string;
+    organizationId: string;
+    role: ParticipantRole;
+    grade: StudentGrade | null;
+  },
   expectedParticipantRevision: number,
   now = new Date(),
 ) {
@@ -157,13 +168,22 @@ export async function addRosterEntry(
     ? [
         env.DB.prepare(
           `UPDATE project_roster_entries
-           SET status = 'ACTIVE', source = ?, revision = revision + 1,
+           SET participant_role_snapshot = ?, student_grade_snapshot = ?,
+               status = 'ACTIVE', source = ?, revision = revision + 1,
                updated_by = ?, updated_at = ?
            WHERE id = ?
            RETURNING id, project_id, participant_id, organization_id,
              participant_name_snapshot, organization_name_snapshot, source, status,
+             participant_role_snapshot, student_grade_snapshot,
              was_expected_at_start, revision`,
-        ).bind(nextSource, actor.session.user.id, timestamp, existing.id),
+        ).bind(
+          confirmedParticipant.role,
+          confirmedParticipant.grade,
+          nextSource,
+          actor.session.user.id,
+          timestamp,
+          existing.id,
+        ),
       ]
     : [
         env.DB.prepare(
@@ -185,20 +205,24 @@ export async function addRosterEntry(
         env.DB.prepare(
           `INSERT INTO project_roster_entries
            (id, project_id, participant_id, organization_id,
-            participant_name_snapshot, organization_name_snapshot, source, status,
+            participant_name_snapshot, organization_name_snapshot,
+            participant_role_snapshot, student_grade_snapshot, source, status,
             was_expected_at_start, revision, created_by, updated_by, created_at, updated_at)
-           SELECT ?, ?, p.id, ?, ?, o.name, ?, 'ACTIVE', 0, 0,
+           SELECT ?, ?, p.id, ?, ?, o.name, ?, ?, ?, 'ACTIVE', 0, 0,
                   ?, ?, ?, ?
            FROM participants p JOIN organizations o ON o.id = ?
            WHERE p.id = ?
            RETURNING id, project_id, participant_id, organization_id,
              participant_name_snapshot, organization_name_snapshot, source, status,
+             participant_role_snapshot, student_grade_snapshot,
              was_expected_at_start, revision`,
         ).bind(
           id,
           projectId,
           confirmedParticipant.organizationId,
           confirmedParticipant.name,
+          confirmedParticipant.role,
+          confirmedParticipant.grade,
           source,
           actor.session.user.id,
           actor.session.user.id,
@@ -732,6 +756,10 @@ function mapReturnedRoster(
     typeof row.organization_id !== "string" ||
     typeof row.participant_name_snapshot !== "string" ||
     typeof row.organization_name_snapshot !== "string" ||
+    (row.participant_role_snapshot !== null &&
+      typeof row.participant_role_snapshot !== "string") ||
+    (row.student_grade_snapshot !== null &&
+      typeof row.student_grade_snapshot !== "string") ||
     (row.source !== "PRE_REGISTRATION" && row.source !== "IN_PROGRESS") ||
     (row.status !== "ACTIVE" && row.status !== "CANCELLED") ||
     typeof row.was_expected_at_start !== "number" ||
@@ -749,8 +777,14 @@ function mapReturnedRoster(
     organizationName: row.organization_name_snapshot,
     source: row.source,
     status: row.status,
-    role: null,
-    grade: null,
+    role:
+      row.participant_role_snapshot === null
+        ? null
+        : ParticipantRoleSchema.parse(row.participant_role_snapshot),
+    grade:
+      row.student_grade_snapshot === null
+        ? null
+        : StudentGradeSchema.parse(row.student_grade_snapshot),
     wasExpectedAtStart: row.was_expected_at_start === 1,
     revision: row.revision,
     updatedAt,

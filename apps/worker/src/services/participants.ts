@@ -1,4 +1,11 @@
-import type { ProjectStatus, RosterSource } from "@event-roster/contracts";
+import {
+  type ParticipantRole,
+  ParticipantRoleSchema,
+  type ProjectStatus,
+  type RosterSource,
+  type StudentGrade,
+  StudentGradeSchema,
+} from "@event-roster/contracts";
 import { DomainError, toKstDate } from "@event-roster/domain";
 import { runGuardedAtomic } from "../db/atomic";
 import { findProjectOrganization } from "../db/project-organizations";
@@ -18,29 +25,63 @@ export interface ParticipantRecord {
 
 export async function getParticipants(env: Env, actor: Actor) {
   const manager = actor.session.user.role === "ORGANIZATION_MANAGER";
+  const suggestionScope = manager
+    ? ` AND EXISTS (
+           SELECT 1 FROM user_organizations suggestion_scope
+           WHERE suggestion_scope.user_id = ?
+             AND suggestion_scope.organization_id = r.organization_id
+         )`
+    : "";
+  const suggestionColumns = `
+       (SELECT r.participant_role_snapshot
+        FROM project_roster_entries r
+        WHERE r.participant_id = p.id${suggestionScope}
+        ORDER BY r.updated_at DESC, r.id DESC
+        LIMIT 1) AS suggested_role,
+       (SELECT r.student_grade_snapshot
+        FROM project_roster_entries r
+        WHERE r.participant_id = p.id${suggestionScope}
+        ORDER BY r.updated_at DESC, r.id DESC
+        LIMIT 1) AS suggested_grade`;
   const sql = manager
-    ? `SELECT p.id, p.participant_id, p.name, p.organization_id, p.revision
+    ? `SELECT p.id, p.participant_id, p.name, p.organization_id, p.revision,
+              ${suggestionColumns}
        FROM participants p
        JOIN user_organizations actor_scope
          ON actor_scope.organization_id = p.organization_id
        JOIN organizations o ON o.id = p.organization_id
        WHERE actor_scope.user_id = ? AND o.is_active = 1
        ORDER BY p.name, p.participant_id`
-    : `SELECT id, participant_id, name, organization_id, revision
-       FROM participants ORDER BY name, participant_id`;
+    : `SELECT p.id, p.participant_id, p.name, p.organization_id, p.revision,
+              ${suggestionColumns}
+       FROM participants p ORDER BY p.name, p.participant_id`;
   const rows = (
     await env.DB.prepare(sql)
-      .bind(...(manager ? [actor.session.user.id] : []))
+      .bind(
+        ...(manager
+          ? [
+              actor.session.user.id,
+              actor.session.user.id,
+              actor.session.user.id,
+            ]
+          : []),
+      )
       .all<ParticipantRow>()
   ).results;
-  return rows.map(mapParticipant);
+  return rows.map(mapParticipantWithSuggestion);
 }
 
 export async function createParticipantAndAddToProject(
   env: Env,
   actor: Actor,
   projectId: string,
-  input: { name: string; organizationId: string; expectedRevision: number },
+  input: {
+    name: string;
+    organizationId: string;
+    role: ParticipantRole;
+    grade: StudentGrade | null;
+    expectedRevision: number;
+  },
   now = new Date(),
 ): Promise<{
   participant: ParticipantRecord;
@@ -101,15 +142,18 @@ export async function createParticipantAndAddToProject(
         env.DB.prepare(
           `INSERT INTO project_roster_entries
          (id, project_id, participant_id, organization_id,
-          participant_name_snapshot, organization_name_snapshot, source, status,
+          participant_name_snapshot, organization_name_snapshot,
+          participant_role_snapshot, student_grade_snapshot, source, status,
           was_expected_at_start, revision, created_by, updated_by, created_at, updated_at)
-         SELECT ?, ?, ?, o.id, ?, o.name, ?, 'ACTIVE', 0, 0, ?, ?, ?, ?
+         SELECT ?, ?, ?, o.id, ?, o.name, ?, ?, ?, 'ACTIVE', 0, 0, ?, ?, ?, ?
          FROM organizations o WHERE o.id = ?`,
         ).bind(
           entryId,
           projectId,
           participantId,
           input.name,
+          input.role,
+          input.grade,
           source,
           actor.session.user.id,
           actor.session.user.id,
@@ -168,6 +212,8 @@ export async function createParticipantAndAddToProject(
       organizationName: membership.name,
       source,
       status: "ACTIVE",
+      role: input.role,
+      grade: input.grade,
       wasExpectedAtStart: false,
       revision: 0,
       updatedAt: timestamp,
@@ -184,11 +230,19 @@ export async function updateProjectParticipant(
   input: {
     name?: string | undefined;
     organizationId?: string | undefined;
+    role?: ParticipantRole | undefined;
+    grade?: StudentGrade | null | undefined;
     expectedRevision: number;
     expectedProjectRevision: number;
   },
   now = new Date(),
-): Promise<ParticipantRecord & { projectRevision: number }> {
+): Promise<
+  ParticipantRecord & {
+    role: ParticipantRole | null;
+    grade: StudentGrade | null;
+    projectRevision: number;
+  }
+> {
   await closeExpiredProject(env, projectId, now);
   const project = await findProject(env.DB, projectId);
   if (!project) throw new DomainError("NOT_FOUND");
@@ -230,6 +284,8 @@ export async function updateProjectParticipant(
   }
   const timestamp = now.toISOString();
   const guardId = crypto.randomUUID();
+  const nextRole = input.role ?? entry.role;
+  const nextGrade = input.grade !== undefined ? input.grade : entry.grade;
   const membershipPredicate =
     nextOrganizationId === current.organizationId
       ? "1 = 1"
@@ -319,6 +375,30 @@ export async function updateProjectParticipant(
           timestamp,
           participantId,
         ),
+        env.DB.prepare(
+          `UPDATE project_roster_entries
+           SET participant_name_snapshot = ?,
+               organization_id = ?,
+               organization_name_snapshot = (
+                 SELECT name FROM organizations WHERE id = ?
+               ),
+               participant_role_snapshot = ?,
+               student_grade_snapshot = ?,
+               revision = revision + 1,
+               updated_by = ?,
+               updated_at = ?
+           WHERE project_id = ? AND participant_id = ?`,
+        ).bind(
+          input.name ?? current.name,
+          nextOrganizationId,
+          nextOrganizationId,
+          nextRole,
+          nextGrade,
+          actor.session.user.id,
+          timestamp,
+          projectId,
+          participantId,
+        ),
         incrementProject(env.DB, projectId, timestamp),
         auditStatement(
           env.DB,
@@ -329,6 +409,10 @@ export async function updateProjectParticipant(
           projectId,
           entry.organizationId,
           timestamp,
+          {
+            before: { role: entry.role, grade: entry.grade },
+            after: { role: nextRole, grade: nextGrade },
+          },
         ),
       ],
       failureCode: "STALE_REVISION",
@@ -345,6 +429,8 @@ export async function updateProjectParticipant(
     ...current,
     name: input.name ?? current.name,
     organizationId: nextOrganizationId,
+    role: nextRole,
+    grade: nextGrade,
     revision: input.expectedRevision + 1,
     projectRevision: input.expectedProjectRevision + 1,
   };
@@ -356,6 +442,8 @@ interface ParticipantRow {
   name: string;
   organization_id: string;
   revision: number;
+  suggested_role?: string | null;
+  suggested_grade?: string | null;
 }
 
 async function findParticipant(db: D1Database, id: string) {
@@ -494,6 +582,7 @@ function auditStatement(
   projectId: string,
   organizationId: string,
   timestamp: string,
+  details: Record<string, unknown> = {},
 ) {
   return db
     .prepare(
@@ -508,16 +597,30 @@ function auditStatement(
       entityType,
       entityId,
       timestamp,
-      JSON.stringify({ projectId, organizationId }),
+      JSON.stringify({ projectId, organizationId, ...details }),
     );
 }
 
-function mapParticipant(row: ParticipantRow): ParticipantRecord {
+function mapParticipant(row: ParticipantRow) {
   return {
     id: row.id,
     participantId: row.participant_id,
     name: row.name,
     organizationId: row.organization_id,
     revision: row.revision,
+  };
+}
+
+function mapParticipantWithSuggestion(row: ParticipantRow) {
+  return {
+    ...mapParticipant(row),
+    suggestedRole:
+      row.suggested_role == null
+        ? null
+        : ParticipantRoleSchema.parse(row.suggested_role),
+    suggestedGrade:
+      row.suggested_grade == null
+        ? null
+        : StudentGradeSchema.parse(row.suggested_grade),
   };
 }

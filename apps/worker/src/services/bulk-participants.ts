@@ -2,7 +2,9 @@ import type {
   BulkParticipantDuplicate,
   BulkRosterCreateRequest,
   BulkRosterCreateResponse,
+  ParticipantRole,
   RosterSource,
+  StudentGrade,
 } from "@event-roster/contracts";
 import { canonicalizeParticipantName } from "@event-roster/contracts";
 import { DomainError, toKstDate } from "@event-roster/domain";
@@ -54,7 +56,7 @@ export async function createBulkParticipantsAndAddToProject(
   ).results;
   await hooks?.afterSnapshot?.();
   const duplicates = collectDuplicates(
-    input.names,
+    input.participants.map((participant) => participant.name),
     existingParticipants.map((participant) => participant.name),
   );
   if (duplicates.length > 0 && !input.confirmDuplicateNames) {
@@ -67,11 +69,11 @@ export async function createBulkParticipantsAndAddToProject(
   const timestamp = now.toISOString();
   const source: RosterSource =
     project.status === "PRE_REGISTRATION" ? "PRE_REGISTRATION" : "IN_PROGRESS";
-  const prepared = input.names.map((name) => ({
+  const prepared = input.participants.map((participant) => ({
     participantId: crypto.randomUUID(),
     participantNumber: `P-${crypto.randomUUID().toUpperCase()}`,
     rosterEntryId: crypto.randomUUID(),
-    name,
+    ...participant,
   }));
   const guardId = crypto.randomUUID();
   const participantRevisionSum = existingParticipants.reduce(
@@ -93,25 +95,32 @@ export async function createBulkParticipantsAndAddToProject(
         input.organizationId,
         participantRevisionSum,
       ];
-  const detailsJson = JSON.stringify({
-    batchId,
-    projectId,
-    organizationId: input.organizationId,
-  });
   const auditRows = prepared.flatMap((participant) => [
     {
       id: crypto.randomUUID(),
       action: "PARTICIPANT_CREATED",
       entityType: "PARTICIPANT",
       entityId: participant.participantId,
-      detailsJson,
+      detailsJson: JSON.stringify({
+        batchId,
+        projectId,
+        organizationId: input.organizationId,
+        participantRole: participant.role,
+        studentGrade: participant.grade,
+      }),
     },
     {
       id: crypto.randomUUID(),
       action: "ROSTER_ADDED",
       entityType: "ROSTER_ENTRY",
       entityId: participant.rosterEntryId,
-      detailsJson,
+      detailsJson: JSON.stringify({
+        batchId,
+        projectId,
+        organizationId: input.organizationId,
+        participantRole: participant.role,
+        studentGrade: participant.grade,
+      }),
     },
   ]);
   const statements = [
@@ -185,6 +194,8 @@ export async function createBulkParticipantsAndAddToProject(
         organizationName: membership.name,
         source,
         status: "ACTIVE",
+        role: participant.role,
+        grade: participant.grade,
         wasExpectedAtStart: false,
         revision: 0,
         updatedAt: timestamp,
@@ -221,6 +232,8 @@ interface PreparedParticipant {
   participantNumber: string;
   rosterEntryId: string;
   name: string;
+  role: ParticipantRole;
+  grade: StudentGrade | null;
 }
 
 interface PreparedAudit {
@@ -266,16 +279,19 @@ function rosterInsert(
   actorUserId: string,
   timestamp: string,
 ) {
-  const values = rows.map(() => "(?, ?, ?)").join(", ");
+  const values = rows.map(() => "(?, ?, ?, ?, ?)").join(", ");
   return db
     .prepare(
-      `WITH input(id, participant_id, participant_name) AS (VALUES ${values})
+      `WITH input(id, participant_id, participant_name, participant_role, student_grade)
+       AS (VALUES ${values})
        INSERT INTO project_roster_entries
        (id, project_id, participant_id, organization_id,
-        participant_name_snapshot, organization_name_snapshot, source, status,
+        participant_name_snapshot, organization_name_snapshot,
+        participant_role_snapshot, student_grade_snapshot, source, status,
         was_expected_at_start, revision, created_by, updated_by, created_at, updated_at)
        SELECT input.id, ?, input.participant_id, o.id,
-              input.participant_name, o.name, ?, 'ACTIVE',
+              input.participant_name, o.name, input.participant_role,
+              input.student_grade, ?, 'ACTIVE',
               0, 0, ?, ?, ?, ?
        FROM input JOIN organizations o ON o.id = ?`,
     )
@@ -284,6 +300,8 @@ function rosterInsert(
         row.rosterEntryId,
         row.participantId,
         row.name,
+        row.role,
+        row.grade,
       ]),
       projectId,
       source,

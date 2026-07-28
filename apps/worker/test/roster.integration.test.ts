@@ -71,7 +71,7 @@ it("adds, cancels, and reactivates one roster row with revisions", async () => {
   ).toBe(1);
 });
 
-it("returns null participant profiles for a legacy roster write", async () => {
+it("persists participant profiles for an existing participant add", async () => {
   const fixture = await setupPreRegistration();
   const actor = await requireActor(
     new Request("https://event-roster.test", {
@@ -86,11 +86,27 @@ it("returns null participant profiles for a legacy roster write", async () => {
     fixture.project.id,
     fixture.firstParticipant.id,
     fixture.project.revision,
-    { name: "첫 참가자", organizationId: "org-1" },
+    {
+      name: "첫 참가자",
+      organizationId: "org-1",
+      role: "STUDENT",
+      grade: "M2",
+    },
     fixture.firstParticipant.revision,
   );
 
-  expect(entry).toMatchObject({ role: null, grade: null });
+  expect(entry).toMatchObject({ role: "STUDENT", grade: "M2" });
+  expect(
+    await env.DB.prepare(
+      `SELECT participant_role_snapshot, student_grade_snapshot
+       FROM project_roster_entries WHERE id = ?`,
+    )
+      .bind(entry.id)
+      .first(),
+  ).toEqual({
+    participant_role_snapshot: "STUDENT",
+    student_grade_snapshot: "M2",
+  });
 });
 
 it("rolls back roster and audit when the project revision is stale", async () => {
@@ -136,6 +152,8 @@ it.each(["PRIMARY_LEADER", "MANAGER"] as const)(
           confirmedParticipant: {
             name: "첫 참가자",
             organizationId: "org-1",
+            role: "STUDENT",
+            grade: "M1",
           },
           expectedParticipantRevision: 0,
           expectedRevision: fixture.project.revision,
@@ -230,7 +248,12 @@ it("forbids organization managers from IN_PROGRESS roster mutations", async () =
       method: "POST",
       body: JSON.stringify({
         participantId: fixture.firstParticipant.id,
-        confirmedParticipant: { name: "첫 참가자", organizationId: "org-1" },
+        confirmedParticipant: {
+          name: "첫 참가자",
+          organizationId: "org-1",
+          role: "STUDENT",
+          grade: "M1",
+        },
         expectedParticipantRevision: 0,
         expectedRevision: dayOf.revision,
       }),
@@ -455,7 +478,12 @@ it("creates a participant and roster entry atomically", async () => {
     {
       method: "POST",
       body: JSON.stringify({
-        newParticipant: { name: "신규 참가자", organizationId: "org-1" },
+        newParticipant: {
+          name: "신규 참가자",
+          organizationId: "org-1",
+          role: "TEACHER",
+          grade: null,
+        },
         expectedRevision: fixture.project.revision,
       }),
     },
@@ -463,8 +491,23 @@ it("creates a participant and roster entry atomically", async () => {
   expect(created.status).toBe(201);
   const createdBody = await created.json<{
     participant: { id: string };
-    rosterEntry: { id: string };
+    rosterEntry: { id: string; role: string | null; grade: string | null };
   }>();
+  expect(createdBody.rosterEntry).toMatchObject({
+    role: "TEACHER",
+    grade: null,
+  });
+  expect(
+    await env.DB.prepare(
+      `SELECT participant_role_snapshot, student_grade_snapshot
+       FROM project_roster_entries WHERE id = ?`,
+    )
+      .bind(createdBody.rosterEntry.id)
+      .first(),
+  ).toEqual({
+    participant_role_snapshot: "TEACHER",
+    student_grade_snapshot: null,
+  });
   expect(
     (
       await env.DB.prepare(
@@ -499,7 +542,12 @@ it("creates a participant and roster entry atomically", async () => {
     {
       method: "POST",
       body: JSON.stringify({
-        newParticipant: { name: "롤백 참가자", organizationId: "org-1" },
+        newParticipant: {
+          name: "롤백 참가자",
+          organizationId: "org-1",
+          role: "STUDENT",
+          grade: "H1",
+        },
         expectedRevision: fixture.project.revision,
       }),
     },
@@ -526,7 +574,11 @@ it("warns about input and existing duplicates without writing rows", async () =>
       method: "POST",
       body: JSON.stringify({
         organizationId: "org-1",
-        names: ["첫 참가자", "새 이름", " 새   이름 "],
+        participants: [
+          { name: "첫 참가자", role: "STUDENT", grade: "M1" },
+          { name: "새 이름", role: "TEACHER", grade: null },
+          { name: " 새   이름 ", role: "STUDENT", grade: "H2" },
+        ],
         confirmDuplicateNames: false,
         expectedRevision: fixture.project.revision,
       }),
@@ -568,7 +620,11 @@ it.each([1, 30])(
         method: "POST",
         body: JSON.stringify({
           organizationId: "org-1",
-          names,
+          participants: names.map((name) => ({
+            name,
+            role: "STUDENT",
+            grade: "M3",
+          })),
           confirmDuplicateNames: false,
           expectedRevision: fixture.project.revision,
         }),
@@ -583,6 +639,8 @@ it.each([1, 30])(
         rosterEntry: {
           id: string;
           source: string;
+          role: string | null;
+          grade: string | null;
           wasExpectedAtStart: boolean;
         };
       }>;
@@ -595,6 +653,8 @@ it.each([1, 30])(
     expect(body.participants).toHaveLength(participantCount);
     expect(body.participants[0]?.rosterEntry).toMatchObject({
       source: "PRE_REGISTRATION",
+      role: "STUDENT",
+      grade: "M3",
       wasExpectedAtStart: false,
     });
     expect(body.projectRevision).toBe(fixture.project.revision + 1);
@@ -626,6 +686,125 @@ it.each([1, 30])(
   },
 );
 
+it("writes structured bulk profiles in order and increments the project once", async () => {
+  const fixture = await setupPreRegistration();
+  const response = await authedRequest(
+    fixture.operator,
+    `/api/v1/projects/${fixture.project.id}/roster/bulk`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        organizationId: "org-1",
+        participants: [
+          { name: "중학생", role: "STUDENT", grade: "M2" },
+          { name: "담당 교사", role: "TEACHER", grade: null },
+        ],
+        confirmDuplicateNames: false,
+        expectedRevision: fixture.project.revision,
+      }),
+    },
+  );
+
+  expect(response.status).toBe(201);
+  const body = await response.json<{
+    batchId: string;
+    participants: Array<{
+      participant: { id: string };
+      rosterEntry: {
+        id: string;
+        participantName: string;
+        role: string | null;
+        grade: string | null;
+      };
+    }>;
+    projectRevision: number;
+  }>();
+  expect(body.participants.map((item) => item.rosterEntry)).toMatchObject([
+    { participantName: "중학생", role: "STUDENT", grade: "M2" },
+    { participantName: "담당 교사", role: "TEACHER", grade: null },
+  ]);
+  expect(body.projectRevision).toBe(fixture.project.revision + 1);
+  expect(
+    (
+      await env.DB.prepare("SELECT revision FROM projects WHERE id = ?")
+        .bind(fixture.project.id)
+        .first<{ revision: number }>()
+    )?.revision,
+  ).toBe(fixture.project.revision + 1);
+  const profileAuditRows = (
+    await env.DB.prepare(
+      `SELECT entity_id, details_json FROM audit_logs
+       WHERE details_json LIKE ?`,
+    )
+      .bind(`%"batchId":"${body.batchId}"%`)
+      .all<{ entity_id: string; details_json: string }>()
+  ).results.map((row) => ({
+    entityId: row.entity_id,
+    ...JSON.parse(row.details_json),
+  }));
+  expect(profileAuditRows).toHaveLength(4);
+  expect(profileAuditRows).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        entityId: body.participants[0]?.participant.id,
+        participantRole: "STUDENT",
+        studentGrade: "M2",
+      }),
+      expect.objectContaining({
+        entityId: body.participants[0]?.rosterEntry.id,
+        participantRole: "STUDENT",
+        studentGrade: "M2",
+      }),
+      expect.objectContaining({
+        entityId: body.participants[1]?.participant.id,
+        participantRole: "TEACHER",
+        studentGrade: null,
+      }),
+      expect.objectContaining({
+        entityId: body.participants[1]?.rosterEntry.id,
+        participantRole: "TEACHER",
+        studentGrade: null,
+      }),
+    ]),
+  );
+});
+
+it("rejects 31 bulk participants before any SQL write", async () => {
+  const fixture = await setupPreRegistration();
+  const before = await env.DB.batch([
+    env.DB.prepare("SELECT COUNT(*) AS count FROM participants"),
+    env.DB.prepare("SELECT COUNT(*) AS count FROM project_roster_entries"),
+    env.DB.prepare("SELECT COUNT(*) AS count FROM audit_logs"),
+  ]);
+  const response = await authedRequest(
+    fixture.operator,
+    `/api/v1/projects/${fixture.project.id}/roster/bulk`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        organizationId: "org-1",
+        participants: Array.from({ length: 31 }, (_, index) => ({
+          name: `초과 참가자 ${index + 1}`,
+          role: "STUDENT",
+          grade: "M1",
+        })),
+        confirmDuplicateNames: false,
+        expectedRevision: fixture.project.revision,
+      }),
+    },
+  );
+
+  expect(response.status).toBe(422);
+  const after = await env.DB.batch([
+    env.DB.prepare("SELECT COUNT(*) AS count FROM participants"),
+    env.DB.prepare("SELECT COUNT(*) AS count FROM project_roster_entries"),
+    env.DB.prepare("SELECT COUNT(*) AS count FROM audit_logs"),
+  ]);
+  expect(after.map((result) => result.results[0])).toEqual(
+    before.map((result) => result.results[0]),
+  );
+});
+
 it("uses the IN_PROGRESS source for operator bulk registration", async () => {
   const fixture = await setupPreRegistration();
   const transitioned = await authedRequest(
@@ -647,7 +826,7 @@ it("uses the IN_PROGRESS source for operator bulk registration", async () => {
       method: "POST",
       body: JSON.stringify({
         organizationId: "org-1",
-        names: ["당일 참가자"],
+        participants: [{ name: "당일 참가자", role: "TEACHER", grade: null }],
         confirmDuplicateNames: false,
         expectedRevision: project.revision,
       }),
@@ -669,7 +848,7 @@ it("rejects stale, inactive, and out-of-scope bulk registration", async () => {
       method: "POST",
       body: JSON.stringify({
         organizationId: "org-1",
-        names: ["오래된 요청"],
+        participants: [{ name: "오래된 요청", role: "STUDENT", grade: "M1" }],
         confirmDuplicateNames: false,
         expectedRevision: fixture.project.revision - 1,
       }),
@@ -686,7 +865,9 @@ it("rejects stale, inactive, and out-of-scope bulk registration", async () => {
       method: "POST",
       body: JSON.stringify({
         organizationId: "org-2",
-        names: ["다른 조직 참가자"],
+        participants: [
+          { name: "다른 조직 참가자", role: "STUDENT", grade: "M1" },
+        ],
         confirmDuplicateNames: false,
         expectedRevision: fixture.project.revision,
       }),
@@ -707,7 +888,9 @@ it("rejects stale, inactive, and out-of-scope bulk registration", async () => {
       method: "POST",
       body: JSON.stringify({
         organizationId: "org-1",
-        names: ["비활성 조직 참가자"],
+        participants: [
+          { name: "비활성 조직 참가자", role: "STUDENT", grade: "M1" },
+        ],
         confirmDuplicateNames: false,
         expectedRevision: fixture.project.revision,
       }),
@@ -738,7 +921,9 @@ it("rejects manager IN_PROGRESS writes and inactive organization masters", async
       method: "POST",
       body: JSON.stringify({
         organizationId: "org-1",
-        names: ["담당자 당일 참가자"],
+        participants: [
+          { name: "담당자 당일 참가자", role: "TEACHER", grade: null },
+        ],
         confirmDuplicateNames: false,
         expectedRevision: project.revision,
       }),
@@ -756,7 +941,9 @@ it("rejects manager IN_PROGRESS writes and inactive organization masters", async
       method: "POST",
       body: JSON.stringify({
         organizationId: "org-1",
-        names: ["비활성 마스터 참가자"],
+        participants: [
+          { name: "비활성 마스터 참가자", role: "STUDENT", grade: "H3" },
+        ],
         confirmDuplicateNames: false,
         expectedRevision: project.revision,
       }),
@@ -765,8 +952,27 @@ it("rejects manager IN_PROGRESS writes and inactive organization masters", async
   expect(inactiveMaster.status).toBe(422);
 });
 
-it("creates duplicate names only after explicit confirmation", async () => {
+it("preserves every profile after a duplicate conflict and confirmed retry", async () => {
   const fixture = await setupPreRegistration();
+  const participants = [
+    { name: "첫 참가자", role: "STUDENT", grade: "M2" },
+    { name: "같은 이름", role: "TEACHER", grade: null },
+    { name: "같은 이름", role: "STUDENT", grade: "H1" },
+  ] as const;
+  const conflicted = await authedRequest(
+    fixture.operator,
+    `/api/v1/projects/${fixture.project.id}/roster/bulk`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        organizationId: "org-1",
+        participants,
+        confirmDuplicateNames: false,
+        expectedRevision: fixture.project.revision,
+      }),
+    },
+  );
+  expect(conflicted.status).toBe(409);
   const response = await authedRequest(
     fixture.operator,
     `/api/v1/projects/${fixture.project.id}/roster/bulk`,
@@ -774,7 +980,7 @@ it("creates duplicate names only after explicit confirmation", async () => {
       method: "POST",
       body: JSON.stringify({
         organizationId: "org-1",
-        names: ["첫 참가자", "같은 이름", "같은 이름"],
+        participants,
         confirmDuplicateNames: true,
         expectedRevision: fixture.project.revision,
       }),
@@ -782,9 +988,16 @@ it("creates duplicate names only after explicit confirmation", async () => {
   );
 
   expect(response.status).toBe(201);
-  expect(
-    (await response.json<{ participants: unknown[] }>()).participants,
-  ).toHaveLength(3);
+  const body = await response.json<{
+    participants: Array<{
+      rosterEntry: { role: string | null; grade: string | null };
+    }>;
+  }>();
+  expect(body.participants.map((item) => item.rosterEntry)).toMatchObject([
+    { role: "STUDENT", grade: "M2" },
+    { role: "TEACHER", grade: null },
+    { role: "STUDENT", grade: "H1" },
+  ]);
 });
 
 it("rolls back every bulk row and audit when one insert fails", async () => {
@@ -794,6 +1007,9 @@ it("rolls back every bulk row and audit when one insert fails", async () => {
   ).first<{ count: number }>();
   const beforeAudit = await env.DB.prepare(
     "SELECT COUNT(*) AS count FROM audit_logs",
+  ).first<{ count: number }>();
+  const beforeRoster = await env.DB.prepare(
+    "SELECT COUNT(*) AS count FROM project_roster_entries",
   ).first<{ count: number }>();
   await env.DB.prepare(
     `CREATE TRIGGER IF NOT EXISTS reject_bulk_participant
@@ -810,7 +1026,10 @@ it("rolls back every bulk row and audit when one insert fails", async () => {
         method: "POST",
         body: JSON.stringify({
           organizationId: "org-1",
-          names: ["정상 대상", "거부 대상"],
+          participants: [
+            { name: "정상 대상", role: "STUDENT", grade: "M1" },
+            { name: "거부 대상", role: "TEACHER", grade: null },
+          ],
           confirmDuplicateNames: false,
           expectedRevision: fixture.project.revision,
         }),
@@ -838,7 +1057,7 @@ it("rolls back every bulk row and audit when one insert fails", async () => {
           "SELECT COUNT(*) AS count FROM project_roster_entries",
         ).first<{ count: number }>()
       )?.count,
-    ).toBe(0);
+    ).toBe(beforeRoster?.count);
     expect(
       (
         await env.DB.prepare("SELECT revision FROM projects WHERE id = ?")
@@ -859,6 +1078,14 @@ it("rejects a bulk write when participant state changes after its snapshot", asy
     }),
     env as Env,
   );
+  const before = await env.DB.batch([
+    env.DB.prepare("SELECT COUNT(*) AS count FROM participants"),
+    env.DB.prepare("SELECT COUNT(*) AS count FROM project_roster_entries"),
+    env.DB.prepare("SELECT COUNT(*) AS count FROM audit_logs"),
+    env.DB.prepare("SELECT revision FROM projects WHERE id = ?").bind(
+      fixture.project.id,
+    ),
+  ]);
 
   await expect(
     createBulkParticipantsAndAddToProject(
@@ -867,7 +1094,7 @@ it("rejects a bulk write when participant state changes after its snapshot", asy
       fixture.project.id,
       {
         organizationId: "org-1",
-        names: ["경합 참가자"],
+        participants: [{ name: "경합 참가자", role: "STUDENT", grade: "M2" }],
         confirmDuplicateNames: false,
         expectedRevision: fixture.project.revision,
       },
@@ -889,6 +1116,17 @@ it("rejects a bulk write when participant state changes after its snapshot", asy
       ).first<{ count: number }>()
     )?.count,
   ).toBe(0);
+  const after = await env.DB.batch([
+    env.DB.prepare("SELECT COUNT(*) AS count FROM participants"),
+    env.DB.prepare("SELECT COUNT(*) AS count FROM project_roster_entries"),
+    env.DB.prepare("SELECT COUNT(*) AS count FROM audit_logs"),
+    env.DB.prepare("SELECT revision FROM projects WHERE id = ?").bind(
+      fixture.project.id,
+    ),
+  ]);
+  expect(after.map((result) => result.results[0])).toEqual(
+    before.map((result) => result.results[0]),
+  );
 });
 
 it("allows a confirmed duplicate request after participant snapshot changes", async () => {
@@ -906,7 +1144,7 @@ it("allows a confirmed duplicate request after participant snapshot changes", as
     fixture.project.id,
     {
       organizationId: "org-1",
-      names: ["첫 참가자"],
+      participants: [{ name: "첫 참가자", role: "STUDENT", grade: "M1" }],
       confirmDuplicateNames: true,
       expectedRevision: fixture.project.revision,
     },
@@ -1002,7 +1240,7 @@ it("preserves historical roster operations when a project membership becomes ina
         .bind(entry.id)
         .first<{ participant_name_snapshot: string }>()
     )?.participant_name_snapshot,
-  ).toBe("첫 참가자");
+  ).toBe("변경된 마스터 이름");
   expect(
     (
       await authedRequest(
@@ -1087,7 +1325,12 @@ it("makes an inactive membership read-only for managers while operators can canc
       method: "POST",
       body: JSON.stringify({
         participantId: fixture.firstParticipant.id,
-        confirmedParticipant: { name: "첫 참가자", organizationId: "org-1" },
+        confirmedParticipant: {
+          name: "첫 참가자",
+          organizationId: "org-1",
+          role: "STUDENT",
+          grade: "M1",
+        },
         expectedParticipantRevision: 0,
         expectedRevision: cancelled.projectRevision,
       }),
@@ -1154,7 +1397,12 @@ it("atomically refreshes a reused participant only for a new project and preserv
       method: "POST",
       body: JSON.stringify({
         participantId: fixture.firstParticipant.id,
-        confirmedParticipant: { name: "최신 참가자", organizationId: "org-2" },
+        confirmedParticipant: {
+          name: "최신 참가자",
+          organizationId: "org-2",
+          role: "TEACHER",
+          grade: null,
+        },
         expectedParticipantRevision: fixture.firstParticipant.revision,
         expectedRevision: target.revision,
       }),
@@ -1220,7 +1468,12 @@ it("atomically refreshes a reused participant only for a new project and preserv
       method: "POST",
       body: JSON.stringify({
         participantId: fixture.firstParticipant.id,
-        confirmedParticipant: { name: "롤백 이름", organizationId: "org-2" },
+        confirmedParticipant: {
+          name: "롤백 이름",
+          organizationId: "org-2",
+          role: "STUDENT",
+          grade: "H3",
+        },
         expectedParticipantRevision: 0,
         expectedRevision: staleTarget.revision,
       }),
@@ -1258,6 +1511,8 @@ it("forbids a manager from moving a reused participant even with both active org
         confirmedParticipant: {
           name: "관리자 이동 금지",
           organizationId: "org-2",
+          role: "STUDENT",
+          grade: "M3",
         },
         expectedParticipantRevision: fixture.firstParticipant.revision,
         expectedRevision: targetProject.revision,
@@ -1310,6 +1565,8 @@ it("allows a manager to rename a same-organization participant while reusing it"
         confirmedParticipant: {
           name: "관리자 확인 이름",
           organizationId: "org-1",
+          role: "TEACHER",
+          grade: null,
         },
         expectedParticipantRevision: fixture.firstParticipant.revision,
         expectedRevision: targetProject.revision,
@@ -1376,7 +1633,12 @@ it("rechecks a manager participant organization inside the atomic reuse guard", 
       targetProject.id,
       fixture.firstParticipant.id,
       targetProject.revision,
-      { name: "race 이름", organizationId: "org-1" },
+      {
+        name: "race 이름",
+        organizationId: "org-1",
+        role: "STUDENT",
+        grade: "M2",
+      },
       fixture.firstParticipant.revision,
     ),
   ).rejects.toMatchObject({ code: "STALE_REVISION" });
@@ -1447,7 +1709,12 @@ it("rechecks the manager assignment inside the atomic roster guard", async () =>
       fixture.project.id,
       fixture.firstParticipant.id,
       fixture.project.revision,
-      { name: "경쟁 조건 이름", organizationId: "org-1" },
+      {
+        name: "경쟁 조건 이름",
+        organizationId: "org-1",
+        role: "STUDENT",
+        grade: "M1",
+      },
       fixture.firstParticipant.revision,
     ),
   ).rejects.toMatchObject({ code: "STALE_REVISION" });
@@ -1469,7 +1736,7 @@ it("rechecks the manager assignment inside the atomic roster guard", async () =>
   ).toBe(beforeAudit?.count);
 });
 
-it("reactivates a same-project entry without replacing its snapshot with confirmed values", async () => {
+it("reactivates a same-project entry with the newly confirmed profile", async () => {
   const fixture = await setupPreRegistration();
   const added = await addRoster(fixture, fixture.firstParticipant.id);
   const active = await added.json<{
@@ -1498,8 +1765,10 @@ it("reactivates a same-project entry without replacing its snapshot with confirm
       body: JSON.stringify({
         participantId: fixture.firstParticipant.id,
         confirmedParticipant: {
-          name: "덮어쓰면 안 됨",
+          name: "복원 확인 이름",
           organizationId: "org-1",
+          role: "TEACHER",
+          grade: null,
         },
         expectedParticipantRevision: 0,
         expectedRevision: cancelledBody.projectRevision,
@@ -1509,13 +1778,17 @@ it("reactivates a same-project entry without replacing its snapshot with confirm
   expect(reactivated.status).toBe(200);
   expect(
     await env.DB.prepare(
-      "SELECT participant_name_snapshot, organization_name_snapshot FROM project_roster_entries WHERE id = ?",
+      `SELECT participant_name_snapshot, organization_name_snapshot,
+              participant_role_snapshot, student_grade_snapshot
+       FROM project_roster_entries WHERE id = ?`,
     )
       .bind(active.id)
       .first(),
   ).toEqual({
     participant_name_snapshot: "첫 참가자",
     organization_name_snapshot: "1팀",
+    participant_role_snapshot: "TEACHER",
+    student_grade_snapshot: null,
   });
 });
 
@@ -1552,7 +1825,12 @@ it("closes an expired project when auto-close first loses a revision race", asyn
       fixture.project.id,
       fixture.firstParticipant.id,
       fixture.project.revision + 1,
-      { name: "첫 참가자", organizationId: "org-1" },
+      {
+        name: "첫 참가자",
+        organizationId: "org-1",
+        role: "STUDENT",
+        grade: "M1",
+      },
       fixture.firstParticipant.revision,
       new Date("2026-07-22T01:00:00.000Z"),
     ),
