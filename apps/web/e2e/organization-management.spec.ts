@@ -176,7 +176,7 @@ test("operator delegates pre-registration roster entry to an organization leader
   await page.getByRole("button", { name: "참가자 추가" }).click();
   await page.getByRole("button", { name: "새 참가자" }).click();
   await page.getByLabel("이름").fill("E2E 조직 참가자");
-  await page.getByRole("button", { name: "참가자 생성 후 추가" }).click();
+  await page.getByRole("button", { name: "1명 명단에 추가" }).click();
   await expect(
     page.getByText("E2E 조직 참가자", { exact: true }),
   ).toBeVisible();
