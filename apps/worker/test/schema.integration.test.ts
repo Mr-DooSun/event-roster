@@ -4,6 +4,22 @@ import { countRows, insertOrganization } from "./support/database";
 import { IDS } from "./support/ids";
 
 describe("initial D1 schema", () => {
+  it("includes nullable participant profile snapshots on roster entries", async () => {
+    const columns = (
+      await env.DB.prepare("PRAGMA table_info(project_roster_entries)").all<{
+        name: string;
+        notnull: number;
+      }>()
+    ).results;
+
+    expect(columns.map(({ name, notnull }) => ({ name, notnull }))).toEqual(
+      expect.arrayContaining([
+        { name: "participant_role_snapshot", notnull: 0 },
+        { name: "student_grade_snapshot", notnull: 0 },
+      ]),
+    );
+  });
+
   it("keeps the legacy PREPARING value in the physical project status check", async () => {
     const projectTable = await env.DB.prepare(
       "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'projects'",

@@ -1,4 +1,11 @@
-import type { RosterSource, RosterStatus } from "@event-roster/contracts";
+import {
+  ParticipantRoleSchema,
+  type ParticipantRole,
+  type RosterSource,
+  type RosterStatus,
+  StudentGradeSchema,
+  type StudentGrade,
+} from "@event-roster/contracts";
 
 export interface RosterRecord {
   id: string;
@@ -10,6 +17,8 @@ export interface RosterRecord {
   organizationName: string;
   source: RosterSource;
   status: RosterStatus;
+  role: ParticipantRole | null;
+  grade: StudentGrade | null;
   wasExpectedAtStart: boolean;
   revision: number;
   updatedAt: string;
@@ -25,6 +34,8 @@ interface RosterRow {
   organization_name_snapshot: string;
   source: RosterSource;
   status: RosterStatus;
+  participant_role_snapshot: string | null;
+  student_grade_snapshot: string | null;
   was_expected_at_start: number;
   revision: number;
   updated_at: string;
@@ -33,7 +44,8 @@ interface RosterRow {
 const SELECT_ROSTER = `SELECT r.id, r.project_id, r.participant_id,
   p.participant_id AS participant_number, r.organization_id,
   r.participant_name_snapshot, r.organization_name_snapshot, r.source,
-  r.status, r.was_expected_at_start, r.revision, r.updated_at
+  r.status, r.participant_role_snapshot, r.student_grade_snapshot,
+  r.was_expected_at_start, r.revision, r.updated_at
   FROM project_roster_entries r
   JOIN participants p ON p.id = r.participant_id`;
 
@@ -94,6 +106,14 @@ function mapRoster(row: RosterRow): RosterRecord {
     organizationName: row.organization_name_snapshot,
     source: row.source,
     status: row.status,
+    role:
+      row.participant_role_snapshot === null
+        ? null
+        : ParticipantRoleSchema.parse(row.participant_role_snapshot),
+    grade:
+      row.student_grade_snapshot === null
+        ? null
+        : StudentGradeSchema.parse(row.student_grade_snapshot),
     wasExpectedAtStart: row.was_expected_at_start === 1,
     revision: row.revision,
     updatedAt: row.updated_at,
