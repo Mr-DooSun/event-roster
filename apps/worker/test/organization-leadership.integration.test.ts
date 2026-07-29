@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, expect, it } from "vitest";
+import type { OrganizationDetail } from "@event-roster/contracts";
 import type { Env } from "../src/env";
 import { requireActor } from "../src/middleware/authentication";
 import { assignOrganizationManager } from "../src/services/organizations";
@@ -39,6 +40,16 @@ it("returns searchable organization summaries and a complete operator detail", a
   expect(detail.status).toBe(200);
   expect(await detail.json()).toMatchObject({
     id: "org-1",
+    deletionEligibility: {
+      canDelete: false,
+      blockers: {
+        managerAssignments: 3,
+        participants: 0,
+        projectLinks: 2,
+        rosterEntries: 0,
+        expectedSnapshots: 0,
+      },
+    },
     managers: [
       expect.objectContaining({
         userId: "leader-1",
@@ -58,6 +69,48 @@ it("returns searchable organization summaries and a complete operator detail", a
       expect.objectContaining({ projectId: "project-closed" }),
     ],
   });
+});
+
+it("reports exact full-history organization deletion blockers", async () => {
+  const operator = await seedOperator();
+  await seedOrganization("empty-inactive", "빈 조직", false);
+  await seedOrganization("history-inactive", "이력 조직", false);
+  const now = "2026-07-29T00:00:00.000Z";
+
+  await env.DB.batch([
+    env.DB.prepare(
+      `INSERT INTO projects
+       (id, name, status, revision, created_by, created_at, updated_at,
+        closed_at, closed_by, close_reason)
+       VALUES ('closed-delete-check', '종료 이력', 'CLOSED', 0, ?, ?, ?, ?, ?, 'MANUAL')`,
+    ).bind(operator.userId, now, now, now, operator.userId),
+    env.DB.prepare(
+      `INSERT INTO project_organizations
+       (project_id, organization_id, is_active, added_at, deactivated_at,
+        added_by, updated_by)
+       VALUES ('closed-delete-check', 'history-inactive', 0, ?, ?, ?, ?)`,
+    ).bind(now, now, operator.userId, operator.userId),
+  ]);
+
+  const empty = await (
+    await authedRequest(operator, "/api/v1/organizations/empty-inactive")
+  ).json<OrganizationDetail>();
+  expect(empty.deletionEligibility).toEqual({
+    canDelete: true,
+    blockers: {
+      managerAssignments: 0,
+      participants: 0,
+      projectLinks: 0,
+      rosterEntries: 0,
+      expectedSnapshots: 0,
+    },
+  });
+
+  const history = await (
+    await authedRequest(operator, "/api/v1/organizations/history-inactive")
+  ).json<OrganizationDetail>();
+  expect(history.deletionEligibility.canDelete).toBe(false);
+  expect(history.deletionEligibility.blockers.projectLinks).toBe(1);
 });
 
 it("filters by leader and active status while treating search metacharacters literally", async () => {
