@@ -29,6 +29,7 @@ const organizationSkeletonKeys = Array.from(
 
 export function OrganizationsPage() {
   const { api } = useAuth();
+  const [organizationNotice] = useState(consumeOrganizationNotice);
   const [organizations, setOrganizations] = useState<OrganizationSummary[]>([]);
   const [query, setQuery] = useState("");
   const [submittedQuery, setSubmittedQuery] = useState("");
@@ -120,6 +121,9 @@ export function OrganizationsPage() {
           새 조직
         </Button>
       </header>
+      {organizationNotice ? (
+        <StatusMessage tone="info">{organizationNotice}</StatusMessage>
+      ) : null}
       {error ? (
         <RetryableError
           message={error}
@@ -287,4 +291,25 @@ export function OrganizationsPage() {
       ) : null}
     </div>
   );
+}
+
+function consumeOrganizationNotice(): string | null {
+  const state = window.history.state;
+  if (
+    typeof state !== "object" ||
+    state === null ||
+    !("organizationNotice" in state) ||
+    typeof state.organizationNotice !== "string"
+  ) {
+    return null;
+  }
+  const mutableState = { ...state } as Record<string, unknown>;
+  const organizationNotice = mutableState.organizationNotice as string;
+  delete mutableState.organizationNotice;
+  window.history.replaceState(
+    Object.keys(mutableState).length > 0 ? mutableState : null,
+    "",
+    window.location.href,
+  );
+  return organizationNotice;
 }

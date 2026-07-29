@@ -1,4 +1,8 @@
 import "@testing-library/jest-dom/vitest";
+import type {
+  OrganizationDeletionBlockers,
+  OrganizationDetail,
+} from "@event-roster/contracts";
 import {
   act,
   cleanup,
@@ -19,6 +23,7 @@ import { UsersPage } from "./UsersPage";
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  window.history.replaceState(null, "", "/");
 });
 
 it("shows a generated password once and removes it after close", async () => {
@@ -1956,18 +1961,7 @@ it("shows organization audit pagination progress without replacing items", async
         return Promise.resolve(Response.json(auth()));
       }
       if (url.endsWith("/organizations/org-1")) {
-        return Promise.resolve(
-          Response.json({
-            id: "org-1",
-            name: "1팀",
-            isActive: true,
-            primaryLeader: null,
-            managerCount: 0,
-            projectCount: 0,
-            managers: [],
-            projects: [],
-          }),
-        );
+        return Promise.resolve(Response.json(organizationDetail()));
       }
       if (url.endsWith("/organizations/org-1/audit?limit=50")) {
         return Promise.resolve(
@@ -2027,18 +2021,7 @@ it("retries failed organization audit pagination with the same cursor", async ()
       return Promise.resolve(Response.json(auth()));
     }
     if (url.endsWith("/organizations/org-1")) {
-      return Promise.resolve(
-        Response.json({
-          id: "org-1",
-          name: "1팀",
-          isActive: true,
-          primaryLeader: null,
-          managerCount: 0,
-          projectCount: 0,
-          managers: [],
-          projects: [],
-        }),
-      );
+      return Promise.resolve(Response.json(organizationDetail()));
     }
     if (url.endsWith("/organizations/org-1/audit?limit=50")) {
       return Promise.resolve(
@@ -2113,8 +2096,644 @@ it("retries failed organization audit pagination with the same cursor", async ()
   );
 });
 
+it("hides the organization danger zone while the organization is active", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/auth/login")) {
+        return Promise.resolve(Response.json(auth()));
+      }
+      if (url.endsWith("/organizations/org-1")) {
+        return Promise.resolve(Response.json(organizationDetail()));
+      }
+      if (url.endsWith("/organizations/org-1/audit?limit=50")) {
+        return Promise.resolve(Response.json(emptyAuditPage()));
+      }
+      throw new Error(`unexpected request: ${url}`);
+    }),
+  );
+
+  renderOrganizationDetail("org-1");
+  await login();
+
+  await screen.findByRole("heading", { name: "1팀" });
+  expect(
+    screen.queryByRole("region", { name: "위험 구역" }),
+  ).not.toBeInTheDocument();
+});
+
+it("shows deletion blockers for an inactive organization", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/auth/login")) {
+        return Promise.resolve(Response.json(auth()));
+      }
+      if (url.endsWith("/organizations/org-blocked")) {
+        return Promise.resolve(
+          Response.json(
+            organizationDetail({
+              id: "org-blocked",
+              name: "차단 조직",
+              isActive: false,
+              deletionEligibility: {
+                canDelete: false,
+                blockers: deletionBlockers({ projectLinks: 2 }),
+              },
+            }),
+          ),
+        );
+      }
+      if (url.endsWith("/organizations/org-blocked/audit?limit=50")) {
+        return Promise.resolve(Response.json(emptyAuditPage()));
+      }
+      throw new Error(`unexpected request: ${url}`);
+    }),
+  );
+
+  renderOrganizationDetail("org-blocked");
+  await login();
+
+  const dangerZone = await screen.findByRole("region", { name: "위험 구역" });
+  expect(dangerZone).toHaveTextContent("프로젝트 연결 이력 2건");
+  expect(
+    within(dangerZone).getByRole("button", { name: "조직 영구 삭제" }),
+  ).toBeDisabled();
+});
+
+it("deletes an eligible organization once and navigates with a success notice", async () => {
+  window.history.replaceState(null, "", "/organizations/org-empty");
+  const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.endsWith("/auth/login")) {
+      return Promise.resolve(Response.json(auth()));
+    }
+    if (url.endsWith("/organizations/org-empty") && init?.method === "DELETE") {
+      return Promise.resolve(new Response(null, { status: 204 }));
+    }
+    if (url.endsWith("/organizations/org-empty")) {
+      return Promise.resolve(
+        Response.json(
+          organizationDetail({
+            id: "org-empty",
+            name: "빈 조직",
+            isActive: false,
+          }),
+        ),
+      );
+    }
+    if (url.endsWith("/organizations/org-empty/audit?limit=50")) {
+      return Promise.resolve(Response.json(emptyAuditPage()));
+    }
+    throw new Error(`unexpected request: ${url}`);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderOrganizationDetail("org-empty");
+  await login();
+  fireEvent.click(
+    within(await screen.findByRole("region", { name: "위험 구역" })).getByRole(
+      "button",
+      { name: "조직 영구 삭제" },
+    ),
+  );
+  fireEvent.change(
+    screen.getByLabelText("확인을 위해 조직 이름을 입력하세요."),
+    { target: { value: "빈 조직" } },
+  );
+  const confirm = within(
+    screen.getByRole("dialog", { name: "조직 영구 삭제" }),
+  ).getByRole("button", { name: "조직 영구 삭제" });
+  fireEvent.click(confirm);
+  fireEvent.click(confirm);
+
+  await waitFor(() => expect(window.location.pathname).toBe("/organizations"));
+  expect(window.history.state).toEqual({
+    organizationNotice: "조직 “빈 조직”을 영구 삭제했습니다.",
+  });
+  const deleteCalls = fetchMock.mock.calls.filter(
+    ([input, init]) =>
+      String(input).endsWith("/organizations/org-empty") &&
+      init?.method === "DELETE",
+  );
+  expect(deleteCalls).toHaveLength(1);
+  expect(deleteCalls[0]).toEqual([
+    "/api/v1/organizations/org-empty",
+    expect.objectContaining({
+      method: "DELETE",
+      body: JSON.stringify({ confirmationName: "빈 조직" }),
+    }),
+  ]);
+});
+
+it("keeps the deletion dialog locked while deletion is pending", async () => {
+  const deletion = deferred<Response>();
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/auth/login")) {
+        return Promise.resolve(Response.json(auth()));
+      }
+      if (
+        url.endsWith("/organizations/org-empty") &&
+        init?.method === "DELETE"
+      ) {
+        return deletion.promise;
+      }
+      if (url.endsWith("/organizations/org-empty")) {
+        return Promise.resolve(
+          Response.json(
+            organizationDetail({
+              id: "org-empty",
+              name: "빈 조직",
+              isActive: false,
+            }),
+          ),
+        );
+      }
+      if (url.endsWith("/organizations/org-empty/audit?limit=50")) {
+        return Promise.resolve(Response.json(emptyAuditPage()));
+      }
+      throw new Error(`unexpected request: ${url}`);
+    }),
+  );
+
+  renderOrganizationDetail("org-empty");
+  await login();
+  fireEvent.click(
+    within(await screen.findByRole("region", { name: "위험 구역" })).getByRole(
+      "button",
+      { name: "조직 영구 삭제" },
+    ),
+  );
+  fireEvent.change(
+    screen.getByLabelText("확인을 위해 조직 이름을 입력하세요."),
+    { target: { value: "빈 조직" } },
+  );
+  fireEvent.click(
+    within(screen.getByRole("dialog", { name: "조직 영구 삭제" })).getByRole(
+      "button",
+      { name: "조직 영구 삭제" },
+    ),
+  );
+
+  const dialog = screen.getByRole("dialog", { name: "조직 영구 삭제" });
+  expect(
+    within(dialog).getByRole("button", { name: "삭제 중…" }),
+  ).toBeDisabled();
+  expect(within(dialog).getByRole("button", { name: "닫기" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "조직 다시 사용" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "이름 저장" })).toBeDisabled();
+  fireEvent.keyDown(dialog, { key: "Escape" });
+  expect(screen.getByRole("dialog", { name: "조직 영구 삭제" })).toBeVisible();
+});
+
+it("reloads deletion blockers and clears the name after a conflict", async () => {
+  let detailReads = 0;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/auth/login")) {
+        return Promise.resolve(Response.json(auth()));
+      }
+      if (
+        url.endsWith("/organizations/org-empty") &&
+        init?.method === "DELETE"
+      ) {
+        return Promise.resolve(
+          Response.json(
+            { code: "CONFLICT", message: "changed", requestId: "request-1" },
+            { status: 409 },
+          ),
+        );
+      }
+      if (url.endsWith("/organizations/org-empty")) {
+        detailReads += 1;
+        return Promise.resolve(
+          Response.json(
+            organizationDetail({
+              id: "org-empty",
+              name: "빈 조직",
+              isActive: false,
+              ...(detailReads === 1
+                ? {}
+                : {
+                    deletionEligibility: {
+                      canDelete: false,
+                      blockers: deletionBlockers({ projectLinks: 1 }),
+                    },
+                  }),
+            }),
+          ),
+        );
+      }
+      if (url.endsWith("/organizations/org-empty/audit?limit=50")) {
+        return Promise.resolve(Response.json(emptyAuditPage()));
+      }
+      throw new Error(`unexpected request: ${url}`);
+    }),
+  );
+
+  renderOrganizationDetail("org-empty");
+  await login();
+  fireEvent.click(
+    within(await screen.findByRole("region", { name: "위험 구역" })).getByRole(
+      "button",
+      { name: "조직 영구 삭제" },
+    ),
+  );
+  fireEvent.change(
+    screen.getByLabelText("확인을 위해 조직 이름을 입력하세요."),
+    { target: { value: "빈 조직" } },
+  );
+  fireEvent.click(
+    within(screen.getByRole("dialog", { name: "조직 영구 삭제" })).getByRole(
+      "button",
+      { name: "조직 영구 삭제" },
+    ),
+  );
+
+  expect(
+    await screen.findByText(
+      "다른 관리 변경이 반영되어 최신 삭제 가능 상태를 불러왔습니다.",
+    ),
+  ).toBeVisible();
+  const dialog = screen.getByRole("dialog", { name: "조직 영구 삭제" });
+  expect(within(dialog).getByText("프로젝트 연결 이력 1건")).toBeVisible();
+  expect(
+    within(dialog).getByLabelText("확인을 위해 조직 이름을 입력하세요."),
+  ).toHaveValue("");
+});
+
+it("keeps the deletion dialog when a conflict refresh reactivates the organization", async () => {
+  let detailReads = 0;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/auth/login")) {
+        return Promise.resolve(Response.json(auth()));
+      }
+      if (
+        url.endsWith("/organizations/org-empty") &&
+        init?.method === "DELETE"
+      ) {
+        return Promise.resolve(new Response(null, { status: 409 }));
+      }
+      if (url.endsWith("/organizations/org-empty")) {
+        detailReads += 1;
+        return Promise.resolve(
+          Response.json(
+            organizationDetail({
+              id: "org-empty",
+              name: "빈 조직",
+              isActive: detailReads > 1,
+              deletionEligibility:
+                detailReads === 1
+                  ? {
+                      canDelete: true,
+                      blockers: deletionBlockers(),
+                    }
+                  : {
+                      canDelete: false,
+                      blockers: deletionBlockers(),
+                    },
+            }),
+          ),
+        );
+      }
+      if (url.endsWith("/organizations/org-empty/audit?limit=50")) {
+        return Promise.resolve(Response.json(emptyAuditPage()));
+      }
+      throw new Error(`unexpected request: ${url}`);
+    }),
+  );
+
+  renderOrganizationDetail("org-empty");
+  await login();
+  fireEvent.click(
+    within(await screen.findByRole("region", { name: "위험 구역" })).getByRole(
+      "button",
+      { name: "조직 영구 삭제" },
+    ),
+  );
+  fireEvent.change(
+    screen.getByLabelText("확인을 위해 조직 이름을 입력하세요."),
+    { target: { value: "빈 조직" } },
+  );
+  fireEvent.click(
+    within(screen.getByRole("dialog", { name: "조직 영구 삭제" })).getByRole(
+      "button",
+      { name: "조직 영구 삭제" },
+    ),
+  );
+
+  expect(
+    await screen.findByText(
+      "다른 관리 변경이 반영되어 최신 삭제 가능 상태를 불러왔습니다.",
+    ),
+  ).toBeVisible();
+  const dialog = screen.getByRole("dialog", { name: "조직 영구 삭제" });
+  expect(
+    within(dialog).getByRole("button", { name: "조직 영구 삭제" }),
+  ).toBeDisabled();
+  expect(
+    screen.queryByRole("region", { name: "위험 구역" }),
+  ).not.toBeInTheDocument();
+});
+
+it("preserves the typed name after a generic deletion failure", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/auth/login")) {
+        return Promise.resolve(Response.json(auth()));
+      }
+      if (
+        url.endsWith("/organizations/org-empty") &&
+        init?.method === "DELETE"
+      ) {
+        return Promise.resolve(new Response(null, { status: 503 }));
+      }
+      if (url.endsWith("/organizations/org-empty")) {
+        return Promise.resolve(
+          Response.json(
+            organizationDetail({
+              id: "org-empty",
+              name: "빈 조직",
+              isActive: false,
+            }),
+          ),
+        );
+      }
+      if (url.endsWith("/organizations/org-empty/audit?limit=50")) {
+        return Promise.resolve(Response.json(emptyAuditPage()));
+      }
+      throw new Error(`unexpected request: ${url}`);
+    }),
+  );
+
+  renderOrganizationDetail("org-empty");
+  await login();
+  fireEvent.click(
+    within(await screen.findByRole("region", { name: "위험 구역" })).getByRole(
+      "button",
+      { name: "조직 영구 삭제" },
+    ),
+  );
+  const confirmationName = screen.getByLabelText(
+    "확인을 위해 조직 이름을 입력하세요.",
+  );
+  fireEvent.change(confirmationName, { target: { value: "빈 조직" } });
+  fireEvent.click(
+    within(screen.getByRole("dialog", { name: "조직 영구 삭제" })).getByRole(
+      "button",
+      { name: "조직 영구 삭제" },
+    ),
+  );
+
+  const dialog = await screen.findByRole("dialog", {
+    name: "조직 영구 삭제",
+  });
+  expect(
+    within(dialog).getByText("조직을 영구 삭제하지 못했습니다."),
+  ).toBeVisible();
+  expect(
+    within(dialog).getByLabelText("확인을 위해 조직 이름을 입력하세요."),
+  ).toHaveValue("빈 조직");
+});
+
+it("navigates to the list when deletion reports an already deleted organization", async () => {
+  window.history.replaceState(null, "", "/organizations/org-empty");
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/auth/login")) {
+        return Promise.resolve(Response.json(auth()));
+      }
+      if (
+        url.endsWith("/organizations/org-empty") &&
+        init?.method === "DELETE"
+      ) {
+        return Promise.resolve(new Response(null, { status: 404 }));
+      }
+      if (url.endsWith("/organizations/org-empty")) {
+        return Promise.resolve(
+          Response.json(
+            organizationDetail({
+              id: "org-empty",
+              name: "빈 조직",
+              isActive: false,
+            }),
+          ),
+        );
+      }
+      if (url.endsWith("/organizations/org-empty/audit?limit=50")) {
+        return Promise.resolve(Response.json(emptyAuditPage()));
+      }
+      throw new Error(`unexpected request: ${url}`);
+    }),
+  );
+
+  renderOrganizationDetail("org-empty");
+  await login();
+  fireEvent.click(
+    within(await screen.findByRole("region", { name: "위험 구역" })).getByRole(
+      "button",
+      { name: "조직 영구 삭제" },
+    ),
+  );
+  fireEvent.change(
+    screen.getByLabelText("확인을 위해 조직 이름을 입력하세요."),
+    { target: { value: "빈 조직" } },
+  );
+  fireEvent.click(
+    within(screen.getByRole("dialog", { name: "조직 영구 삭제" })).getByRole(
+      "button",
+      { name: "조직 영구 삭제" },
+    ),
+  );
+
+  await waitFor(() => expect(window.location.pathname).toBe("/organizations"));
+  expect(window.history.state).toEqual({
+    organizationNotice: "요청한 조직은 이미 삭제됐거나 찾을 수 없습니다.",
+  });
+});
+
+it("navigates from an already deleted organization detail URL", async () => {
+  window.history.replaceState(null, "", "/organizations/org-missing");
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/auth/login")) {
+        return Promise.resolve(Response.json(auth()));
+      }
+      if (url.endsWith("/organizations/org-missing")) {
+        return Promise.resolve(new Response(null, { status: 404 }));
+      }
+      if (url.endsWith("/organizations/org-missing/audit?limit=50")) {
+        return Promise.resolve(Response.json(emptyAuditPage()));
+      }
+      throw new Error(`unexpected request: ${url}`);
+    }),
+  );
+
+  renderOrganizationDetail("org-missing");
+  await login();
+
+  await waitFor(() => expect(window.location.pathname).toBe("/organizations"));
+  expect(window.history.state).toEqual({
+    organizationNotice: "요청한 조직은 이미 삭제됐거나 찾을 수 없습니다.",
+  });
+  expect(
+    screen.queryByText("조직 정보를 불러오지 못했습니다."),
+  ).not.toBeInTheDocument();
+});
+
+it("ignores a deletion response owned by a previous organization", async () => {
+  window.history.replaceState(null, "", "/organizations/org-old");
+  const deletion = deferred<Response>();
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/auth/login")) {
+        return Promise.resolve(Response.json(auth()));
+      }
+      if (url.endsWith("/organizations/org-old") && init?.method === "DELETE") {
+        return deletion.promise;
+      }
+      if (url.endsWith("/organizations/org-old")) {
+        return Promise.resolve(
+          Response.json(
+            organizationDetail({
+              id: "org-old",
+              name: "이전 조직",
+              isActive: false,
+            }),
+          ),
+        );
+      }
+      if (url.endsWith("/organizations/org-new")) {
+        return Promise.resolve(
+          Response.json(
+            organizationDetail({
+              id: "org-new",
+              name: "새 조직",
+            }),
+          ),
+        );
+      }
+      if (
+        url.endsWith("/organizations/org-old/audit?limit=50") ||
+        url.endsWith("/organizations/org-new/audit?limit=50")
+      ) {
+        return Promise.resolve(Response.json(emptyAuditPage()));
+      }
+      throw new Error(`unexpected request: ${url}`);
+    }),
+  );
+
+  const view = renderOrganizationDetail("org-old");
+  await login();
+  fireEvent.click(
+    within(await screen.findByRole("region", { name: "위험 구역" })).getByRole(
+      "button",
+      { name: "조직 영구 삭제" },
+    ),
+  );
+  fireEvent.change(
+    screen.getByLabelText("확인을 위해 조직 이름을 입력하세요."),
+    { target: { value: "이전 조직" } },
+  );
+  fireEvent.click(
+    within(screen.getByRole("dialog", { name: "조직 영구 삭제" })).getByRole(
+      "button",
+      { name: "조직 영구 삭제" },
+    ),
+  );
+
+  window.history.replaceState(null, "", "/organizations/org-new");
+  view.rerender(
+    <AuthProvider restoreOnMount={false}>
+      <Gate>
+        <OrganizationDetailPage organizationId="org-new" />
+      </Gate>
+    </AuthProvider>,
+  );
+  expect(await screen.findByRole("heading", { name: "새 조직" })).toBeVisible();
+  await act(async () => {
+    deletion.resolve(new Response(null, { status: 204 }));
+    await deletion.promise;
+  });
+
+  expect(window.location.pathname).toBe("/organizations/org-new");
+  expect(window.history.state?.organizationNotice).toBeUndefined();
+  expect(screen.getByRole("heading", { name: "새 조직" })).toBeVisible();
+});
+
+it("consumes an organization list notice only once", async () => {
+  const notice = "조직 “빈 조직”을 영구 삭제했습니다.";
+  window.history.replaceState(
+    { preserved: "state", organizationNotice: notice },
+    "",
+    "/organizations",
+  );
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/auth/login")) {
+        return Promise.resolve(Response.json(auth()));
+      }
+      if (url.includes("/organizations?")) {
+        return Promise.resolve(Response.json([]));
+      }
+      throw new Error(`unexpected request: ${url}`);
+    }),
+  );
+
+  const firstView = renderOrganizationsPage();
+  await login();
+  expect(await screen.findByText(notice)).toBeVisible();
+  expect(window.history.state).toEqual({ preserved: "state" });
+
+  firstView.unmount();
+  renderOrganizationsPage();
+  await login();
+  await screen.findByText("조건에 맞는 조직이 없습니다.");
+  expect(screen.queryByText(notice)).not.toBeInTheDocument();
+});
+
 function Gate({ children }: { children: React.ReactNode }) {
   return useAuth().auth ? children : <LoginPage />;
+}
+
+function renderOrganizationDetail(organizationId: string) {
+  return render(
+    <AuthProvider restoreOnMount={false}>
+      <Gate>
+        <OrganizationDetailPage organizationId={organizationId} />
+      </Gate>
+    </AuthProvider>,
+  );
+}
+
+function renderOrganizationsPage() {
+  return render(
+    <AuthProvider restoreOnMount={false}>
+      <Gate>
+        <OrganizationsPage />
+      </Gate>
+    </AuthProvider>,
+  );
 }
 
 async function login() {
@@ -2214,7 +2833,23 @@ function auditItem(action: string) {
   };
 }
 
-function organizationDetail() {
+const emptyDeletionBlockers: OrganizationDeletionBlockers = {
+  managerAssignments: 0,
+  participants: 0,
+  projectLinks: 0,
+  rosterEntries: 0,
+  expectedSnapshots: 0,
+};
+
+function deletionBlockers(
+  overrides: Partial<OrganizationDeletionBlockers> = {},
+): OrganizationDeletionBlockers {
+  return { ...emptyDeletionBlockers, ...overrides };
+}
+
+function organizationDetail(
+  overrides: Partial<OrganizationDetail> = {},
+): OrganizationDetail {
   return {
     id: "org-1",
     name: "1팀",
@@ -2224,7 +2859,16 @@ function organizationDetail() {
     projectCount: 0,
     managers: [],
     projects: [],
+    deletionEligibility: {
+      canDelete: true,
+      blockers: deletionBlockers(),
+    },
+    ...overrides,
   };
+}
+
+function emptyAuditPage() {
+  return { items: [], nextCursor: null };
 }
 
 function organizationDetailWithManagers() {

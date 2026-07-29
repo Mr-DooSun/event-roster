@@ -200,3 +200,89 @@ test("operator delegates pre-registration roster entry to an organization leader
     0,
   );
 });
+
+test("operator safely deletes only an inactive empty organization", async ({
+  page,
+}) => {
+  const data = fixture();
+  await login(page, data.operator.loginId, data.operator.password);
+  await page.getByRole("link", { name: "조직 관리" }).click();
+
+  await page.getByRole("button", { name: "새 조직" }).click();
+  await page
+    .getByRole("dialog", { name: "새 조직" })
+    .getByLabel("조직 이름")
+    .fill("E2E 삭제 조직");
+  await page.getByRole("button", { name: "조직 만들기" }).click();
+  await page.getByRole("link", { name: "E2E 삭제 조직 상세 관리" }).click();
+  const deletedDetailUrl = page.url();
+
+  await page.getByRole("button", { name: "조직 사용 중지" }).click();
+  await page.getByRole("button", { name: "상태 변경 확인" }).click();
+  const dangerZone = page.getByRole("region", { name: "위험 구역" });
+  await expect(dangerZone).toBeVisible();
+  await dangerZone.getByRole("button", { name: "조직 영구 삭제" }).click();
+  const deletionDialog = page.getByRole("dialog", {
+    name: "조직 영구 삭제",
+  });
+  const confirmationName = deletionDialog.getByLabel(
+    "확인을 위해 조직 이름을 입력하세요.",
+  );
+  await confirmationName.fill(" E2E 삭제 조직 ");
+  await expect(
+    deletionDialog.getByRole("button", { name: "조직 영구 삭제" }),
+  ).toBeDisabled();
+  await confirmationName.fill("E2E 삭제 조직");
+  await deletionDialog.getByRole("button", { name: "조직 영구 삭제" }).click();
+
+  await expect(
+    page.getByText("조직 “E2E 삭제 조직”을 영구 삭제했습니다."),
+  ).toBeVisible();
+  await expect(page).toHaveURL(/\/organizations$/);
+
+  await page.goto(deletedDetailUrl);
+  await expect(page).toHaveURL(/\/organizations$/);
+  await expect(
+    page.getByText("요청한 조직은 이미 삭제됐거나 찾을 수 없습니다."),
+  ).toBeVisible();
+
+  await page.getByRole("button", { name: "새 조직" }).click();
+  await page
+    .getByRole("dialog", { name: "새 조직" })
+    .getByLabel("조직 이름")
+    .fill("E2E 삭제 조직");
+  await page.getByRole("button", { name: "조직 만들기" }).click();
+  await page.getByRole("link", { name: "E2E 삭제 조직 상세 관리" }).click();
+  expect(page.url()).not.toBe(deletedDetailUrl);
+
+  await page.getByRole("link", { name: "조직 관리" }).click();
+  await page.getByRole("button", { name: "새 조직" }).click();
+  await page
+    .getByRole("dialog", { name: "새 조직" })
+    .getByLabel("조직 이름")
+    .fill("E2E 삭제 차단 조직");
+  await page.getByRole("button", { name: "조직 만들기" }).click();
+  await page
+    .getByRole("link", { name: "E2E 삭제 차단 조직 상세 관리" })
+    .click();
+  const blockedDetailUrl = page.url();
+
+  await page.goto(`/projects/${data.projectId}`);
+  await page.getByRole("tab", { name: "조직" }).click();
+  await page
+    .getByRole("combobox", { name: "조직 이름 검색 또는 입력" })
+    .fill("E2E 삭제 차단 조직");
+  await page.getByRole("option", { name: /E2E 삭제 차단 조직/ }).click();
+  await page.getByRole("button", { name: "프로젝트에 추가" }).click();
+
+  await page.goto(blockedDetailUrl);
+  await page.getByRole("button", { name: "조직 사용 중지" }).click();
+  await page.getByRole("button", { name: "상태 변경 확인" }).click();
+  const blockedDangerZone = page.getByRole("region", { name: "위험 구역" });
+  await expect(
+    blockedDangerZone.getByText("프로젝트 연결 이력 1건"),
+  ).toBeVisible();
+  await expect(
+    blockedDangerZone.getByRole("button", { name: "조직 영구 삭제" }),
+  ).toBeDisabled();
+});

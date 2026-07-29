@@ -21,6 +21,7 @@ import { ApiError } from "../../lib/api";
 import { getTotalOrganizationManagerCount } from "../../lib/organization-summary";
 import { useAuth } from "../auth/AuthProvider";
 import { AuditPanel, type AuditView } from "../roster/AuditPanel";
+import { OrganizationDeletionPanel } from "./OrganizationDeletionPanel";
 import { OrganizationManagersPanel } from "./OrganizationManagersPanel";
 import { TemporaryPasswordDialog } from "./TemporaryPasswordDialog";
 
@@ -59,9 +60,14 @@ export function OrganizationDetailPage({
   const [auditLoading, setAuditLoading] = useState(true);
   const [auditLoaded, setAuditLoaded] = useState(false);
   const [auditLoadingMore, setAuditLoadingMore] = useState(false);
-  const [mutating, setMutating] = useState<"RENAME" | "STATUS" | null>(null);
+  const [mutating, setMutating] = useState<
+    "RENAME" | "STATUS" | "DELETE" | null
+  >(null);
   const [message, setMessage] = useState<string | null>(null);
   const [showStatusConfirmation, setShowStatusConfirmation] = useState(false);
+  const [showDeleteConfirmation, setShowDeleteConfirmation] = useState(false);
+  const [deleteConfirmationName, setDeleteConfirmationName] = useState("");
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [temporaryPassword, setTemporaryPassword] = useState<{
     value: string;
     returnFocus?: HTMLElement;
@@ -74,6 +80,7 @@ export function OrganizationDetailPage({
   const auditLoadingRef = useRef(true);
   const auditNextCursorRef = useRef<string | null>(null);
   const auditPaginationRequest = useRef<AuditPaginationRequest | null>(null);
+  const deleteRequestInFlight = useRef(false);
 
   const updateAuditNextCursor = useCallback((nextCursor: string | null) => {
     auditNextCursorRef.current = nextCursor;
@@ -115,13 +122,19 @@ export function OrganizationDetailPage({
       setName(next.name);
       setDetailError(null);
       return true;
-    } catch {
+    } catch (error) {
       if (
         instanceActive.current &&
         generation === detailGeneration.current &&
         activeOrganizationId.current === requestedOrganizationId
       ) {
-        setDetailError("조직 정보를 불러오지 못했습니다.");
+        if (error instanceof ApiError && error.status === 404) {
+          navigateToOrganizationList(
+            "요청한 조직은 이미 삭제됐거나 찾을 수 없습니다.",
+          );
+        } else {
+          setDetailError("조직 정보를 불러오지 못했습니다.");
+        }
       }
       return false;
     } finally {
@@ -206,6 +219,10 @@ export function OrganizationDetailPage({
     setMutating(null);
     setMessage(null);
     setShowStatusConfirmation(false);
+    setShowDeleteConfirmation(false);
+    setDeleteConfirmationName("");
+    setDeleteError(null);
+    deleteRequestInFlight.current = false;
     setTemporaryPassword(null);
     void loadDetail();
     void loadInitialAudit();
@@ -291,6 +308,64 @@ export function OrganizationDetailPage({
         instanceActive.current &&
         activeOrganizationId.current === requestedOrganizationId
       ) {
+        setMutating(null);
+      }
+    }
+  }
+
+  async function deleteOrganization() {
+    if (!organization || deleteRequestInFlight.current) return;
+    deleteRequestInFlight.current = true;
+    const requestedOrganizationId = organizationId;
+    const deletedName = organization.name;
+    setMutating("DELETE");
+    setDeleteError(null);
+    try {
+      await api.delete(
+        `/organizations/${encodeURIComponent(requestedOrganizationId)}`,
+        { confirmationName: deleteConfirmationName },
+      );
+      if (
+        !instanceActive.current ||
+        activeOrganizationId.current !== requestedOrganizationId
+      ) {
+        return;
+      }
+      navigateToOrganizationList(`조직 “${deletedName}”을 영구 삭제했습니다.`);
+    } catch (error) {
+      if (
+        !instanceActive.current ||
+        activeOrganizationId.current !== requestedOrganizationId
+      ) {
+        return;
+      }
+      if (error instanceof ApiError && error.status === 409) {
+        const reloaded = await loadDetail();
+        if (
+          !instanceActive.current ||
+          activeOrganizationId.current !== requestedOrganizationId
+        ) {
+          return;
+        }
+        setDeleteConfirmationName("");
+        setDeleteError(
+          reloaded
+            ? "다른 관리 변경이 반영되어 최신 삭제 가능 상태를 불러왔습니다."
+            : "삭제 조건이 변경됐지만 최신 조직 정보를 불러오지 못했습니다.",
+        );
+      } else if (error instanceof ApiError && error.status === 404) {
+        navigateToOrganizationList(
+          "요청한 조직은 이미 삭제됐거나 찾을 수 없습니다.",
+        );
+      } else {
+        setDeleteError("조직을 영구 삭제하지 못했습니다.");
+      }
+    } finally {
+      if (
+        instanceActive.current &&
+        activeOrganizationId.current === requestedOrganizationId
+      ) {
+        deleteRequestInFlight.current = false;
         setMutating(null);
       }
     }
@@ -554,6 +629,27 @@ export function OrganizationDetailPage({
           />
         </div>
       ) : null}
+      {organization ? (
+        <OrganizationDeletionPanel
+          organization={organization}
+          dialogOpen={showDeleteConfirmation}
+          confirmationName={deleteConfirmationName}
+          deleting={mutating === "DELETE"}
+          error={deleteError}
+          onOpen={() => {
+            setDeleteConfirmationName("");
+            setDeleteError(null);
+            setShowDeleteConfirmation(true);
+          }}
+          onClose={() => {
+            setShowDeleteConfirmation(false);
+            setDeleteConfirmationName("");
+            setDeleteError(null);
+          }}
+          onConfirmationNameChange={setDeleteConfirmationName}
+          onConfirm={() => void deleteOrganization()}
+        />
+      ) : null}
       {showStatusConfirmation && organization ? (
         <Dialog
           title="조직 상태 변경"
@@ -589,6 +685,12 @@ export function OrganizationDetailPage({
       ) : null}
     </div>
   );
+}
+
+function navigateToOrganizationList(organizationNotice: string) {
+  const state = { organizationNotice };
+  window.history.pushState(state, "", "/organizations");
+  window.dispatchEvent(new PopStateEvent("popstate", { state }));
 }
 
 function OrganizationDetailSkeleton() {

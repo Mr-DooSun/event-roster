@@ -44,10 +44,12 @@ export function OrganizationDeletionPanel({
     if (!dialogOpen || !deleting) confirmationLockedRef.current = false;
   }, [dialogOpen, deleting]);
 
-  if (organization.isActive) return null;
+  if (organization.isActive && !dialogOpen) return null;
 
-  const canDelete = organization.deletionEligibility.canDelete;
-  const canConfirm = confirmationName === organization.name && !deleting;
+  const canDelete =
+    !organization.isActive && organization.deletionEligibility.canDelete;
+  const canConfirm =
+    canDelete && confirmationName === organization.name && !deleting;
 
   function closeDialog() {
     if (!deleting) onClose();
@@ -61,44 +63,33 @@ export function OrganizationDeletionPanel({
 
   return (
     <>
-      <section className="er-danger-zone" aria-label="위험 구역">
-        <h2>위험 구역</h2>
-        {canDelete ? (
-          <>
-            <p>이 조직은 연결된 데이터가 없어 영구 삭제할 수 있습니다.</p>
-            <Button type="button" variant="danger" onClick={onOpen}>
-              조직 영구 삭제
-            </Button>
-          </>
-        ) : (
-          <>
-            <p>이 조직에는 보존해야 할 연결 데이터가 있어 삭제할 수 없습니다.</p>
-            <ul className="er-danger-zone__blockers">
-              {(Object.keys(BLOCKER_LABELS) as Array<
-                keyof OrganizationDeletionBlockers
-              >)
-                .filter(
-                  (key) => organization.deletionEligibility.blockers[key] > 0,
-                )
-                .map((key) => {
-                  const [label, unit] = BLOCKER_LABELS[key];
-                  const count = organization.deletionEligibility.blockers[key];
-                  return (
-                    <li key={key}>
-                      {label} {count}
-                      {unit}
-                    </li>
-                  );
-                })}
-            </ul>
-            <p>사용 중지 상태로 유지하면 기존 기록은 보존됩니다.</p>
-            <Button type="button" variant="danger" disabled>
-              조직 영구 삭제
-            </Button>
-          </>
-        )}
-      </section>
-      {dialogOpen && canDelete ? (
+      {!organization.isActive ? (
+        <section className="er-danger-zone" aria-label="위험 구역">
+          <h2>위험 구역</h2>
+          {canDelete ? (
+            <>
+              <p>이 조직은 연결된 데이터가 없어 영구 삭제할 수 있습니다.</p>
+              <Button type="button" variant="danger" onClick={onOpen}>
+                조직 영구 삭제
+              </Button>
+            </>
+          ) : (
+            <>
+              <p>
+                이 조직에는 보존해야 할 연결 데이터가 있어 삭제할 수 없습니다.
+              </p>
+              <DeletionBlockerList
+                blockers={organization.deletionEligibility.blockers}
+              />
+              <p>사용 중지 상태로 유지하면 기존 기록은 보존됩니다.</p>
+              <Button type="button" variant="danger" disabled>
+                조직 영구 삭제
+              </Button>
+            </>
+          )}
+        </section>
+      ) : null}
+      {dialogOpen ? (
         <Dialog
           title="조직 영구 삭제"
           onClose={closeDialog}
@@ -106,9 +97,21 @@ export function OrganizationDeletionPanel({
         >
           <div className="er-dialog-form er-organization-deletion-dialog">
             <p>
-              <span className="er-danger-zone__target">{organization.name}</span>
+              <span className="er-danger-zone__target">
+                {organization.name}
+              </span>
               조직을 영구 삭제합니다. 이 작업은 되돌릴 수 없습니다.
             </p>
+            {organization.isActive ? (
+              <p>조직이 다시 사용 중이어서 영구 삭제할 수 없습니다.</p>
+            ) : !canDelete ? (
+              <>
+                <p>최신 상태에는 보존해야 할 연결 데이터가 있습니다.</p>
+                <DeletionBlockerList
+                  blockers={organization.deletionEligibility.blockers}
+                />
+              </>
+            ) : null}
             <TextInput
               label="확인을 위해 조직 이름을 입력하세요."
               value={confirmationName}
@@ -141,5 +144,29 @@ export function OrganizationDeletionPanel({
         </Dialog>
       ) : null}
     </>
+  );
+}
+
+function DeletionBlockerList({
+  blockers,
+}: {
+  blockers: OrganizationDeletionBlockers;
+}) {
+  return (
+    <ul className="er-danger-zone__blockers">
+      {(
+        Object.keys(BLOCKER_LABELS) as Array<keyof OrganizationDeletionBlockers>
+      )
+        .filter((key) => blockers[key] > 0)
+        .map((key) => {
+          const [label, unit] = BLOCKER_LABELS[key];
+          return (
+            <li key={key}>
+              {label} {blockers[key]}
+              {unit}
+            </li>
+          );
+        })}
+    </ul>
   );
 }

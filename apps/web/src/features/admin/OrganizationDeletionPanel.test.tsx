@@ -97,9 +97,7 @@ it("shows only positive blockers and disables permanent deletion", () => {
   expect(screen.getByText("프로젝트 연결 이력 2건")).toBeVisible();
   expect(screen.getByText("예상 인원 기록 1건")).toBeVisible();
   expect(screen.queryByText("담당자 배정 0건")).not.toBeInTheDocument();
-  expect(
-    screen.getByRole("button", { name: "조직 영구 삭제" }),
-  ).toBeDisabled();
+  expect(screen.getByRole("button", { name: "조직 영구 삭제" })).toBeDisabled();
 });
 
 it("requires the exact current name and locks the dialog while deleting", () => {
@@ -158,7 +156,9 @@ it("requires the exact current name and locks the dialog while deleting", () => 
 it("shows the deletion error and wraps a long target name", () => {
   render(
     <OrganizationDeletionPanel
-      organization={organization({ name: "매우긴조직이름매우긴조직이름매우긴조직이름" })}
+      organization={organization({
+        name: "매우긴조직이름매우긴조직이름매우긴조직이름",
+      })}
       dialogOpen
       confirmationName=""
       deleting={false}
@@ -176,6 +176,71 @@ it("shows the deletion error and wraps a long target name", () => {
   expect(
     screen.getByText("매우긴조직이름매우긴조직이름매우긴조직이름"),
   ).toHaveClass("er-danger-zone__target");
+});
+
+it("keeps the dialog open with latest blockers after eligibility changes", () => {
+  render(
+    <OrganizationDeletionPanel
+      organization={organization({
+        deletionEligibility: {
+          canDelete: false,
+          blockers: {
+            ...emptyBlockers,
+            projectLinks: 1,
+          },
+        },
+      })}
+      dialogOpen
+      confirmationName="황룡사"
+      deleting={false}
+      error="다른 관리 변경이 반영되어 최신 삭제 가능 상태를 불러왔습니다."
+      onOpen={vi.fn()}
+      onClose={vi.fn()}
+      onConfirmationNameChange={vi.fn()}
+      onConfirm={vi.fn()}
+    />,
+  );
+
+  const dialog = screen.getByRole("dialog", { name: "조직 영구 삭제" });
+  expect(within(dialog).getByText("프로젝트 연결 이력 1건")).toBeVisible();
+  expect(
+    within(dialog).getByRole("button", { name: "조직 영구 삭제" }),
+  ).toBeDisabled();
+});
+
+it("keeps the dialog open when the organization becomes active", () => {
+  render(
+    <OrganizationDeletionPanel
+      organization={organization({
+        isActive: true,
+        deletionEligibility: {
+          canDelete: false,
+          blockers: emptyBlockers,
+        },
+      })}
+      dialogOpen
+      confirmationName=""
+      deleting={false}
+      error="다른 관리 변경이 반영되어 최신 삭제 가능 상태를 불러왔습니다."
+      onOpen={vi.fn()}
+      onClose={vi.fn()}
+      onConfirmationNameChange={vi.fn()}
+      onConfirm={vi.fn()}
+    />,
+  );
+
+  const dialog = screen.getByRole("dialog", { name: "조직 영구 삭제" });
+  expect(
+    within(dialog).getByText(
+      "다른 관리 변경이 반영되어 최신 삭제 가능 상태를 불러왔습니다.",
+    ),
+  ).toBeVisible();
+  expect(
+    within(dialog).getByRole("button", { name: "조직 영구 삭제" }),
+  ).toBeDisabled();
+  expect(
+    screen.queryByRole("region", { name: "위험 구역" }),
+  ).not.toBeInTheDocument();
 });
 
 it("blocks repeated exact-name confirms before the parent rerenders", () => {
@@ -244,7 +309,9 @@ it("allows another confirmation after a deleting cycle or a new dialog attempt",
   expect(onConfirm).toHaveBeenCalledTimes(1);
 
   rerender(<OrganizationDeletionPanel dialogOpen deleting {...props} />);
-  rerender(<OrganizationDeletionPanel dialogOpen deleting={false} {...props} />);
+  rerender(
+    <OrganizationDeletionPanel dialogOpen deleting={false} {...props} />,
+  );
   fireEvent.click(
     within(screen.getByRole("dialog", { name: "조직 영구 삭제" })).getByRole(
       "button",
@@ -253,8 +320,16 @@ it("allows another confirmation after a deleting cycle or a new dialog attempt",
   );
   expect(onConfirm).toHaveBeenCalledTimes(2);
 
-  rerender(<OrganizationDeletionPanel dialogOpen={false} deleting={false} {...props} />);
-  rerender(<OrganizationDeletionPanel dialogOpen deleting={false} {...props} />);
+  rerender(
+    <OrganizationDeletionPanel
+      dialogOpen={false}
+      deleting={false}
+      {...props}
+    />,
+  );
+  rerender(
+    <OrganizationDeletionPanel dialogOpen deleting={false} {...props} />,
+  );
   fireEvent.click(
     within(screen.getByRole("dialog", { name: "조직 영구 삭제" })).getByRole(
       "button",

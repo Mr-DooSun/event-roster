@@ -1,4 +1,5 @@
 import "@testing-library/jest-dom/vitest";
+import type { OrganizationDetail } from "@event-roster/contracts";
 import {
   act,
   cleanup,
@@ -1188,7 +1189,7 @@ it("routes a project URL to the project roster", async () => {
   expect(mockApi.get).toHaveBeenCalledWith("/projects/project-1");
 });
 
-function organizationDetail() {
+function organizationDetail(): OrganizationDetail {
   return {
     id: "org-1",
     name: "1팀",
@@ -1222,6 +1223,16 @@ function organizationDetail() {
         membershipIsActive: true,
       },
     ],
+    deletionEligibility: {
+      canDelete: false,
+      blockers: {
+        managerAssignments: 2,
+        participants: 0,
+        projectLinks: 1,
+        rosterEntries: 0,
+        expectedSnapshots: 0,
+      },
+    },
   };
 }
 
