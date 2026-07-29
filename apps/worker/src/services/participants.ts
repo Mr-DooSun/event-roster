@@ -523,6 +523,7 @@ export function projectParticipantGuard(
        ) AND EXISTS (
          SELECT 1 FROM projects
          WHERE id = ? AND status = ? AND revision = ?
+           AND deleted_at IS NULL
            AND (end_date IS NULL OR end_date >= ?)
        ) AND (${operationPredicate}) THEN 1 ELSE 0 END)`,
     )

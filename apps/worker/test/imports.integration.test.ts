@@ -15,6 +15,58 @@ beforeEach(resetAuthState);
 
 const studentProfile = { role: "STUDENT" as const, grade: "M1" as const };
 
+async function markProjectDeleted(
+  projectId: string,
+  actorId: string,
+  revision: number,
+) {
+  const timestamp = "2026-07-29T00:00:00.000Z";
+  await env.DB.prepare(
+    `UPDATE projects
+     SET status = 'CLOSED', revision = ?, updated_at = ?,
+         closed_at = ?, closed_by = ?, close_reason = 'MANUAL',
+         deleted_at = ?, deleted_by = ?, deleted_revision = ?
+     WHERE id = ?`,
+  )
+    .bind(
+      revision + 1,
+      timestamp,
+      timestamp,
+      actorId,
+      timestamp,
+      actorId,
+      revision + 1,
+      projectId,
+    )
+    .run();
+}
+
+it("rejects import validation after the project is deleted", async () => {
+  const fixture = await setupPreRegistration();
+  await markProjectDeleted(
+    fixture.project.id,
+    fixture.operator.userId,
+    fixture.project.revision,
+  );
+
+  const response = await authedRequest(
+    fixture.operator,
+    `/api/v1/projects/${fixture.project.id}/imports/validate`,
+    {
+      method: "POST",
+      body: JSON.stringify([
+        {
+          rowNumber: 2,
+          name: "삭제 후 가져오기",
+          organizationName: "1팀",
+          ...studentProfile,
+        },
+      ]),
+    },
+  );
+  expect(response.status).toBe(404);
+});
+
 it("commits 130 valid normalized rows atomically", async () => {
   const fixture = await setupPreRegistration();
   const rows = Array.from({ length: 130 }, (_, index) => ({

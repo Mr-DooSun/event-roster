@@ -81,6 +81,8 @@ function toHttpProblem(error: Error): HttpProblem {
       INVALID_TRANSITION: [409, "허용되지 않은 프로젝트 상태 변경입니다."],
       STALE_REVISION: [409, "다른 변경이 먼저 반영되었습니다."],
       PROJECT_CLOSED: [409, "종료된 프로젝트는 변경할 수 없습니다."],
+      PROJECT_NOT_CLOSED: [409, "종료된 프로젝트만 삭제할 수 있습니다."],
+      CONFIRMATION_MISMATCH: [409, "프로젝트 이름이 일치하지 않습니다."],
       NOT_FOUND: [404, "요청한 데이터를 찾을 수 없습니다."],
       VALIDATION_FAILED: [422, "입력값을 확인해 주세요."],
     } as const;

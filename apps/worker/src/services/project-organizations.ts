@@ -81,6 +81,7 @@ export async function addProjectOrganization(
   const operationPredicate = newOrganization
     ? `EXISTS (
          SELECT 1 FROM projects WHERE id = ? AND revision = ?
+           AND deleted_at IS NULL
            AND status <> 'CLOSED'
            AND (end_date IS NULL OR end_date >= ?)
        ) AND NOT EXISTS (
@@ -91,6 +92,7 @@ export async function addProjectOrganization(
        )`
     : `EXISTS (
          SELECT 1 FROM projects WHERE id = ? AND revision = ?
+           AND deleted_at IS NULL
            AND status <> 'CLOSED'
            AND (end_date IS NULL OR end_date >= ?)
        ) AND EXISTS (
@@ -302,6 +304,7 @@ export async function setProjectOrganizationActive(
         actor,
         `EXISTS (
            SELECT 1 FROM projects WHERE id = ? AND revision = ?
+             AND deleted_at IS NULL
              AND status <> 'CLOSED'
              AND (end_date IS NULL OR end_date >= ?)
          ) AND EXISTS (
@@ -323,7 +326,7 @@ export async function setProjectOrganizationActive(
         env.DB.prepare(
           `UPDATE projects
            SET revision = revision + 1, updated_at = ?
-           WHERE id = ? AND revision = ?`,
+           WHERE id = ? AND revision = ? AND deleted_at IS NULL`,
         ).bind(timestamp, projectId, input.expectedProjectRevision),
       ],
       failureCode: "CONFLICT",

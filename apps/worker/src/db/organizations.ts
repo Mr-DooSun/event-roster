@@ -45,7 +45,9 @@ const ORGANIZATION_SUMMARY_SELECT = `SELECT o.id, o.name, o.is_active,
    WHERE uo.organization_id = o.id
      AND uo.assignment_role = 'MANAGER') AS manager_count,
   (SELECT COUNT(*) FROM project_organizations po
-   WHERE po.organization_id = o.id) AS project_count
+   JOIN projects p ON p.id = po.project_id
+   WHERE po.organization_id = o.id
+     AND p.deleted_at IS NULL) AS project_count
   FROM organizations o`;
 
 export async function listOrganizationSummaries(
@@ -128,8 +130,10 @@ export async function findOrganizationDeletionBlockers(
           WHERE organization_id = ?) AS manager_assignments,
          (SELECT COUNT(*) FROM participants
           WHERE organization_id = ?) AS participants,
-         (SELECT COUNT(*) FROM project_organizations
-          WHERE organization_id = ?) AS project_links,
+         (SELECT COUNT(*) FROM project_organizations po
+          JOIN projects p ON p.id = po.project_id
+          WHERE po.organization_id = ?
+            AND p.deleted_at IS NULL) AS project_links,
          (SELECT COUNT(*) FROM project_roster_entries
           WHERE organization_id = ?) AS roster_entries,
          (SELECT COUNT(*) FROM project_expected_snapshots
@@ -210,6 +214,7 @@ export async function findOrganizationDetail(
          FROM project_organizations po
          JOIN projects p ON p.id = po.project_id
          WHERE po.organization_id = ?
+           AND p.deleted_at IS NULL
          ORDER BY CASE WHEN p.status = 'CLOSED' THEN 1 ELSE 0 END,
                   p.name, p.id`,
       )

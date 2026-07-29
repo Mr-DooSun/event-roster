@@ -160,7 +160,8 @@ export async function commitImport(
   }
   statements.push(
     env.DB.prepare(
-      "UPDATE projects SET revision = revision + 1, updated_at = ? WHERE id = ?",
+      `UPDATE projects SET revision = revision + 1, updated_at = ?
+       WHERE id = ? AND deleted_at IS NULL`,
     ).bind(now, projectId),
     env.DB.prepare(
       `INSERT INTO project_import_runs
@@ -185,6 +186,7 @@ export async function commitImport(
         `EXISTS (
            SELECT 1 FROM projects
            WHERE id = ? AND status = 'PRE_REGISTRATION' AND revision = ?
+             AND deleted_at IS NULL
              AND (end_date IS NULL OR end_date >= ?)
          )`,
         [projectId, expectedProjectRevision, toKstDate(currentTime)],

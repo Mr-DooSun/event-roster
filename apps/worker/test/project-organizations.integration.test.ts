@@ -16,6 +16,88 @@ import { addRoster, setupPreRegistration } from "./support/roster";
 beforeEach(resetAuthState);
 afterEach(() => vi.useRealTimers());
 
+async function markProjectDeleted(
+  projectId: string,
+  actorId: string,
+  revision: number,
+) {
+  const timestamp = "2026-07-29T00:00:00.000Z";
+  await env.DB.prepare(
+    `UPDATE projects
+     SET status = 'CLOSED', revision = ?, updated_at = ?,
+         closed_at = ?, closed_by = ?, close_reason = 'MANUAL',
+         deleted_at = ?, deleted_by = ?, deleted_revision = ?
+     WHERE id = ?`,
+  )
+    .bind(
+      revision + 1,
+      timestamp,
+      timestamp,
+      actorId,
+      timestamp,
+      actorId,
+      revision + 1,
+      projectId,
+    )
+    .run();
+}
+
+it("hides project organizations after the project is deleted", async () => {
+  const operator = await seedOperator();
+  const organization = await seedOrganization();
+  const project = await seedProject(operator);
+  await linkProjectOrganization(
+    operator,
+    project.id,
+    organization.id,
+    project.revision,
+  );
+  await markProjectDeleted(project.id, operator.userId, project.revision + 1);
+
+  const response = await authedRequest(
+    operator,
+    `/api/v1/projects/${project.id}/organizations`,
+  );
+  expect(response.status).toBe(404);
+});
+
+it("excludes deleted projects from an organization's active project count", async () => {
+  const operator = await seedOperator();
+  const organization = await seedOrganization();
+  const visibleProject = await seedProject(operator, { name: "표시 프로젝트" });
+  const deletedProject = await seedProject(operator, { name: "삭제 프로젝트" });
+  await linkProjectOrganization(
+    operator,
+    visibleProject.id,
+    organization.id,
+    visibleProject.revision,
+  );
+  const deletedLink = await linkProjectOrganization(
+    operator,
+    deletedProject.id,
+    organization.id,
+    deletedProject.revision,
+  );
+  await markProjectDeleted(
+    deletedProject.id,
+    operator.userId,
+    deletedLink.projectRevision,
+  );
+
+  const organizations = await (
+    await authedRequest(
+      operator,
+      `/api/v1/projects/${visibleProject.id}/organizations`,
+    )
+  ).json<Array<{ organizationId: string; activeProjectCount: number }>>();
+  expect(organizations).toEqual([
+    expect.objectContaining({
+      organizationId: organization.id,
+      activeProjectCount: 1,
+    }),
+  ]);
+});
+
 it("links an existing organization, deactivates it, and reuses the row", async () => {
   const operator = await seedOperator();
   const organization = await seedOrganization();

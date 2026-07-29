@@ -36,8 +36,10 @@ const SELECT_PROJECT_ORGANIZATION = `SELECT
      AND roster.organization_id = po.organization_id
      AND roster.status = 'ACTIVE') AS roster_count,
   (SELECT COUNT(*) FROM project_organizations active
+   JOIN projects active_project ON active_project.id = active.project_id
    WHERE active.organization_id = po.organization_id
-     AND active.is_active = 1) AS active_project_count,
+     AND active.is_active = 1
+     AND active_project.deleted_at IS NULL) AS active_project_count,
   EXISTS (
     SELECT 1 FROM project_roster_entries roster
     WHERE roster.project_id = po.project_id
@@ -89,8 +91,10 @@ export async function countActiveProjectOrganizations(
   const row = await db
     .prepare(
       `SELECT COUNT(*) AS count
-       FROM project_organizations
-       WHERE organization_id = ? AND is_active = 1`,
+       FROM project_organizations po
+       JOIN projects p ON p.id = po.project_id
+       WHERE po.organization_id = ? AND po.is_active = 1
+         AND p.deleted_at IS NULL`,
     )
     .bind(organizationId)
     .first<{ count: number }>();

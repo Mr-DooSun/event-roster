@@ -425,7 +425,7 @@ export async function getSummary(env: Env, actor: Actor, projectId: string) {
          ON s.project_id = p.id AND s.organization_id = po.organization_id
        LEFT JOIN project_roster_entries r
          ON r.project_id = p.id AND r.organization_id = po.organization_id
-       WHERE p.id = ?${scopeSql}
+       WHERE p.id = ? AND p.deleted_at IS NULL${scopeSql}
        GROUP BY po.organization_id, o.name, po.is_active, o.is_active,
                 p.status, s.expected_count
        ORDER BY o.name, po.organization_id`,
@@ -648,6 +648,7 @@ function rosterGuard(
        ) AND EXISTS (
          SELECT 1 FROM projects
          WHERE id = ? AND status = ? AND revision = ?
+           AND deleted_at IS NULL
            AND (end_date IS NULL OR end_date >= ?)
        ) AND (${operationPredicate}) THEN 1 ELSE 0 END)`,
     )

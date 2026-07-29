@@ -15,6 +15,47 @@ import { addRoster, setupPreRegistration } from "./support/roster";
 
 beforeEach(resetAuthState);
 
+async function markProjectDeleted(
+  projectId: string,
+  actorId: string,
+  revision: number,
+) {
+  const timestamp = "2026-07-29T00:00:00.000Z";
+  await env.DB.prepare(
+    `UPDATE projects
+     SET status = 'CLOSED', revision = ?, updated_at = ?,
+         closed_at = ?, closed_by = ?, close_reason = 'MANUAL',
+         deleted_at = ?, deleted_by = ?, deleted_revision = ?
+     WHERE id = ?`,
+  )
+    .bind(
+      revision + 1,
+      timestamp,
+      timestamp,
+      actorId,
+      timestamp,
+      actorId,
+      revision + 1,
+      projectId,
+    )
+    .run();
+}
+
+it("hides the roster after the project is deleted", async () => {
+  const fixture = await setupPreRegistration();
+  await markProjectDeleted(
+    fixture.project.id,
+    fixture.operator.userId,
+    fixture.project.revision,
+  );
+
+  const response = await authedRequest(
+    fixture.operator,
+    `/api/v1/projects/${fixture.project.id}/roster`,
+  );
+  expect(response.status).toBe(404);
+});
+
 it("adds, cancels, and reactivates one roster row with revisions", async () => {
   const fixture = await setupPreRegistration();
   const added = await addRoster(fixture, fixture.firstParticipant.id);

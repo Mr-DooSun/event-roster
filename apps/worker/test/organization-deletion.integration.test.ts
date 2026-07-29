@@ -20,6 +20,60 @@ import {
 
 beforeEach(resetAuthState);
 
+async function markProjectDeleted(
+  projectId: string,
+  actorId: string,
+  revision: number,
+) {
+  const timestamp = "2026-07-29T00:00:00.000Z";
+  await env.DB.prepare(
+    `UPDATE projects
+     SET status = 'CLOSED', revision = ?, updated_at = ?,
+         closed_at = ?, closed_by = ?, close_reason = 'MANUAL',
+         deleted_at = ?, deleted_by = ?, deleted_revision = ?
+     WHERE id = ?`,
+  )
+    .bind(
+      revision + 1,
+      timestamp,
+      timestamp,
+      actorId,
+      timestamp,
+      actorId,
+      revision + 1,
+      projectId,
+    )
+    .run();
+}
+
+it("does not count deleted project links as organization blockers", async () => {
+  const operator = await seedOperator();
+  await seedOrganization("deleted-link-org", "삭제 프로젝트 조직", false);
+  const project = await seedProject(operator, { name: "삭제된 연결" });
+  const timestamp = "2026-07-29T00:00:00.000Z";
+  await env.DB.prepare(
+    `INSERT INTO project_organizations
+     (project_id, organization_id, is_active, added_at, deactivated_at,
+      added_by, updated_by)
+     VALUES (?, 'deleted-link-org', 0, ?, ?, ?, ?)`,
+  )
+    .bind(
+      project.id,
+      timestamp,
+      timestamp,
+      operator.userId,
+      operator.userId,
+    )
+    .run();
+  await markProjectDeleted(project.id, operator.userId, project.revision);
+
+  const detail = await (
+    await authedRequest(operator, "/api/v1/organizations/deleted-link-org")
+  ).json<OrganizationDetail>();
+  expect(detail.projects).toEqual([]);
+  expect(detail.deletionEligibility.blockers.projectLinks).toBe(0);
+});
+
 function synchronizeFirstBatches(
   db: D1Database,
   participantCount: number,

@@ -1,6 +1,8 @@
 import {
   CreateProjectRequestSchema,
+  DeleteProjectRequestSchema,
   ProjectStatusSchema,
+  RestoreProjectRequestSchema,
   UpdateProjectRequestSchema,
 } from "@event-roster/contracts";
 import { Hono } from "hono";
@@ -19,6 +21,8 @@ import {
   createProject,
   getProject,
   getProjects,
+  restoreProject,
+  softDeleteProject,
   updateProject,
 } from "../services/projects";
 
@@ -27,18 +31,33 @@ const ProjectTransitionSchema = z.object({
   expectedRevision: z.number().int().nonnegative(),
 });
 
+const IncludeDeletedQuerySchema = z.object({
+  includeDeleted: z.enum(["true"]).optional(),
+});
+
 export const projectRoutes = new Hono<{ Bindings: Env }>();
 
 projectRoutes.get("/projects", async (c) => {
   const actor = await requireActor(c.req.raw, c.env);
   requireFullSession(actor);
-  return c.json(await getProjects(c.env, actor));
+  const query = IncludeDeletedQuerySchema.parse(c.req.query());
+  return c.json(
+    await getProjects(c.env, actor, query.includeDeleted === "true"),
+  );
 });
 
 projectRoutes.get("/projects/:id", async (c) => {
   const actor = await requireActor(c.req.raw, c.env);
   requireFullSession(actor);
-  return c.json(await getProject(c.env, actor, c.req.param("id")));
+  const query = IncludeDeletedQuerySchema.parse(c.req.query());
+  return c.json(
+    await getProject(
+      c.env,
+      actor,
+      c.req.param("id"),
+      query.includeDeleted === "true",
+    ),
+  );
 });
 
 projectRoutes.post("/projects", async (c) => {
@@ -57,6 +76,28 @@ projectRoutes.patch("/projects/:id", async (c) => {
   requireAdministrativeOperator(actor);
   const input = UpdateProjectRequestSchema.parse(await c.req.json());
   return c.json(await updateProject(c.env, actor, c.req.param("id"), input));
+});
+
+projectRoutes.delete("/projects/:id", async (c) => {
+  assertExactOrigin(c.req.raw, c.env.APP_ORIGIN);
+  const actor = await requireActor(c.req.raw, c.env);
+  await requireCsrf(c.req.raw, actor);
+  requireAdministrativeOperator(actor);
+  const input = DeleteProjectRequestSchema.parse(await c.req.json());
+  return c.json(
+    await softDeleteProject(c.env, actor, c.req.param("id"), input),
+  );
+});
+
+projectRoutes.post("/projects/:id/restore", async (c) => {
+  assertExactOrigin(c.req.raw, c.env.APP_ORIGIN);
+  const actor = await requireActor(c.req.raw, c.env);
+  await requireCsrf(c.req.raw, actor);
+  requireAdministrativeOperator(actor);
+  const input = RestoreProjectRequestSchema.parse(await c.req.json());
+  return c.json(
+    await restoreProject(c.env, actor, c.req.param("id"), input),
+  );
 });
 
 projectRoutes.post("/projects/:id/transition", async (c) => {

@@ -2,11 +2,12 @@ import { env } from "cloudflare:workers";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import {
   authedRequest,
+  seedManager,
   seedOperator,
   seedOrganization,
   seedProject,
 } from "./support/admin";
-import { resetAuthState } from "./support/auth";
+import { login, resetAuthState, seedUser } from "./support/auth";
 
 beforeEach(resetAuthState);
 afterEach(() => vi.useRealTimers());
@@ -86,6 +87,224 @@ it("returns project detail and orders open projects before recently closed proje
     undated.id,
     closed.id,
   ]);
+});
+
+it("soft-deletes and restores a closed project while preserving one audit per action", async () => {
+  const operator = await seedOperator();
+  let project = await seedProject(operator, { name: "1회 수련 법회" });
+  project = await transition(operator, project, "IN_PROGRESS");
+  project = await transition(operator, project, "CLOSED");
+
+  const deleted = await authedRequest(
+    operator,
+    `/api/v1/projects/${project.id}`,
+    {
+      method: "DELETE",
+      body: JSON.stringify({
+        confirmationName: "1회 수련 법회",
+        expectedRevision: project.revision,
+      }),
+    },
+  );
+  expect(deleted.status).toBe(200);
+  const deletedProject = await deleted.json<{
+    id: string;
+    revision: number;
+    status: string;
+    isDeleted: boolean;
+    deletedAt: string | null;
+  }>();
+  expect(deletedProject).toMatchObject({
+    id: project.id,
+    revision: project.revision + 1,
+    status: "CLOSED",
+    isDeleted: true,
+  });
+  expect(deletedProject.deletedAt).not.toBeNull();
+  expect(
+    (await authedRequest(operator, `/api/v1/projects/${project.id}`)).status,
+  ).toBe(404);
+  expect(
+    (
+      await authedRequest(
+        operator,
+        `/api/v1/projects/${project.id}?includeDeleted=true`,
+      )
+    ).status,
+  ).toBe(200);
+  expect(
+    (
+      await (
+        await authedRequest(operator, "/api/v1/projects")
+      ).json<Array<{ id: string }>>()
+    ).map(({ id }) => id),
+  ).not.toContain(project.id);
+  expect(
+    (
+      await (
+        await authedRequest(
+          operator,
+          "/api/v1/projects?includeDeleted=true",
+        )
+      ).json<Array<{ id: string }>>()
+    ).map(({ id }) => id),
+  ).toContain(project.id);
+
+  const repeatedDelete = await authedRequest(
+    operator,
+    `/api/v1/projects/${project.id}`,
+    {
+      method: "DELETE",
+      body: JSON.stringify({
+        confirmationName: "1회 수련 법회",
+        expectedRevision: project.revision,
+      }),
+    },
+  );
+  expect(repeatedDelete.status).toBe(404);
+
+  const staleRestore = await authedRequest(
+    operator,
+    `/api/v1/projects/${project.id}/restore`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        expectedRevision: deletedProject.revision - 1,
+      }),
+    },
+  );
+  expect(staleRestore.status).toBe(409);
+  expect(await staleRestore.json()).toMatchObject({ code: "STALE_REVISION" });
+
+  const restored = await authedRequest(
+    operator,
+    `/api/v1/projects/${project.id}/restore`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        expectedRevision: deletedProject.revision,
+      }),
+    },
+  );
+  expect(restored.status).toBe(200);
+  expect(await restored.json()).toMatchObject({
+    id: project.id,
+    status: "CLOSED",
+    revision: deletedProject.revision + 1,
+    isDeleted: false,
+    deletedAt: null,
+  });
+  expect(
+    (
+      await env.DB.prepare(
+        `SELECT action, COUNT(*) AS count FROM audit_logs
+         WHERE entity_id = ?
+           AND action IN ('PROJECT_DELETED', 'PROJECT_RESTORED')
+         GROUP BY action ORDER BY action`,
+      )
+        .bind(project.id)
+        .all()
+    ).results,
+  ).toEqual([
+    { action: "PROJECT_DELETED", count: 1 },
+    { action: "PROJECT_RESTORED", count: 1 },
+  ]);
+});
+
+it("rejects unsafe project deletion confirmation, state, and revisions", async () => {
+  const operator = await seedOperator();
+  const open = await seedProject(operator, { name: "삭제 확인 프로젝트" });
+  const openDelete = await authedRequest(
+    operator,
+    `/api/v1/projects/${open.id}`,
+    {
+      method: "DELETE",
+      body: JSON.stringify({
+        confirmationName: "삭제 확인 프로젝트",
+        expectedRevision: open.revision,
+      }),
+    },
+  );
+  expect(await openDelete.json()).toMatchObject({
+    code: "PROJECT_NOT_CLOSED",
+  });
+
+  let closed = await transition(operator, open, "IN_PROGRESS");
+  closed = await transition(operator, closed, "CLOSED");
+  for (const confirmationName of [
+    "삭제 확인 프로젝트 ",
+    "삭제 확인 프로젝트".normalize("NFD"),
+  ]) {
+    const mismatch = await authedRequest(
+      operator,
+      `/api/v1/projects/${closed.id}`,
+      {
+        method: "DELETE",
+        body: JSON.stringify({
+          confirmationName,
+          expectedRevision: closed.revision,
+        }),
+      },
+    );
+    expect(await mismatch.json()).toMatchObject({
+      code: "CONFIRMATION_MISMATCH",
+    });
+  }
+  const stale = await authedRequest(
+    operator,
+    `/api/v1/projects/${closed.id}`,
+    {
+      method: "DELETE",
+      body: JSON.stringify({
+        confirmationName: "삭제 확인 프로젝트",
+        expectedRevision: closed.revision - 1,
+      }),
+    },
+  );
+  expect(await stale.json()).toMatchObject({ code: "STALE_REVISION" });
+});
+
+it("limits deleted-project reads and lifecycle actions to administrative operators", async () => {
+  const operator = await seedOperator();
+  await seedOrganization();
+  const manager = await seedManager();
+  await seedUser({
+    id: "bootstrap-user",
+    loginId: "bootstrap-user",
+    password: "bootstrap-password-123",
+    isBootstrap: true,
+  });
+  const bootstrap = await login("bootstrap-user", "bootstrap-password-123");
+  let project = await seedProject(operator, { name: "권한 프로젝트" });
+  project = await transition(operator, project, "IN_PROGRESS");
+  project = await transition(operator, project, "CLOSED");
+
+  expect(
+    (
+      await authedRequest(manager, "/api/v1/projects?includeDeleted=true")
+    ).status,
+  ).toBe(403);
+  for (const actor of [manager, bootstrap]) {
+    expect(
+      (
+        await authedRequest(actor, `/api/v1/projects/${project.id}`, {
+          method: "DELETE",
+          body: JSON.stringify({
+            confirmationName: "권한 프로젝트",
+            expectedRevision: project.revision,
+          }),
+        })
+      ).status,
+    ).toBe(403);
+    expect(
+      (
+        await authedRequest(actor, `/api/v1/projects/${project.id}/restore`, {
+          method: "POST",
+          body: JSON.stringify({ expectedRevision: project.revision }),
+        })
+      ).status,
+    ).toBe(403);
+  }
 });
 
 it("clears optional dates and rejects a stale patch", async () => {
