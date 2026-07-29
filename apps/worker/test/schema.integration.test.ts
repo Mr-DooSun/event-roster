@@ -1,9 +1,71 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
+import {
+  findProject,
+  findProjectIncludingDeleted,
+} from "../src/db/projects";
 import { countRows, insertOrganization } from "./support/database";
 import { IDS } from "./support/ids";
 
 describe("initial D1 schema", () => {
+  it("enforces a consistent closed project deletion state", async () => {
+    await env.DB.prepare(
+      `INSERT INTO users
+       (id, login_id, login_id_canonical, display_name, role, is_active,
+        is_bootstrap, session_version, created_at, updated_at)
+       VALUES ('deletion-user', 'deletion-user', 'deletion-user', '삭제 운영자',
+        'OPERATOR', 1, 0, 1, '2026-07-29T00:00:00.000Z',
+        '2026-07-29T00:00:00.000Z')`,
+    ).run();
+    await env.DB.prepare(
+      `INSERT INTO projects
+       (id, name, status, revision, created_by, created_at, updated_at,
+        closed_at, closed_by, close_reason)
+       VALUES ('deletion-project', '삭제 프로젝트', 'CLOSED', 2,
+        'deletion-user', '2026-07-29T00:00:00.000Z',
+        '2026-07-29T00:00:00.000Z', '2026-07-29T00:30:00.000Z',
+        'deletion-user', 'MANUAL')`,
+    ).run();
+
+    const columns = (
+      await env.DB.prepare("PRAGMA table_info(projects)").all<{
+        name: string;
+        notnull: number;
+      }>()
+    ).results;
+    expect(columns.map(({ name, notnull }) => ({ name, notnull }))).toEqual(
+      expect.arrayContaining([
+        { name: "deleted_at", notnull: 0 },
+        { name: "deleted_by", notnull: 0 },
+        { name: "deleted_revision", notnull: 0 },
+      ]),
+    );
+
+    await expect(
+      env.DB.prepare(
+        `UPDATE projects
+         SET deleted_at = '2026-07-29T01:00:00.000Z'
+         WHERE id = 'deletion-project'`,
+      ).run(),
+    ).rejects.toThrow(/INVALID_PROJECT_DELETION_STATE/);
+
+    await env.DB.prepare(
+      `UPDATE projects
+       SET revision = 3, deleted_revision = 3,
+           deleted_at = '2026-07-29T01:00:00.000Z',
+           deleted_by = 'deletion-user'
+       WHERE id = 'deletion-project'`,
+    ).run();
+    expect(await findProject(env.DB, "deletion-project")).toBeNull();
+    expect(
+      await findProjectIncludingDeleted(env.DB, "deletion-project"),
+    ).toMatchObject({
+      id: "deletion-project",
+      isDeleted: true,
+      deletedAt: "2026-07-29T01:00:00.000Z",
+    });
+  });
+
   it("includes nullable participant profile snapshots on roster entries", async () => {
     const columns = (
       await env.DB.prepare("PRAGMA table_info(project_roster_entries)").all<{

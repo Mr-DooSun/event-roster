@@ -12,7 +12,7 @@ export async function closeExpiredProject(
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const project = await env.DB.prepare(
       `SELECT revision FROM projects
-       WHERE id = ? AND status <> 'CLOSED'
+       WHERE id = ? AND deleted_at IS NULL AND status <> 'CLOSED'
          AND end_date IS NOT NULL AND end_date < ?`,
     )
       .bind(projectId, today)
@@ -27,7 +27,8 @@ export async function closeExpiredProject(
           `INSERT INTO operation_guards (id, ok)
              VALUES (?, CASE WHEN EXISTS (
                SELECT 1 FROM projects
-               WHERE id = ? AND revision = ? AND status <> 'CLOSED'
+               WHERE id = ? AND deleted_at IS NULL
+                 AND revision = ? AND status <> 'CLOSED'
                  AND end_date IS NOT NULL AND end_date < ?
              ) THEN 1 ELSE 0 END)`,
         ).bind(guardId, projectId, project.revision, today),
@@ -68,7 +69,8 @@ export async function closeExpiredProjects(
   const rows = (
     await env.DB.prepare(
       `SELECT id FROM projects
-       WHERE status <> 'CLOSED' AND end_date IS NOT NULL AND end_date < ?
+       WHERE deleted_at IS NULL
+         AND status <> 'CLOSED' AND end_date IS NOT NULL AND end_date < ?
        ORDER BY created_at, id
        LIMIT ?`,
     )

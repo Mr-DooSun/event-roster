@@ -22,7 +22,9 @@ import { closeExpiredProject } from "./project-expiration";
 export async function getProjects(env: Env, actor: Actor): Promise<Project[]> {
   return listProjects(
     env.DB,
-    actor.session.user.role === "OPERATOR" ? undefined : actor.session.user.id,
+    actor.session.user.role === "OPERATOR"
+      ? {}
+      : { actorUserId: actor.session.user.id },
   );
 }
 

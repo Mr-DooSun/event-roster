@@ -197,6 +197,43 @@ it("runs expiration from the Worker scheduled export", async () => {
   });
 });
 
+it("leaves a deleted closed project unchanged without another auto-close audit", async () => {
+  const operator = await seedOperator();
+  await env.DB.prepare(
+    `INSERT INTO projects
+     (id, name, end_date, status, revision, created_by, created_at, updated_at,
+      closed_at, closed_by, close_reason, deleted_at, deleted_by,
+      deleted_revision)
+     VALUES ('project-deleted', '삭제된 프로젝트', '2000-01-01', 'CLOSED', 4,
+      ?, '2026-05-01T00:00:00.000Z', '2026-05-02T00:00:00.000Z',
+      '2026-05-02T00:00:00.000Z', ?, 'MANUAL',
+      '2026-05-03T00:00:00.000Z', ?, 4)`,
+  )
+    .bind(operator.userId, operator.userId, operator.userId)
+    .run();
+
+  expect(
+    await closeExpiredProjects(env, new Date("2026-07-29T00:00:00.000Z")),
+  ).toBe(0);
+  expect(
+    await env.DB.prepare(
+      `SELECT status, revision, deleted_at FROM projects
+       WHERE id = 'project-deleted'`,
+    ).first(),
+  ).toEqual({
+    status: "CLOSED",
+    revision: 4,
+    deleted_at: "2026-05-03T00:00:00.000Z",
+  });
+  expect(
+    await env.DB.prepare(
+      `SELECT COUNT(*) AS count FROM audit_logs
+       WHERE entity_id = 'project-deleted'
+         AND action = 'PROJECT_AUTO_CLOSED'`,
+    ).first(),
+  ).toEqual({ count: 0 });
+});
+
 async function insertProject(
   operatorId: string,
   projectId: string,
