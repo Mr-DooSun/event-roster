@@ -248,6 +248,44 @@ it("rolls back deletion when the audit insert fails", async () => {
   }
 });
 
+it("keeps an audit-trigger foreign-key failure as an internal error", async () => {
+  const operator = await seedOperator();
+  await seedOrganization("audit-fk-delete", "감사 FK 실패 조직", false);
+  await env.DB.prepare(
+    `CREATE TRIGGER fail_organization_delete_audit_with_foreign_key
+     BEFORE INSERT ON audit_logs
+     WHEN NEW.action = 'ORGANIZATION_DELETED'
+     BEGIN
+       INSERT INTO participants
+       (id, participant_id, name, organization_id, revision, created_at, updated_at)
+       VALUES ('audit-fk-participant', 'P-AUDIT-FK', '감사 FK 참가자',
+               'missing-organization', 0, '2026-07-29T00:00:00.000Z',
+               '2026-07-29T00:00:00.000Z');
+     END`,
+  ).run();
+
+  try {
+    const response = await authedRequest(
+      operator,
+      "/api/v1/organizations/audit-fk-delete",
+      {
+        method: "DELETE",
+        body: JSON.stringify({ confirmationName: "감사 FK 실패 조직" }),
+      },
+    );
+    expect(response.status).toBe(500);
+    expect(
+      await env.DB.prepare(
+        "SELECT id FROM organizations WHERE id = 'audit-fk-delete'",
+      ).first(),
+    ).not.toBeNull();
+  } finally {
+    await env.DB.prepare(
+      "DROP TRIGGER IF EXISTS fail_organization_delete_audit_with_foreign_key",
+    ).run();
+  }
+});
+
 it("maps only a delete-time foreign-key race to conflict and rolls back", async () => {
   const operator = await seedOperator();
   await seedOrganization("fk-race-delete", "FK 경쟁 조직", false);

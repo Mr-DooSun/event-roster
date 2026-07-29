@@ -311,6 +311,11 @@ export async function deleteOrganization(
     )`;
   const now = new Date().toISOString();
   const guardId = crypto.randomUUID();
+  const auditDetails = {
+    before: { name: current.name, isActive: false },
+    after: { name: null, isActive: null },
+    deletionEligibility: blockers,
+  };
 
   try {
     await runGuardedAtomic(env.DB, {
@@ -331,18 +336,25 @@ export async function deleteOrganization(
           "ORGANIZATION_DELETED",
           id,
           now,
-          {
-            before: { name: current.name, isActive: false },
-            after: { name: null, isActive: null },
-            deletionEligibility: blockers,
-          },
+          auditDetails,
         ),
         env.DB.prepare("DELETE FROM organizations WHERE id = ?").bind(id),
       ],
       failureCode: "CONFLICT",
     });
   } catch (error) {
-    throwForeignKeyConflict(error);
+    await throwDeleteForeignKeyConflict(
+      env.DB,
+      error,
+      organizationAuditStatement(
+        env.DB,
+        actor.session.user.id,
+        "ORGANIZATION_DELETED",
+        id,
+        now,
+        auditDetails,
+      ),
+    );
   }
 }
 
@@ -918,12 +930,41 @@ function throwConstraintConflict(error: unknown): never {
   throw error;
 }
 
-function throwForeignKeyConflict(error: unknown): never {
-  if (
-    error instanceof Error &&
-    error.message.includes("FOREIGN KEY constraint failed")
-  ) {
-    throw new DomainError("CONFLICT");
+async function throwDeleteForeignKeyConflict(
+  db: D1Database,
+  error: unknown,
+  auditProbe: D1PreparedStatement,
+): Promise<never> {
+  if (!isD1ForeignKeyConstraint(error)) throw error;
+
+  try {
+    // The forced guard failure rolls the probe back. Reaching it proves the
+    // original audit statement succeeded, leaving DELETE as the FK source.
+    await db.batch([
+      auditProbe,
+      db
+        .prepare("INSERT INTO operation_guards (id, ok) VALUES (?, 0)")
+        .bind(crypto.randomUUID()),
+    ]);
+  } catch (probeError) {
+    if (
+      probeError instanceof Error &&
+      probeError.message.includes("GUARD_FAILED")
+    ) {
+      throw new DomainError("CONFLICT");
+    }
+    throw error;
   }
+
   throw error;
+}
+
+function isD1ForeignKeyConstraint(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const cause = (error as Error & { cause?: unknown }).cause;
+  return (
+    error.message.startsWith("D1_ERROR: FOREIGN KEY constraint failed:") &&
+    cause instanceof Error &&
+    cause.message.startsWith("FOREIGN KEY constraint failed:")
+  );
 }
