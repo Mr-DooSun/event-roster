@@ -264,9 +264,13 @@ expect(await findProjectIncludingDeleted(env.DB, deletedProjectId)).toMatchObjec
 });
 ```
 
-Add a Cron regression to `project-expiration.integration.test.ts`: a
-soft-deleted, expired, non-closed fixture must not be selected or changed by
-`closeExpiredProjects`.
+Add a Cron characterization to `project-expiration.integration.test.ts`: a
+soft-deleted `CLOSED` fixture remains unchanged and gains no additional
+`PROJECT_AUTO_CLOSED` audit when `closeExpiredProjects` runs. The schema
+invariant test, not an impossible fixture, proves that a deleted project
+cannot have a non-`CLOSED` status. If this characterization is already green
+before production changes, retain it as coverage but do not claim that it
+drives a Cron implementation change.
 
 - [ ] **Step 2: Run focused Worker tests and confirm RED**
 
