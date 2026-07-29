@@ -1,4 +1,5 @@
 import {
+  OrganizationDeleteRequestSchema,
   OrganizationManagerCreateRequestSchema,
   OrganizationPatchRequestSchema,
   OrganizationPrimaryPatchRequestSchema,
@@ -14,6 +15,7 @@ import { requireAdministrativeOperator } from "../services/admin";
 import {
   assignOrganizationManager,
   createOrganization,
+  deleteOrganization,
   getAssignableManagerAccounts,
   getOrganizationAuditPage,
   getOrganizationDetail,
@@ -134,6 +136,17 @@ organizationRoutes.delete("/organizations/:id/managers/:userId", async (c) => {
     c.req.param("id"),
     c.req.param("userId"),
   );
+  return c.body(null, 204);
+});
+
+organizationRoutes.delete("/organizations/:id", async (c) => {
+  assertExactOrigin(c.req.raw, c.env.APP_ORIGIN);
+  const actor = await requireActor(c.req.raw, c.env);
+  requireFullSession(actor);
+  await requireCsrf(c.req.raw, actor);
+  requireAdministrativeOperator(actor);
+  const input = OrganizationDeleteRequestSchema.parse(await c.req.json());
+  await deleteOrganization(c.env, actor, c.req.param("id"), input);
   return c.body(null, 204);
 });
 

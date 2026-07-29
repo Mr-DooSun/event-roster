@@ -1,4 +1,5 @@
 import type {
+  OrganizationDeleteRequest,
   OrganizationDetail,
   OrganizationManager,
   OrganizationManagerCreateRequest,
@@ -9,12 +10,14 @@ import { DomainError } from "@event-roster/domain";
 import { BcryptPasswordHasher } from "../auth/password";
 import { runGuardedAtomic } from "../db/atomic";
 import {
+  findOrganizationDeletionBlockers,
   findOrganizationDetail,
   findOrganizationState,
   listAssignableManagerAccounts,
   listOrganizationAuditRows,
   listOrganizationSummaries,
   type OrganizationListFilters,
+  toOrganizationDeletionEligibility,
 } from "../db/organizations";
 import type { Env } from "../env";
 import type { Actor } from "../middleware/authentication";
@@ -267,6 +270,80 @@ export async function updateOrganization(
     isActive,
     await countActiveProjects(env.DB, id),
   );
+}
+
+export async function deleteOrganization(
+  env: Env,
+  actor: Actor,
+  id: string,
+  input: OrganizationDeleteRequest,
+): Promise<void> {
+  const current = await findOrganizationState(env.DB, id);
+  if (!current) throw new DomainError("NOT_FOUND");
+  if (current.name !== input.confirmationName) {
+    throw new DomainError("CONFLICT");
+  }
+  const blockers = await findOrganizationDeletionBlockers(env.DB, id);
+  if (
+    !toOrganizationDeletionEligibility(current.isActive, blockers).canDelete
+  ) {
+    throw new DomainError("CONFLICT");
+  }
+
+  const deleteGuard = `EXISTS (
+      SELECT 1 FROM organizations
+      WHERE id = ? AND name = ? AND is_active = 0
+    )
+    AND NOT EXISTS (
+      SELECT 1 FROM user_organizations WHERE organization_id = ?
+    )
+    AND NOT EXISTS (
+      SELECT 1 FROM participants WHERE organization_id = ?
+    )
+    AND NOT EXISTS (
+      SELECT 1 FROM project_organizations WHERE organization_id = ?
+    )
+    AND NOT EXISTS (
+      SELECT 1 FROM project_roster_entries WHERE organization_id = ?
+    )
+    AND NOT EXISTS (
+      SELECT 1 FROM project_expected_snapshots WHERE organization_id = ?
+    )`;
+  const now = new Date().toISOString();
+  const guardId = crypto.randomUUID();
+
+  try {
+    await runGuardedAtomic(env.DB, {
+      guardId,
+      guardStatement: createOperatorGuard(env.DB, guardId, actor, deleteGuard, [
+        id,
+        current.name,
+        id,
+        id,
+        id,
+        id,
+        id,
+      ]),
+      statements: [
+        organizationAuditStatement(
+          env.DB,
+          actor.session.user.id,
+          "ORGANIZATION_DELETED",
+          id,
+          now,
+          {
+            before: { name: current.name, isActive: false },
+            after: { name: null, isActive: null },
+            deletionEligibility: blockers,
+          },
+        ),
+        env.DB.prepare("DELETE FROM organizations WHERE id = ?").bind(id),
+      ],
+      failureCode: "CONFLICT",
+    });
+  } catch (error) {
+    throwForeignKeyConflict(error);
+  }
 }
 
 export async function assignOrganizationManager(
@@ -836,6 +913,16 @@ function organizationMutationResult(
 
 function throwConstraintConflict(error: unknown): never {
   if (error instanceof Error && error.message.includes("UNIQUE constraint")) {
+    throw new DomainError("CONFLICT");
+  }
+  throw error;
+}
+
+function throwForeignKeyConflict(error: unknown): never {
+  if (
+    error instanceof Error &&
+    error.message.includes("FOREIGN KEY constraint failed")
+  ) {
     throw new DomainError("CONFLICT");
   }
   throw error;
