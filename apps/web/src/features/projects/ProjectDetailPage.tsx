@@ -128,7 +128,9 @@ export function ProjectDetailPage({
 }) {
   const { api, auth } = useAuth();
   const operator = auth?.session.user.role === "OPERATOR";
-  const deletedDetailForbidden = includeDeleted && !operator;
+  const administrativeOperator =
+    operator && auth?.session.user.isBootstrap === false;
+  const deletedDetailForbidden = includeDeleted && !administrativeOperator;
   const projectPath = includeDeleted
     ? `/projects/${projectId}?includeDeleted=true`
     : `/projects/${projectId}`;
@@ -340,20 +342,24 @@ export function ProjectDetailPage({
       return;
     }
     const projectRequest = loadProject(context);
+    const loadChildren = () =>
+      Promise.all(
+        (
+          [
+            "summary",
+            "memberships",
+            "organizations",
+            "roster",
+            "participants",
+            "audit",
+          ] satisfies DetailResource[]
+        ).map((resource) => loadDetailResource(context, resource)),
+      );
     const detailRefresh = includeDeleted
-      ? Promise.resolve([])
-      : Promise.all(
-          (
-            [
-              "summary",
-              "memberships",
-              "organizations",
-              "roster",
-              "participants",
-              "audit",
-            ] satisfies DetailResource[]
-          ).map((resource) => loadDetailResource(context, resource)),
-        );
+      ? projectRequest.then((nextProject) =>
+          nextProject?.isDeleted ? [] : loadChildren(),
+        )
+      : loadChildren();
     return { projectRequest, detailRefresh };
   }, [
     deletedDetailForbidden,
@@ -807,7 +813,7 @@ export function ProjectDetailPage({
             >
               {action.label}
             </Button>
-            {project.status === "CLOSED" ? (
+            {administrativeOperator && project.status === "CLOSED" ? (
               <Button
                 type="button"
                 variant="danger"

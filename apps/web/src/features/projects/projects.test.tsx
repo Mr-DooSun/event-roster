@@ -17,23 +17,32 @@ import {
 } from "./ProjectLoadingStates";
 import { ProjectsPage } from "./ProjectsPage";
 
-const { mockApi, mockRole } = vi.hoisted(() => ({
+const { mockApi, mockRole, mockBootstrap } = vi.hoisted(() => ({
   mockApi: { get: vi.fn(), post: vi.fn(), patch: vi.fn() },
   mockRole: {
     current: "OPERATOR" as "OPERATOR" | "ORGANIZATION_MANAGER",
   },
+  mockBootstrap: { current: false },
 }));
 
 vi.mock("../auth/AuthProvider", () => ({
   useAuth: () => ({
     api: mockApi,
-    auth: { session: { user: { role: mockRole.current } } },
+    auth: {
+      session: {
+        user: {
+          role: mockRole.current,
+          isBootstrap: mockBootstrap.current,
+        },
+      },
+    },
   }),
 }));
 
 beforeEach(() => {
   vi.resetAllMocks();
   mockRole.current = "OPERATOR";
+  mockBootstrap.current = false;
 });
 
 afterEach(cleanup);
@@ -327,6 +336,18 @@ it("does not expose the deleted-project filter to organization managers", async 
     screen.queryByRole("checkbox", { name: "삭제된 프로젝트 포함" }),
   ).not.toBeInTheDocument();
   expect(mockApi.get).toHaveBeenCalledTimes(1);
+  expect(mockApi.get).toHaveBeenCalledWith("/projects");
+});
+
+it("does not expose the deleted-project filter to bootstrap operators", async () => {
+  mockBootstrap.current = true;
+  mockApi.get.mockResolvedValueOnce([projectFixture]);
+  render(<ProjectsPage />);
+
+  await screen.findByText(projectFixture.name);
+  expect(
+    screen.queryByRole("checkbox", { name: "삭제된 프로젝트 포함" }),
+  ).not.toBeInTheDocument();
   expect(mockApi.get).toHaveBeenCalledWith("/projects");
 });
 

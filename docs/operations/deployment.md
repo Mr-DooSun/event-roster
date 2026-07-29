@@ -770,14 +770,35 @@ corepack pnpm@10.28.1 --filter @event-roster/worker exec \
 
 ### 7.3.3 `0006_project_soft_deletion.sql` 적용 게이트
 
-이 gate는 `0001`~`0005`가 이미 적용된 기존 운영 D1 전용이다. 저장소와
-worktree 밖의 `/private/tmp`에 실행별 백업 디렉터리를 만들고, export와
-체크섬을 각각 mode 0600으로 제한한다.
+이 gate는 `0001`~`0005`가 이미 적용된 기존 운영 D1 전용이다. 2절에서
+검증한 저장소·모든 worktree 밖의 **지속성 있는 백업 상위 디렉터리**에
+실행별 디렉터리를 만들고, export와 체크섬을 각각 mode 0600으로 제한한다.
+`/tmp`, `/private/tmp`, `${TMPDIR}` 같은 OS 임시 경로는 재부팅이나 정리
+정책으로 사라질 수 있으므로 pre-`0006` 복구 원본 위치로 사용하지 않는다.
 
 ```bash
 set -euo pipefail
 umask 077
-release_backup_dir="$(mktemp -d /private/tmp/event-roster-d1-0006.XXXXXX)"
+test -n "${EVENT_ROSTER_0006_BACKUP_PARENT:?지속성 있는 외부 백업 경로가 필요합니다}"
+case "$EVENT_ROSTER_0006_BACKUP_PARENT" in
+  /*) ;;
+  *) echo "백업 상위 경로는 절대 경로여야 합니다." >&2; exit 1 ;;
+esac
+test -d "$EVENT_ROSTER_0006_BACKUP_PARENT"
+test ! -L "$EVENT_ROSTER_0006_BACKUP_PARENT"
+EVENT_ROSTER_0006_BACKUP_PARENT="$(
+  cd "$EVENT_ROSTER_0006_BACKUP_PARENT"
+  pwd -P
+)"
+case "$EVENT_ROSTER_0006_BACKUP_PARENT" in
+  /tmp|/tmp/*|/private/tmp|/private/tmp/*)
+    echo "0006 백업은 OS 임시 경로에 둘 수 없습니다." >&2
+    exit 1
+    ;;
+esac
+release_backup_dir="$(
+  mktemp -d "$EVENT_ROSTER_0006_BACKUP_PARENT/event-roster-d1-0006.XXXXXX"
+)"
 chmod 700 "$release_backup_dir"
 test "$(stat -c '%a' "$release_backup_dir" 2>/dev/null ||
   stat -f '%Lp' "$release_backup_dir")" = "700"
@@ -799,7 +820,10 @@ corepack pnpm@10.28.1 --filter @event-roster/worker exec \
 ```
 
 사전 `project_count`, export 절대 경로와 체크섬을 접근 제한된 배포 기록에
-남긴다. 이어 pending 파일명 집합을 정규화해 정확히
+남긴다. export와 checksum을 migration 복구 보존 기간 동안 유지할 수 있고
+별도 셸에서 checksum 검증이 다시 성공하는지 확인한다. 이 보존 확인이
+끝나기 전에는 migration을 적용하지 않는다. 이어 pending 파일명 집합을
+정규화해 정확히
 `0006_project_soft_deletion.sql` 하나인지 migration 적용 직전에 다시
 확인한다.
 

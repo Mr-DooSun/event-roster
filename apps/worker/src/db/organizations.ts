@@ -130,10 +130,8 @@ export async function findOrganizationDeletionBlockers(
           WHERE organization_id = ?) AS manager_assignments,
          (SELECT COUNT(*) FROM participants
           WHERE organization_id = ?) AS participants,
-         (SELECT COUNT(*) FROM project_organizations po
-          JOIN projects p ON p.id = po.project_id
-          WHERE po.organization_id = ?
-            AND p.deleted_at IS NULL) AS project_links,
+         (SELECT COUNT(*) FROM project_organizations
+          WHERE organization_id = ?) AS project_links,
          (SELECT COUNT(*) FROM project_roster_entries
           WHERE organization_id = ?) AS roster_entries,
          (SELECT COUNT(*) FROM project_expected_snapshots

@@ -29,8 +29,12 @@ export function ProjectsPage() {
   const hasLoaded = useRef(false);
   const loadGeneration = useRef(0);
   const operator = auth?.session.user.role === "OPERATOR";
+  const administrativeOperator =
+    operator && auth?.session.user.isBootstrap === false;
   const listPath =
-    operator && includeDeleted ? "/projects?includeDeleted=true" : "/projects";
+    administrativeOperator && includeDeleted
+      ? "/projects?includeDeleted=true"
+      : "/projects";
   const load = useCallback(async () => {
     const generation = ++loadGeneration.current;
     setLoadState(hasLoaded.current ? "REFRESHING" : "INITIAL");
@@ -84,7 +88,7 @@ export function ProjectsPage() {
           </Button>
         ) : null}
       </header>
-      {operator ? (
+      {administrativeOperator ? (
         <label className="er-checkbox">
           <input
             className="er-checkbox__input"

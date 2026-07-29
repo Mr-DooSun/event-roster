@@ -46,7 +46,7 @@ async function markProjectDeleted(
     .run();
 }
 
-it("does not count deleted project links as organization blockers", async () => {
+it("keeps deleted project links as organization deletion blockers", async () => {
   const operator = await seedOperator();
   await seedOrganization("deleted-link-org", "삭제 프로젝트 조직", false);
   const project = await seedProject(operator, { name: "삭제된 연결" });
@@ -65,7 +65,8 @@ it("does not count deleted project links as organization blockers", async () => 
     await authedRequest(operator, "/api/v1/organizations/deleted-link-org")
   ).json<OrganizationDetail>();
   expect(detail.projects).toEqual([]);
-  expect(detail.deletionEligibility.blockers.projectLinks).toBe(0);
+  expect(detail.deletionEligibility.blockers.projectLinks).toBe(1);
+  expect(detail.deletionEligibility.canDelete).toBe(false);
 });
 
 function synchronizeFirstBatches(

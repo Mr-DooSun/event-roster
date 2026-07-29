@@ -14,17 +14,25 @@ import { ApiError } from "../../lib/api";
 import { ProjectDetailPage } from "./ProjectDetailPage";
 import { ProjectOrganizationsPanel } from "./ProjectOrganizationsPanel";
 
-const { mockApi, mockRole } = vi.hoisted(() => ({
+const { mockApi, mockRole, mockBootstrap } = vi.hoisted(() => ({
   mockApi: { get: vi.fn(), post: vi.fn(), patch: vi.fn(), delete: vi.fn() },
   mockRole: {
     current: "OPERATOR" as "OPERATOR" | "ORGANIZATION_MANAGER",
   },
+  mockBootstrap: { current: false },
 }));
 
 vi.mock("../auth/AuthProvider", () => ({
   useAuth: () => ({
     api: mockApi,
-    auth: { session: { user: { role: mockRole.current } } },
+    auth: {
+      session: {
+        user: {
+          role: mockRole.current,
+          isBootstrap: mockBootstrap.current,
+        },
+      },
+    },
   }),
 }));
 
@@ -60,6 +68,7 @@ beforeEach(() => {
   });
   mockApi.get.mockImplementation(defaultGet);
   mockRole.current = "OPERATOR";
+  mockBootstrap.current = false;
 });
 
 afterEach(cleanup);
@@ -248,6 +257,51 @@ it("does not let organization managers request deleted project detail", async ()
     await screen.findByText("삭제된 프로젝트를 볼 권한이 없습니다."),
   ).toBeVisible();
   expect(mockApi.get).not.toHaveBeenCalled();
+});
+
+it("loads ordinary detail resources when an include-deleted link was already restored", async () => {
+  mockApi.get.mockImplementation((path: string) => {
+    if (path === "/projects/project-1?includeDeleted=true") {
+      return closedProject();
+    }
+    return defaultGet(path);
+  });
+
+  render(<ProjectDetailPage projectId="project-1" includeDeleted />);
+
+  expect(
+    await screen.findByRole("heading", { name: project.name }),
+  ).toBeVisible();
+  await waitFor(() =>
+    expect(mockApi.get).toHaveBeenCalledWith("/projects/project-1/summary"),
+  );
+  expect(mockApi.get).toHaveBeenCalledWith("/projects/project-1/organizations");
+  expect(mockApi.get).toHaveBeenCalledWith("/projects/project-1/roster");
+  expect(mockApi.get).toHaveBeenCalledWith(
+    "/projects/project-1/audit?limit=50",
+  );
+});
+
+it("does not expose project deletion or deleted detail to bootstrap operators", async () => {
+  mockBootstrap.current = true;
+  mockApi.get.mockImplementation((path: string) => {
+    if (path === "/projects/project-1") return closedProject();
+    return defaultGet(path);
+  });
+  const detail = render(<ProjectDetailPage projectId="project-1" />);
+  await screen.findByRole("heading", { name: project.name });
+  expect(
+    screen.queryByRole("button", { name: "프로젝트 삭제" }),
+  ).not.toBeInTheDocument();
+  detail.unmount();
+
+  render(<ProjectDetailPage projectId="project-1" includeDeleted />);
+  expect(
+    await screen.findByText("삭제된 프로젝트를 볼 권한이 없습니다."),
+  ).toBeVisible();
+  expect(mockApi.get).not.toHaveBeenCalledWith(
+    "/projects/project-1?includeDeleted=true",
+  );
 });
 
 it("shows four semantic tabs with only the selected panel mounted", async () => {

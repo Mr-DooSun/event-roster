@@ -127,7 +127,9 @@
     격리 D1에만 import한다. 운영 D1이나 운영 Worker binding을 import
     대상으로 사용하지 않는다. 격리 D1의 database ID만 담은 mode 0600
     recovery config와 mode 0600 export/checksum을 준비하고 체크섬을 먼저
-    검증한다.
+    검증한다. export는 배포 기록에 남긴 지속성 있는 저장소 밖 백업 경로에서
+    가져와야 하며 `/tmp`, `/private/tmp`, `${TMPDIR}`의 파일은 승인된 복구
+    원본으로 간주하지 않는다.
 
     import 직후 migration ledger에 `0001`~`0005`가 정확히 적용되어 있고
     pending 파일이 `0006_project_soft_deletion.sql` 하나뿐인지 확인한다.
