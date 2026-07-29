@@ -902,6 +902,27 @@ th {
 .er-dialog--roster {
   width: min(100%, 52rem);
 }
+.er-danger-zone {
+  display: grid;
+  gap: var(--er-space-4);
+  padding: var(--er-space-6);
+  border: 1px solid var(--er-color-danger);
+  border-radius: var(--er-radius-md);
+  background: var(--er-color-surface);
+}
+.er-danger-zone h2 {
+  color: var(--er-color-danger);
+  margin: 0;
+}
+.er-danger-zone__target {
+  overflow-wrap: anywhere;
+}
+.er-danger-zone__blockers {
+  display: grid;
+  gap: var(--er-space-2);
+  margin: 0;
+  padding-left: var(--er-space-5);
+}
 .er-assignment-dialog {
   display: grid;
   gap: var(--er-space-4);
@@ -994,6 +1015,13 @@ th {
   }
   .er-dialog-actions {
     justify-content: flex-start;
+  }
+  .er-organization-deletion-dialog .er-dialog-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .er-organization-deletion-dialog .er-dialog-actions .er-button {
+    width: 100%;
   }
   .er-assignment-search,
   .er-assignment-fields {
