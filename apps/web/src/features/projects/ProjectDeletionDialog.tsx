@@ -25,7 +25,7 @@ export function ProjectDeletionDialog({
     setConfirmationName("");
     setSubmitting(false);
     setError(null);
-  }, [open, projectName]);
+  }, [open]);
 
   if (!open) return null;
 
@@ -52,11 +52,7 @@ export function ProjectDeletionDialog({
   }
 
   return (
-    <Dialog
-      title="프로젝트 삭제"
-      hideDefaultCloseAction
-      onClose={close}
-    >
+    <Dialog title="프로젝트 삭제" hideDefaultCloseAction onClose={close}>
       <form className="er-dialog-form" onSubmit={(event) => void submit(event)}>
         <p>
           프로젝트는 목록에서 숨겨지며 참가 명단, 조직, 집계와 변경 이력은
@@ -73,8 +69,7 @@ export function ProjectDeletionDialog({
           />
         </label>
         <p className="er-muted">
-          확인을 위해 <strong>{projectName}</strong>을(를) 정확히 입력해
-          주세요.
+          확인을 위해 <strong>{projectName}</strong>을(를) 정확히 입력해 주세요.
         </p>
         {error ? <StatusMessage tone="error">{error}</StatusMessage> : null}
         <div className="er-dialog-actions">

@@ -95,9 +95,7 @@ projectRoutes.post("/projects/:id/restore", async (c) => {
   await requireCsrf(c.req.raw, actor);
   requireAdministrativeOperator(actor);
   const input = RestoreProjectRequestSchema.parse(await c.req.json());
-  return c.json(
-    await restoreProject(c.env, actor, c.req.param("id"), input),
-  );
+  return c.json(await restoreProject(c.env, actor, c.req.param("id"), input));
 });
 
 projectRoutes.post("/projects/:id/transition", async (c) => {

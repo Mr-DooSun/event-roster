@@ -98,9 +98,7 @@ it("deletes a project with its exact name and navigates to the list", async () =
   });
   render(<ProjectDetailPage projectId="project-1" />);
 
-  fireEvent.click(
-    await screen.findByRole("button", { name: "프로젝트 삭제" }),
-  );
+  fireEvent.click(await screen.findByRole("button", { name: "프로젝트 삭제" }));
   fireEvent.change(
     screen.getByRole("textbox", { name: "삭제할 프로젝트 이름" }),
     { target: { value: closed.name } },
@@ -142,9 +140,7 @@ it("reloads a stale project deletion and closes its dialog", async () => {
   );
   render(<ProjectDetailPage projectId="project-1" />);
 
-  fireEvent.click(
-    await screen.findByRole("button", { name: "프로젝트 삭제" }),
-  );
+  fireEvent.click(await screen.findByRole("button", { name: "프로젝트 삭제" }));
   fireEvent.change(
     screen.getByRole("textbox", { name: "삭제할 프로젝트 이름" }),
     { target: { value: closed.name } },
@@ -182,9 +178,7 @@ it("keeps deletion open when the server rejects the exact project name", async (
   );
   render(<ProjectDetailPage projectId="project-1" />);
 
-  fireEvent.click(
-    await screen.findByRole("button", { name: "프로젝트 삭제" }),
-  );
+  fireEvent.click(await screen.findByRole("button", { name: "프로젝트 삭제" }));
   fireEvent.change(
     screen.getByRole("textbox", { name: "삭제할 프로젝트 이름" }),
     { target: { value: closed.name } },
@@ -201,9 +195,7 @@ it("keeps deletion open when the server rejects the exact project name", async (
       "프로젝트 이름이 일치하지 않습니다. 정확한 이름을 다시 입력해 주세요.",
     ),
   ).toBeVisible();
-  expect(
-    screen.getByRole("dialog", { name: "프로젝트 삭제" }),
-  ).toBeVisible();
+  expect(screen.getByRole("dialog", { name: "프로젝트 삭제" })).toBeVisible();
 });
 
 it("renders a deleted project read-only and restores it without child reads", async () => {
@@ -223,9 +215,7 @@ it("renders a deleted project read-only and restores it without child reads", as
     isDeleted: false,
     deletedAt: null,
   });
-  render(
-    <ProjectDetailPage projectId="project-1" includeDeleted />,
-  );
+  render(<ProjectDetailPage projectId="project-1" includeDeleted />);
 
   expect(
     await screen.findByRole("heading", { name: deleted.name }),
@@ -239,10 +229,9 @@ it("renders a deleted project read-only and restores it without child reads", as
 
   fireEvent.click(screen.getByRole("button", { name: "프로젝트 복구" }));
   await waitFor(() =>
-    expect(mockApi.post).toHaveBeenCalledWith(
-      "/projects/project-1/restore",
-      { expectedRevision: deleted.revision },
-    ),
+    expect(mockApi.post).toHaveBeenCalledWith("/projects/project-1/restore", {
+      expectedRevision: deleted.revision,
+    }),
   );
   await waitFor(() =>
     expect(`${window.location.pathname}${window.location.search}`).toBe(
@@ -253,9 +242,7 @@ it("renders a deleted project read-only and restores it without child reads", as
 
 it("does not let organization managers request deleted project detail", async () => {
   mockRole.current = "ORGANIZATION_MANAGER";
-  render(
-    <ProjectDetailPage projectId="project-1" includeDeleted />,
-  );
+  render(<ProjectDetailPage projectId="project-1" includeDeleted />);
 
   expect(
     await screen.findByText("삭제된 프로젝트를 볼 권한이 없습니다."),
@@ -930,9 +917,7 @@ it("hides excluded organizations and reactivates them through the add flow", asy
   fireEvent.change(input, { target: { value: "제외 조직" } });
   fireEvent.click(screen.getByRole("option", { name: "제외 조직" }));
   expect(
-    screen.getByText(
-      "기존 명단과 집계 이력이 있으면 그대로 다시 연결됩니다.",
-    ),
+    screen.getByText("기존 명단과 집계 이력이 있으면 그대로 다시 연결됩니다."),
   ).toBeVisible();
   fireEvent.click(screen.getByRole("button", { name: "프로젝트에 추가" }));
   await waitFor(() =>

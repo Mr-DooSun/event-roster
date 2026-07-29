@@ -1,9 +1,6 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
-import {
-  findProject,
-  findProjectIncludingDeleted,
-} from "../src/db/projects";
+import { findProject, findProjectIncludingDeleted } from "../src/db/projects";
 import { countRows, insertOrganization } from "./support/database";
 import { IDS } from "./support/ids";
 

@@ -56,13 +56,15 @@ it("does not close from cancel, Escape, or the backdrop while deleting", async (
   );
   fireEvent.click(screen.getByRole("button", { name: "프로젝트 삭제" }));
   fireEvent.click(screen.getByRole("button", { name: "취소" }));
-  fireEvent.keyDown(
-    screen.getByRole("dialog", { name: "프로젝트 삭제" }),
-    { key: "Escape" },
-  );
-  fireEvent.click(
-    screen.getByRole("dialog", { name: "프로젝트 삭제" }).parentElement!,
-  );
+  fireEvent.keyDown(screen.getByRole("dialog", { name: "프로젝트 삭제" }), {
+    key: "Escape",
+  });
+  const dialogParent = screen.getByRole("dialog", {
+    name: "프로젝트 삭제",
+  }).parentElement;
+  expect(dialogParent).not.toBeNull();
+  if (!dialogParent) throw new Error("dialog overlay is missing");
+  fireEvent.click(dialogParent);
   expect(onClose).not.toHaveBeenCalled();
 
   await act(async () => deferredDelete.resolve());
@@ -74,7 +76,9 @@ it("keeps the dialog and exact input after a rejected deletion", async () => {
       projectName="삭제 대상"
       open
       onClose={vi.fn()}
-      onConfirm={vi.fn().mockRejectedValue(new Error("이름을 다시 확인해 주세요."))}
+      onConfirm={vi
+        .fn()
+        .mockRejectedValue(new Error("이름을 다시 확인해 주세요."))}
     />,
   );
 
@@ -86,9 +90,7 @@ it("keeps the dialog and exact input after a rejected deletion", async () => {
 
   expect(await screen.findByText("이름을 다시 확인해 주세요.")).toBeVisible();
   expect(input).toHaveValue("삭제 대상");
-  expect(
-    screen.getByRole("dialog", { name: "프로젝트 삭제" }),
-  ).toBeVisible();
+  expect(screen.getByRole("dialog", { name: "프로젝트 삭제" })).toBeVisible();
 });
 
 function deferred<T>() {

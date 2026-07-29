@@ -30,9 +30,7 @@ export function ProjectsPage() {
   const loadGeneration = useRef(0);
   const operator = auth?.session.user.role === "OPERATOR";
   const listPath =
-    operator && includeDeleted
-      ? "/projects?includeDeleted=true"
-      : "/projects";
+    operator && includeDeleted ? "/projects?includeDeleted=true" : "/projects";
   const load = useCallback(async () => {
     const generation = ++loadGeneration.current;
     setLoadState(hasLoaded.current ? "REFRESHING" : "INITIAL");
@@ -92,9 +90,7 @@ export function ProjectsPage() {
             className="er-checkbox__input"
             type="checkbox"
             checked={includeDeleted}
-            onChange={(event) =>
-              setIncludeDeleted(event.currentTarget.checked)
-            }
+            onChange={(event) => setIncludeDeleted(event.currentTarget.checked)}
           />
           <span className="er-checkbox__box" aria-hidden="true" />
           삭제된 프로젝트 포함

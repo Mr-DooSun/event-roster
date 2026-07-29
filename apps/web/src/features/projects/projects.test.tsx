@@ -311,9 +311,7 @@ it("lets operators include deleted projects and distinguishes their cards", asyn
     ),
   );
   expect(await screen.findByText("삭제됨", { exact: true })).toBeVisible();
-  expect(
-    screen.getByRole("link", { name: /삭제 프로젝트/ }),
-  ).toHaveAttribute(
+  expect(screen.getByRole("link", { name: /삭제 프로젝트/ })).toHaveAttribute(
     "href",
     "/projects/deleted-project?includeDeleted=true",
   );

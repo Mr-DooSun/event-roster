@@ -142,10 +142,7 @@ it("soft-deletes and restores a closed project while preserving one audit per ac
   expect(
     (
       await (
-        await authedRequest(
-          operator,
-          "/api/v1/projects?includeDeleted=true",
-        )
+        await authedRequest(operator, "/api/v1/projects?includeDeleted=true")
       ).json<Array<{ id: string }>>()
     ).map(({ id }) => id),
   ).toContain(project.id);
@@ -250,17 +247,13 @@ it("rejects unsafe project deletion confirmation, state, and revisions", async (
       code: "CONFIRMATION_MISMATCH",
     });
   }
-  const stale = await authedRequest(
-    operator,
-    `/api/v1/projects/${closed.id}`,
-    {
-      method: "DELETE",
-      body: JSON.stringify({
-        confirmationName: "삭제 확인 프로젝트",
-        expectedRevision: closed.revision - 1,
-      }),
-    },
-  );
+  const stale = await authedRequest(operator, `/api/v1/projects/${closed.id}`, {
+    method: "DELETE",
+    body: JSON.stringify({
+      confirmationName: "삭제 확인 프로젝트",
+      expectedRevision: closed.revision - 1,
+    }),
+  });
   expect(await stale.json()).toMatchObject({ code: "STALE_REVISION" });
 });
 
@@ -280,9 +273,8 @@ it("limits deleted-project reads and lifecycle actions to administrative operato
   project = await transition(operator, project, "CLOSED");
 
   expect(
-    (
-      await authedRequest(manager, "/api/v1/projects?includeDeleted=true")
-    ).status,
+    (await authedRequest(manager, "/api/v1/projects?includeDeleted=true"))
+      .status,
   ).toBe(403);
   for (const actor of [manager, bootstrap]) {
     expect(

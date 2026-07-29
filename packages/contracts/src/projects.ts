@@ -60,16 +60,12 @@ export const DeleteProjectRequestSchema = z.object({
   confirmationName: z.string().min(1).max(100),
   expectedRevision: z.number().int().nonnegative(),
 });
-export type DeleteProjectRequest = z.infer<
-  typeof DeleteProjectRequestSchema
->;
+export type DeleteProjectRequest = z.infer<typeof DeleteProjectRequestSchema>;
 
 export const RestoreProjectRequestSchema = z.object({
   expectedRevision: z.number().int().nonnegative(),
 });
-export type RestoreProjectRequest = z.infer<
-  typeof RestoreProjectRequestSchema
->;
+export type RestoreProjectRequest = z.infer<typeof RestoreProjectRequestSchema>;
 
 export interface Project {
   id: string;

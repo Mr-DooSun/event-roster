@@ -57,13 +57,7 @@ it("does not count deleted project links as organization blockers", async () => 
       added_by, updated_by)
      VALUES (?, 'deleted-link-org', 0, ?, ?, ?, ?)`,
   )
-    .bind(
-      project.id,
-      timestamp,
-      timestamp,
-      operator.userId,
-      operator.userId,
-    )
+    .bind(project.id, timestamp, timestamp, operator.userId, operator.userId)
     .run();
   await markProjectDeleted(project.id, operator.userId, project.revision);
 

@@ -413,7 +413,7 @@ export function ProjectDetailPage({
     return () => {
       loadGeneration.current += 1;
     };
-  }, [includeDeleted, load, projectId, updateAuditNextCursor]);
+  }, [load, projectId, updateAuditNextCursor]);
 
   async function reloadProjectForContext(context: RequestContext) {
     return loadProject(context);
@@ -681,8 +681,8 @@ export function ProjectDetailPage({
         <Card className="er-panel er-deleted-project-notice">
           <h2>삭제된 프로젝트</h2>
           <p>
-            참가 명단, 조직, 집계와 변경 이력은 보존되어 있습니다. 복구하면
-            종료 상태로 다시 사용할 수 있습니다.
+            참가 명단, 조직, 집계와 변경 이력은 보존되어 있습니다. 복구하면 종료
+            상태로 다시 사용할 수 있습니다.
           </p>
         </Card>
       </div>
