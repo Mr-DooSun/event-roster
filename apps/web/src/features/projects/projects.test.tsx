@@ -1,4 +1,5 @@
 import "@testing-library/jest-dom/vitest";
+import type { Project } from "@event-roster/contracts";
 import {
   act,
   cleanup,
@@ -37,7 +38,7 @@ beforeEach(() => {
 
 afterEach(cleanup);
 
-const projectFixture = {
+const projectFixture: Project = {
   id: "project-1",
   name: "상반기 리더십 캠프",
   startDate: "2026-05-22",
@@ -50,6 +51,8 @@ const projectFixture = {
   closedAt: null,
   closedBy: null,
   closeReason: null,
+  isDeleted: false,
+  deletedAt: null,
 };
 
 function deferred<T>() {
@@ -281,6 +284,89 @@ it("renders the minimal B-style project card fields", async () => {
   expect(screen.getByText("종료 수동")).toBeVisible();
   expect(screen.getByText("생성 2026.02.10")).toBeVisible();
   expect(screen.queryByText(/예상 .*명/)).not.toBeInTheDocument();
+});
+
+it("lets operators include deleted projects and distinguishes their cards", async () => {
+  const deletedProject = {
+    ...projectFixture,
+    id: "deleted-project",
+    name: "삭제 프로젝트",
+    status: "CLOSED" as const,
+    isDeleted: true,
+    deletedAt: "2026-07-29T01:00:00.000Z",
+  };
+  mockApi.get
+    .mockResolvedValueOnce([projectFixture])
+    .mockResolvedValueOnce([projectFixture, deletedProject]);
+  render(<ProjectsPage />);
+
+  await screen.findByText(projectFixture.name);
+  fireEvent.click(
+    screen.getByRole("checkbox", { name: "삭제된 프로젝트 포함" }),
+  );
+
+  await waitFor(() =>
+    expect(mockApi.get).toHaveBeenLastCalledWith(
+      "/projects?includeDeleted=true",
+    ),
+  );
+  expect(await screen.findByText("삭제됨", { exact: true })).toBeVisible();
+  expect(
+    screen.getByRole("link", { name: /삭제 프로젝트/ }),
+  ).toHaveAttribute(
+    "href",
+    "/projects/deleted-project?includeDeleted=true",
+  );
+});
+
+it("does not expose the deleted-project filter to organization managers", async () => {
+  mockRole.current = "ORGANIZATION_MANAGER";
+  mockApi.get.mockResolvedValueOnce([projectFixture]);
+  render(<ProjectsPage />);
+
+  await screen.findByText(projectFixture.name);
+  expect(
+    screen.queryByRole("checkbox", { name: "삭제된 프로젝트 포함" }),
+  ).not.toBeInTheDocument();
+  expect(mockApi.get).toHaveBeenCalledTimes(1);
+  expect(mockApi.get).toHaveBeenCalledWith("/projects");
+});
+
+it("ignores an older include-deleted response after the filter is turned off", async () => {
+  const includeDeleted = deferred<(typeof projectFixture)[]>();
+  const ordinary = deferred<(typeof projectFixture)[]>();
+  const deletedProject = {
+    ...projectFixture,
+    id: "deleted-project",
+    name: "늦게 도착한 삭제 프로젝트",
+    status: "CLOSED" as const,
+    isDeleted: true,
+    deletedAt: "2026-07-29T01:00:00.000Z",
+  };
+  mockApi.get
+    .mockResolvedValueOnce([projectFixture])
+    .mockReturnValueOnce(includeDeleted.promise)
+    .mockReturnValueOnce(ordinary.promise);
+  render(<ProjectsPage />);
+
+  await screen.findByText(projectFixture.name);
+  const checkbox = screen.getByRole("checkbox", {
+    name: "삭제된 프로젝트 포함",
+  });
+  fireEvent.click(checkbox);
+  await waitFor(() => expect(mockApi.get).toHaveBeenCalledTimes(2));
+  fireEvent.click(checkbox);
+  await waitFor(() => expect(mockApi.get).toHaveBeenCalledTimes(3));
+
+  await act(async () => ordinary.resolve([projectFixture]));
+  await act(async () =>
+    includeDeleted.resolve([projectFixture, deletedProject]),
+  );
+
+  expect(
+    screen.queryByText("늦게 도착한 삭제 프로젝트"),
+  ).not.toBeInTheDocument();
+  expect(screen.queryByText("삭제됨", { exact: true })).not.toBeInTheDocument();
 });
 
 it("keeps the project order returned by the server", async () => {

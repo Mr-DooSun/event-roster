@@ -476,6 +476,14 @@ a {
   opacity: 0.72;
   border-color: color-mix(in srgb, var(--er-color-border) 72%, transparent);
 }
+.er-project-card--deleted {
+  border-style: dashed;
+  background: var(--er-color-canvas);
+}
+.er-project-card--deleted:hover,
+.er-project-card--deleted:focus-visible {
+  border-color: var(--er-color-primary);
+}
 .er-project-card--skeleton {
   align-content: start;
   pointer-events: none;

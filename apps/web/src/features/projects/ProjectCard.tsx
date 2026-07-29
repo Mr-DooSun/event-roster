@@ -12,15 +12,25 @@ const STATUS_LABEL: Record<ProjectStatus, string> = {
 
 export function ProjectCard({ project }: ProjectCardProps) {
   const closedClass =
-    project.status === "CLOSED" ? " er-project-card--closed" : "";
+    project.status === "CLOSED" && !project.isDeleted
+      ? " er-project-card--closed"
+      : "";
+  const deletedClass = project.isDeleted ? " er-project-card--deleted" : "";
+  const href = project.isDeleted
+    ? `/projects/${encodeURIComponent(project.id)}?includeDeleted=true`
+    : `/projects/${encodeURIComponent(project.id)}`;
   return (
     <a
-      className={`er-card er-project-card${closedClass}`}
-      href={`/projects/${encodeURIComponent(project.id)}`}
+      className={`er-card er-project-card${closedClass}${deletedClass}`}
+      href={href}
     >
-      <span className={`er-badge er-badge--${project.status.toLowerCase()}`}>
-        {STATUS_LABEL[project.status]}
-      </span>
+      {project.isDeleted ? (
+        <span className="er-badge er-badge--inactive">삭제됨</span>
+      ) : (
+        <span className={`er-badge er-badge--${project.status.toLowerCase()}`}>
+          {STATUS_LABEL[project.status]}
+        </span>
+      )}
       <h2>{project.name}</h2>
       <span className="er-project-card__dates">
         <span>
@@ -37,6 +47,11 @@ export function ProjectCard({ project }: ProjectCardProps) {
       <time dateTime={project.createdAt}>
         생성 {formatKstDate(project.createdAt)}
       </time>
+      {project.isDeleted && project.deletedAt ? (
+        <time dateTime={project.deletedAt}>
+          삭제 {formatKstDate(project.deletedAt)}
+        </time>
+      ) : null}
     </a>
   );
 }

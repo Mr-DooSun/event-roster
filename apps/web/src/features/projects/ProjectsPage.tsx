@@ -25,14 +25,19 @@ export function ProjectsPage() {
   const [error, setError] = useState<string | null>(null);
   const [createError, setCreateError] = useState<string | null>(null);
   const [loadState, setLoadState] = useState<ListLoadState>("INITIAL");
+  const [includeDeleted, setIncludeDeleted] = useState(false);
   const hasLoaded = useRef(false);
   const loadGeneration = useRef(0);
   const operator = auth?.session.user.role === "OPERATOR";
+  const listPath =
+    operator && includeDeleted
+      ? "/projects?includeDeleted=true"
+      : "/projects";
   const load = useCallback(async () => {
     const generation = ++loadGeneration.current;
     setLoadState(hasLoaded.current ? "REFRESHING" : "INITIAL");
     try {
-      const nextProjects = await api.get<Project[]>("/projects");
+      const nextProjects = await api.get<Project[]>(listPath);
       if (generation !== loadGeneration.current) return;
       setProjects(nextProjects);
       hasLoaded.current = true;
@@ -44,7 +49,7 @@ export function ProjectsPage() {
     } finally {
       if (generation === loadGeneration.current) setLoadState(null);
     }
-  }, [api]);
+  }, [api, listPath]);
 
   useEffect(() => {
     void load();
@@ -81,6 +86,20 @@ export function ProjectsPage() {
           </Button>
         ) : null}
       </header>
+      {operator ? (
+        <label className="er-checkbox">
+          <input
+            className="er-checkbox__input"
+            type="checkbox"
+            checked={includeDeleted}
+            onChange={(event) =>
+              setIncludeDeleted(event.currentTarget.checked)
+            }
+          />
+          <span className="er-checkbox__box" aria-hidden="true" />
+          삭제된 프로젝트 포함
+        </label>
+      ) : null}
       {createError ? (
         <StatusMessage tone="error">{createError}</StatusMessage>
       ) : null}
