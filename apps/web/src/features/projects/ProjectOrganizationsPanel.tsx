@@ -51,8 +51,20 @@ export function ProjectOrganizationsPanel({
   onProjectClosed,
 }: ProjectOrganizationsPanelProps) {
   const { api } = useAuth();
+  const visibleMemberships = useMemo(
+    () =>
+      memberships.filter(
+        (membership) => membership.isActive && membership.masterIsActive,
+      ),
+    [memberships],
+  );
   const linkedOrganizationIds = useMemo(
-    () => new Set(memberships.map((membership) => membership.organizationId)),
+    () =>
+      new Set(
+        memberships
+          .filter((membership) => membership.isActive)
+          .map((membership) => membership.organizationId),
+      ),
     [memberships],
   );
   const [pendingSelection, setPendingSelection] =
@@ -72,6 +84,15 @@ export function ProjectOrganizationsPanel({
   useEffect(() => {
     setObservedProjectRevision(projectRevision);
   }, [projectRevision]);
+
+  const selectedInactiveMembership =
+    pendingSelection?.kind === "EXISTING"
+      ? memberships.find(
+          (membership) =>
+            membership.organizationId === pendingSelection.organizationId &&
+            !membership.isActive,
+        )
+      : undefined;
 
   function selectOrganization(selection: OrganizationComboboxSelection) {
     setMessage(null);
@@ -214,6 +235,11 @@ export function ProjectOrganizationsPanel({
               onSelect={selectOrganization}
               onQueryChange={() => setPendingSelection(null)}
             />
+            {selectedInactiveMembership ? (
+              <StatusMessage tone="info">
+                기존 명단과 집계 이력이 있으면 그대로 다시 연결됩니다.
+              </StatusMessage>
+            ) : null}
             <Button
               type="submit"
               variant="primary"
@@ -234,11 +260,11 @@ export function ProjectOrganizationsPanel({
       ) : null}
       <Card className="er-panel">
         <h2>프로젝트 조직</h2>
-        {memberships.length === 0 ? (
+        {visibleMemberships.length === 0 ? (
           <p className="er-muted">연결된 조직이 없습니다.</p>
         ) : (
           <ul className="er-list">
-            {memberships.map((membership) => (
+            {visibleMemberships.map((membership) => (
               <OrganizationMembershipRow
                 key={membership.organizationId}
                 membership={membership}

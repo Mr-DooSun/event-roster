@@ -41,6 +41,8 @@ const project = {
   closedAt: null,
   closedBy: null,
   closeReason: null,
+  isDeleted: false,
+  deletedAt: null,
 };
 
 beforeEach(() => {
@@ -692,54 +694,54 @@ it("separates disabled membership mutations from operator organization managemen
   ).not.toBeInTheDocument();
 });
 
-it("confirms a project exclusion before chaining its revision to reactivation", async () => {
+it("hides excluded organizations and reactivates them through the add flow", async () => {
   const onChanged = vi.fn().mockResolvedValue(undefined);
-  const membership = organizationMembership({ hasBusinessHistory: false });
-  const view = render(
-    <ProjectOrganizationsPanel
-      projectId="project-1"
-      projectRevision={7}
-      memberships={[membership]}
-      allOrganizations={[]}
-      canMutateMemberships
-      canManageOrganizations
-      onChanged={onChanged}
-    />,
-  );
-
-  fireEvent.click(screen.getByRole("button", { name: "프로젝트에서 제외" }));
-  const dialog = screen.getByRole("dialog", { name: "프로젝트 조직 제외" });
-  expect(
-    within(dialog).getByText(
-      "이 조직을 프로젝트에서 제외할까요? 다시 추가할 수 있습니다.",
-    ),
-  ).toBeVisible();
-  expect(mockApi.patch).not.toHaveBeenCalled();
-
-  fireEvent.click(within(dialog).getByRole("button", { name: "제외하기" }));
-  await waitFor(() =>
-    expect(mockApi.patch).toHaveBeenCalledWith(
-      "/projects/project-1/organizations/org-1",
-      { isActive: false, expectedProjectRevision: 7 },
-    ),
-  );
-
-  view.rerender(
+  render(
     <ProjectOrganizationsPanel
       projectId="project-1"
       projectRevision={8}
-      memberships={[{ ...membership, isActive: false }]}
-      allOrganizations={[]}
+      memberships={[
+        organizationMembership({
+          organizationId: "org-active",
+          name: "활성 조직",
+        }),
+        organizationMembership({
+          organizationId: "org-inactive",
+          name: "제외 조직",
+          isActive: false,
+        }),
+      ]}
+      allOrganizations={[
+        { id: "org-active", name: "활성 조직", isActive: true },
+        { id: "org-inactive", name: "제외 조직", isActive: true },
+      ]}
       canMutateMemberships
       canManageOrganizations
       onChanged={onChanged}
     />,
   );
-  fireEvent.click(screen.getByRole("button", { name: "다시 사용" }));
+
+  expect(screen.getByText("활성 조직")).toBeVisible();
+  expect(screen.queryByText("제외 조직")).not.toBeInTheDocument();
+
+  const input = screen.getByRole("combobox", {
+    name: "조직 이름 검색 또는 입력",
+  });
+  fireEvent.change(input, { target: { value: "제외 조직" } });
+  fireEvent.click(screen.getByRole("option", { name: "제외 조직" }));
+  expect(
+    screen.getByText(
+      "기존 명단과 집계 이력이 있으면 그대로 다시 연결됩니다.",
+    ),
+  ).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "프로젝트에 추가" }));
   await waitFor(() =>
-    expect(mockApi.patch).toHaveBeenCalledWith(
-      "/projects/project-1/organizations/org-1",
-      { isActive: true, expectedProjectRevision: 8 },
+    expect(mockApi.post).toHaveBeenCalledWith(
+      "/projects/project-1/organizations",
+      {
+        organizationId: "org-inactive",
+        expectedProjectRevision: 8,
+      },
     ),
   );
 });

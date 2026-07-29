@@ -118,6 +118,8 @@ it("waits for confirmation before exporting the complete roster and keeps filter
         closedAt: null,
         closedBy: null,
         closeReason: null,
+        isDeleted: false,
+        deletedAt: null,
       },
       rows,
       participants: [],

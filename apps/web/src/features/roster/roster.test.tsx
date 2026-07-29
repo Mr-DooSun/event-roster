@@ -2724,6 +2724,8 @@ function project() {
     closedAt: null,
     closedBy: null,
     closeReason: null,
+    isDeleted: false,
+    deletedAt: null,
   };
 }
 

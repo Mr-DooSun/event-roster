@@ -26,6 +26,8 @@ const project = {
   closedAt: null,
   closedBy: null,
   closeReason: null,
+  isDeleted: false,
+  deletedAt: null,
 } satisfies Project;
 
 it("uses the shared date and action rows when editing a project", () => {
