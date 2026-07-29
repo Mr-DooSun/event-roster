@@ -290,11 +290,7 @@ export async function deleteOrganization(
     throw new DomainError("CONFLICT");
   }
 
-  const deleteGuard = `EXISTS (
-      SELECT 1 FROM organizations
-      WHERE id = ? AND name = ? AND is_active = 0
-    )
-    AND NOT EXISTS (
+  const noDeletionReferences = `NOT EXISTS (
       SELECT 1 FROM user_organizations WHERE organization_id = ?
     )
     AND NOT EXISTS (
@@ -309,43 +305,32 @@ export async function deleteOrganization(
     AND NOT EXISTS (
       SELECT 1 FROM project_expected_snapshots WHERE organization_id = ?
     )`;
+  const deleteGuard = `EXISTS (
+      SELECT 1 FROM organizations
+      WHERE id = ? AND name = ? AND is_active = 0
+    )
+    AND ${noDeletionReferences}`;
   const now = new Date().toISOString();
   const guardId = crypto.randomUUID();
+  const postDeleteGuardId = crypto.randomUUID();
   const auditDetails = {
     before: { name: current.name, isActive: false },
     after: { name: null, isActive: null },
     deletionEligibility: blockers,
   };
 
-  try {
-    await runGuardedAtomic(env.DB, {
-      guardId,
-      guardStatement: createOperatorGuard(env.DB, guardId, actor, deleteGuard, [
-        id,
-        current.name,
-        id,
-        id,
-        id,
-        id,
-        id,
-      ]),
-      statements: [
-        organizationAuditStatement(
-          env.DB,
-          actor.session.user.id,
-          "ORGANIZATION_DELETED",
-          id,
-          now,
-          auditDetails,
-        ),
-        env.DB.prepare("DELETE FROM organizations WHERE id = ?").bind(id),
-      ],
-      failureCode: "CONFLICT",
-    });
-  } catch (error) {
-    await throwDeleteForeignKeyConflict(
-      env.DB,
-      error,
+  await runGuardedAtomic(env.DB, {
+    guardId,
+    guardStatement: createOperatorGuard(env.DB, guardId, actor, deleteGuard, [
+      id,
+      current.name,
+      id,
+      id,
+      id,
+      id,
+      id,
+    ]),
+    statements: [
       organizationAuditStatement(
         env.DB,
         actor.session.user.id,
@@ -354,8 +339,24 @@ export async function deleteOrganization(
         now,
         auditDetails,
       ),
-    );
-  }
+      env.DB.prepare(
+        `DELETE FROM organizations
+           WHERE id = ? AND name = ? AND is_active = 0
+             AND ${noDeletionReferences}`,
+      ).bind(id, current.name, id, id, id, id, id),
+      createOperatorGuard(
+        env.DB,
+        postDeleteGuardId,
+        actor,
+        "NOT EXISTS (SELECT 1 FROM organizations WHERE id = ?)",
+        [id],
+      ),
+      env.DB.prepare("DELETE FROM operation_guards WHERE id = ?").bind(
+        postDeleteGuardId,
+      ),
+    ],
+    failureCode: "CONFLICT",
+  });
 }
 
 export async function assignOrganizationManager(
@@ -928,43 +929,4 @@ function throwConstraintConflict(error: unknown): never {
     throw new DomainError("CONFLICT");
   }
   throw error;
-}
-
-async function throwDeleteForeignKeyConflict(
-  db: D1Database,
-  error: unknown,
-  auditProbe: D1PreparedStatement,
-): Promise<never> {
-  if (!isD1ForeignKeyConstraint(error)) throw error;
-
-  try {
-    // The forced guard failure rolls the probe back. Reaching it proves the
-    // original audit statement succeeded, leaving DELETE as the FK source.
-    await db.batch([
-      auditProbe,
-      db
-        .prepare("INSERT INTO operation_guards (id, ok) VALUES (?, 0)")
-        .bind(crypto.randomUUID()),
-    ]);
-  } catch (probeError) {
-    if (
-      probeError instanceof Error &&
-      probeError.message.includes("GUARD_FAILED")
-    ) {
-      throw new DomainError("CONFLICT");
-    }
-    throw error;
-  }
-
-  throw error;
-}
-
-function isD1ForeignKeyConstraint(error: unknown): boolean {
-  if (!(error instanceof Error)) return false;
-  const cause = (error as Error & { cause?: unknown }).cause;
-  return (
-    error.message.startsWith("D1_ERROR: FOREIGN KEY constraint failed:") &&
-    cause instanceof Error &&
-    cause.message.startsWith("FOREIGN KEY constraint failed:")
-  );
 }

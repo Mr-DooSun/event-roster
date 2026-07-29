@@ -286,18 +286,19 @@ it("keeps an audit-trigger foreign-key failure as an internal error", async () =
   }
 });
 
-it("maps only a delete-time foreign-key race to conflict and rolls back", async () => {
+it("rolls back when audit introduces a reference after the authoritative guard", async () => {
   const operator = await seedOperator();
   await seedOrganization("fk-race-delete", "FK 경쟁 조직", false);
   await env.DB.prepare(
-    `CREATE TRIGGER create_delete_time_organization_reference
-     BEFORE DELETE ON organizations
-     WHEN OLD.id = 'fk-race-delete'
+    `CREATE TRIGGER create_post_guard_organization_reference
+     AFTER INSERT ON audit_logs
+     WHEN NEW.action = 'ORGANIZATION_DELETED'
+       AND NEW.entity_id = 'fk-race-delete'
      BEGIN
        INSERT INTO participants
        (id, participant_id, name, organization_id, revision, created_at, updated_at)
        VALUES ('fk-race-participant', 'P-FK-RACE', 'FK 경쟁 참가자',
-               OLD.id, 0, '2026-07-29T00:00:00.000Z',
+               NEW.entity_id, 0, '2026-07-29T00:00:00.000Z',
                '2026-07-29T00:00:00.000Z');
      END`,
   ).run();
@@ -331,7 +332,7 @@ it("maps only a delete-time foreign-key race to conflict and rolls back", async 
     ).toBeNull();
   } finally {
     await env.DB.prepare(
-      "DROP TRIGGER IF EXISTS create_delete_time_organization_reference",
+      "DROP TRIGGER IF EXISTS create_post_guard_organization_reference",
     ).run();
   }
 });
@@ -358,6 +359,13 @@ it("atomically audits and deletes an inactive empty organization", async () => {
   expect(
     (await env.DB.prepare("PRAGMA foreign_key_check").all()).results,
   ).toEqual([]);
+  expect(
+    (
+      await env.DB.prepare(
+        "SELECT COUNT(*) AS count FROM operation_guards",
+      ).first<{ count: number }>()
+    )?.count,
+  ).toBe(0);
 
   const audit = await env.DB.prepare(
     `SELECT actor_user_id, details_json FROM audit_logs
