@@ -597,6 +597,11 @@ pending migration은 모두 없어야 한다. 정확히 `0005` 하나만 pending
 있거나, `0005` 전용 백업·사전 기록을 완료하지 못한 경우 migration과 Worker
 배포를 모두 중단한다.
 
+`0006_project_soft_deletion.sql`이 목록에 있으면 `0001`~`0005`와 다른
+pending migration은 모두 없어야 한다. 정확히 `0006` 하나만 pending인 기존
+운영 D1은 아래 7.3.3 전용 gate로 이동한다. 다른 조합에는 일반
+`migrations apply`를 실행하지 않는다.
+
 <a id="roster-participant-profiles-0005-gate"></a>
 
 ### 7.3.2 `0005_roster_participant_profiles.sql` 적용 게이트
@@ -761,18 +766,78 @@ corepack pnpm@10.28.1 --filter @event-roster/worker exec \
 하나라도 충족하지 않으면 성공으로 기록하거나 Worker를 배포하지 않는다.
 [복구 절차](recovery.md)의 pre-0005 export 격리 복원으로 이동한다.
 
+<a id="project-soft-deletion-0006-gate"></a>
+
+### 7.3.3 `0006_project_soft_deletion.sql` 적용 게이트
+
+이 gate는 `0001`~`0005`가 이미 적용된 기존 운영 D1 전용이다. 저장소와
+worktree 밖의 `/private/tmp`에 실행별 백업 디렉터리를 만들고, export와
+체크섬을 각각 mode 0600으로 제한한다.
+
 ```bash
 set -euo pipefail
+umask 077
+release_backup_dir="$(mktemp -d /private/tmp/event-roster-d1-0006.XXXXXX)"
+chmod 700 "$release_backup_dir"
+test "$(stat -c '%a' "$release_backup_dir" 2>/dev/null ||
+  stat -f '%Lp' "$release_backup_dir")" = "700"
+
+corepack pnpm@10.28.1 --filter @event-roster/worker exec \
+  wrangler d1 export event-roster --remote \
+  --output "$release_backup_dir/event-roster-before-0006.sql"
+test -s "$release_backup_dir/event-roster-before-0006.sql"
+chmod 600 "$release_backup_dir/event-roster-before-0006.sql"
+shasum -a 256 "$release_backup_dir/event-roster-before-0006.sql" \
+  > "$release_backup_dir/event-roster-before-0006.sql.sha256"
+chmod 600 "$release_backup_dir/event-roster-before-0006.sql.sha256"
+shasum -a 256 -c \
+  "$release_backup_dir/event-roster-before-0006.sql.sha256"
+
+corepack pnpm@10.28.1 --filter @event-roster/worker exec \
+  wrangler d1 execute event-roster --remote --command \
+  "SELECT COUNT(*) AS project_count FROM projects"
+```
+
+사전 `project_count`, export 절대 경로와 체크섬을 접근 제한된 배포 기록에
+남긴다. 이어 pending 파일명 집합을 정규화해 정확히
+`0006_project_soft_deletion.sql` 하나인지 migration 적용 직전에 다시
+확인한다.
+
+```bash
+set -euo pipefail
+EVENT_ROSTER_0006_PENDING="$(
+  corepack pnpm@10.28.1 --filter @event-roster/worker exec \
+    wrangler d1 migrations list event-roster --remote
+)"
+printf '%s\n' "$EVENT_ROSTER_0006_PENDING"
+EVENT_ROSTER_0006_PENDING_FILES="$(
+  printf '%s\n' "$EVENT_ROSTER_0006_PENDING" |
+    LC_ALL=C tr -cs '[:alnum:]_.\n-' '\n' |
+    LC_ALL=C awk '/^[[:alnum:]_.-]+[.]sql$/ { print }' |
+    LC_ALL=C sort -u
+)"
+test "$EVENT_ROSTER_0006_PENDING_FILES" = \
+  "0006_project_soft_deletion.sql"
+
 corepack pnpm@10.28.1 --filter @event-roster/worker exec \
   wrangler d1 migrations apply event-roster --remote
+corepack pnpm@10.28.1 --filter @event-roster/worker exec \
+  wrangler d1 execute event-roster --remote --command \
+  "SELECT COUNT(*) AS project_count FROM projects"
+corepack pnpm@10.28.1 --filter @event-roster/worker exec \
+  wrangler d1 execute event-roster --remote --command \
+  "SELECT COUNT(*) AS deleted_count FROM projects WHERE deleted_at IS NOT NULL"
 corepack pnpm@10.28.1 --filter @event-roster/worker exec \
   wrangler d1 execute event-roster --remote --command \
   "PRAGMA foreign_key_check"
 ```
 
-foreign key 검사는 행을 반환하지 않아야 한다. migration별 사후 검증도 모두
-통과해야 한다. 실패하면 Worker를 배포하지 말고
-[복구 절차](recovery.md)의 격리 복원을 따른다.
+사전·사후 `project_count`는 같아야 하고 최초 `deleted_count`는 0이어야
+한다. `PRAGMA foreign_key_check`는 행을 반환하지 않아야 하며 pending
+목록에서 `0006`이 사라지고 ledger에 적용 기록이 있어야 한다. 어느 조건이든
+실패하면 Worker 배포를 즉시 중단하고
+[복구 절차](recovery.md)의 pre-0006 export 격리 복원으로 이동한다. 운영
+D1을 수동 SQL이나 역방향 migration으로 되돌리지 않는다.
 
 ### 7.4 Worker 배포와 확인
 

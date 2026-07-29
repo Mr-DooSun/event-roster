@@ -28,6 +28,14 @@ PRE_REGISTRATION → IN_PROGRESS → CLOSED 상태와 revision을 가진다.
 종료된 프로젝트는 유효한 미래/미정 종료일로 수정한 뒤 IN_PROGRESS로 재개한다.
 `project_organizations`는 전역 조직과 프로젝트의 연결을 보존한다.
 
+- 프로젝트 삭제는 복구 가능한 수명주기 overlay다. 일반 조회는 항상
+  `deleted_at IS NULL`을 요구하며, 운영자가 명시한 include-deleted 조회와
+  복구만 이 경계를 넘는다.
+- 삭제는 `CLOSED` 프로젝트에만 허용하고 명단, 조직 연결, 집계와 감사 이력을
+  그대로 보존한다. 복구된 프로젝트는 `CLOSED` 상태로 돌아온다.
+- 프로젝트 조직 제외는 연결 행을 비활성화해 이력을 보존하되 일반 목록과
+  조직별 현황에서는 즉시 숨긴다. 같은 조직을 다시 추가하면 기존 연결과
+  이력을 재사용한다.
 - 조직 담당자 mutation은 활성 사용자, 활성 조직, 현재 배정, 활성 프로젝트 연결, `PRE_REGISTRATION`을 모두 요구한다.
 - 운영자는 전체 프로젝트를 관리하며 기존 이력 정정은 프로젝트 조직이나 조직 마스터가 비활성화된 뒤에도 보존한다.
 - 계정(`users`)과 참가자(`participants`)는 별도다. 담당자 발급·배정은 참가자나 `project_roster_entries`를 만들지 않는다.

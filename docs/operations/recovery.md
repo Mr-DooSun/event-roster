@@ -123,7 +123,64 @@
    정확한 role/grade 필터, 취소 행을 포함한 Excel 내보내기를 smoke test한다.
    smoke가 모두 통과하고 사용자 승인과 binding 대조가 끝나기 전에는 운영
    Worker binding을 전환하거나 배포하지 않는다.
-10. 운영 D1의 행을 수동으로 되돌리거나 역방향 migration으로 복구하지 않는다.
+10. **`0001`~`0005`가 적용되고 `0006` 적용 전인 export**는 새로 생성한
+    격리 D1에만 import한다. 운영 D1이나 운영 Worker binding을 import
+    대상으로 사용하지 않는다. 격리 D1의 database ID만 담은 mode 0600
+    recovery config와 mode 0600 export/checksum을 준비하고 체크섬을 먼저
+    검증한다.
+
+    import 직후 migration ledger에 `0001`~`0005`가 정확히 적용되어 있고
+    pending 파일이 `0006_project_soft_deletion.sql` 하나뿐인지 확인한다.
+    이어 사전 프로젝트 수를 기록하고, 격리 D1에만 `0006`을 적용한다.
+
+    ```bash
+    set -euo pipefail
+    test -n "${EVENT_ROSTER_RECOVERY_CONFIG:?격리 D1 recovery config가 필요합니다}"
+    test -n "${EVENT_ROSTER_PRE_0006_EXPORT:?pre-0006 export가 필요합니다}"
+    test -f "$EVENT_ROSTER_RECOVERY_CONFIG"
+    test ! -L "$EVENT_ROSTER_RECOVERY_CONFIG"
+    test -s "$EVENT_ROSTER_PRE_0006_EXPORT"
+    test -f "$EVENT_ROSTER_PRE_0006_EXPORT"
+    test ! -L "$EVENT_ROSTER_PRE_0006_EXPORT"
+    test -f "${EVENT_ROSTER_PRE_0006_EXPORT}.sha256"
+    test ! -L "${EVENT_ROSTER_PRE_0006_EXPORT}.sha256"
+    test "$(stat -c '%a' "$EVENT_ROSTER_RECOVERY_CONFIG" 2>/dev/null ||
+      stat -f '%Lp' "$EVENT_ROSTER_RECOVERY_CONFIG")" = "600"
+    test "$(stat -c '%a' "$EVENT_ROSTER_PRE_0006_EXPORT" 2>/dev/null ||
+      stat -f '%Lp' "$EVENT_ROSTER_PRE_0006_EXPORT")" = "600"
+    test "$(stat -c '%a' "${EVENT_ROSTER_PRE_0006_EXPORT}.sha256" 2>/dev/null ||
+      stat -f '%Lp' "${EVENT_ROSTER_PRE_0006_EXPORT}.sha256")" = "600"
+    shasum -a 256 -c "${EVENT_ROSTER_PRE_0006_EXPORT}.sha256"
+
+    corepack pnpm@10.28.1 --filter @event-roster/worker exec \
+      wrangler d1 execute DB --remote --config "$EVENT_ROSTER_RECOVERY_CONFIG" \
+      --file "$EVENT_ROSTER_PRE_0006_EXPORT"
+    corepack pnpm@10.28.1 --filter @event-roster/worker exec \
+      wrangler d1 execute DB --remote --config "$EVENT_ROSTER_RECOVERY_CONFIG" \
+      --command "SELECT id, name, applied_at FROM d1_migrations ORDER BY id"
+    corepack pnpm@10.28.1 --filter @event-roster/worker exec \
+      wrangler d1 migrations list DB --remote \
+      --config "$EVENT_ROSTER_RECOVERY_CONFIG"
+    corepack pnpm@10.28.1 --filter @event-roster/worker exec \
+      wrangler d1 execute DB --remote --config "$EVENT_ROSTER_RECOVERY_CONFIG" \
+      --command "SELECT COUNT(*) AS project_count FROM projects"
+    ```
+
+    pending 집합이 정확하지 않거나 사전 수량을 기록하지 못하면 중단한다.
+    격리 config를 대상으로
+    [0006 전용 적용 게이트](deployment.md#project-soft-deletion-0006-gate)의
+    pending 재검사와 migration apply를 수행한다. 모든 D1 명령 대상은
+    `event-roster`가 아니라
+    `DB --remote --config "$EVENT_ROSTER_RECOVERY_CONFIG"`여야 한다.
+
+    적용 후 `project_count`가 사전 값과 같고 `deleted_count`가 0이며
+    `PRAGMA foreign_key_check`가 행을 반환하지 않는지 확인한다. 격리 D1에
+    연결한 local 또는 preview Worker에서 일반 프로젝트 목록, 조직 제외 후
+    재추가, 종료 프로젝트 삭제·include-deleted 조회·복구를 smoke test한다.
+    검증 결과와 사용자 승인을 확보하기 전에는 production binding을 변경하지
+    않는다. 승인 뒤에도 binding의 database ID가 검증한 격리 D1과 정확히
+    같은지 다시 대조한 후에만 전환한다.
+11. 운영 D1의 행을 수동으로 되돌리거나 역방향 migration으로 복구하지 않는다.
    특히 production의 `participant_role_snapshot`,
    `student_grade_snapshot` 열을 수동 삭제하지 않는다. pre-0005 export는
    오직 격리 D1에 복원하고 검증하며, 실패한 운영 schema를 reverse migration
@@ -132,9 +189,9 @@
    `user_organizations.assignment_role`별 수량 합계가 복원 전 배정 수와
    같은지 확인한다. 조직별 `PRIMARY_LEADER`가 둘 이상인 조회도 0행이어야
    한다.
-11. 조직, 계정, 전역 역할, 조직별 역할, 프로젝트 revision/status, 프로젝트 조직, 참가자, 명단, snapshot, 감사, session 폐기 상태를 표본 검증한다.
-12. 운영자·대표 조직장·추가 관리자·미배정 조직 담당자 표본으로 [월간 점검](monthly-check.md)의 권한 matrix를 검증한다.
-13. 사용자 승인과 점검 결과를 확보한 뒤에만 Worker의 D1 binding을 검증 D1 또는 승인된 복원 D1으로 전환하고 배포한다.
+12. 조직, 계정, 전역 역할, 조직별 역할, 프로젝트 revision/status, 프로젝트 조직, 참가자, 명단, snapshot, 감사, session 폐기 상태를 표본 검증한다.
+13. 운영자·대표 조직장·추가 관리자·미배정 조직 담당자 표본으로 [월간 점검](monthly-check.md)의 권한 matrix를 검증한다.
+14. 사용자 승인과 점검 결과를 확보한 뒤에만 Worker의 D1 binding을 검증 D1 또는 승인된 복원 D1으로 전환하고 배포한다.
 
 `0003` 전 export 복원 후 사용하는 검증 조회:
 
