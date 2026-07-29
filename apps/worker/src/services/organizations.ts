@@ -319,44 +319,54 @@ export async function deleteOrganization(
     deletionEligibility: blockers,
   };
 
-  await runGuardedAtomic(env.DB, {
-    guardId,
-    guardStatement: createOperatorGuard(env.DB, guardId, actor, deleteGuard, [
-      id,
-      current.name,
-      id,
-      id,
-      id,
-      id,
-      id,
-    ]),
-    statements: [
-      organizationAuditStatement(
-        env.DB,
-        actor.session.user.id,
-        "ORGANIZATION_DELETED",
+  try {
+    await runGuardedAtomic(env.DB, {
+      guardId,
+      guardStatement: createOperatorGuard(env.DB, guardId, actor, deleteGuard, [
         id,
-        now,
-        auditDetails,
-      ),
-      env.DB.prepare(
-        `DELETE FROM organizations
-           WHERE id = ? AND name = ? AND is_active = 0
-             AND ${noDeletionReferences}`,
-      ).bind(id, current.name, id, id, id, id, id),
-      createOperatorGuard(
-        env.DB,
-        postDeleteGuardId,
-        actor,
-        "NOT EXISTS (SELECT 1 FROM organizations WHERE id = ?)",
-        [id],
-      ),
-      env.DB.prepare("DELETE FROM operation_guards WHERE id = ?").bind(
-        postDeleteGuardId,
-      ),
-    ],
-    failureCode: "CONFLICT",
-  });
+        current.name,
+        id,
+        id,
+        id,
+        id,
+        id,
+      ]),
+      statements: [
+        organizationAuditStatement(
+          env.DB,
+          actor.session.user.id,
+          "ORGANIZATION_DELETED",
+          id,
+          now,
+          auditDetails,
+        ),
+        env.DB.prepare(
+          `DELETE FROM organizations
+             WHERE id = ? AND name = ? AND is_active = 0
+               AND ${noDeletionReferences}`,
+        ).bind(id, current.name, id, id, id, id, id),
+        createOperatorGuard(
+          env.DB,
+          postDeleteGuardId,
+          actor,
+          "NOT EXISTS (SELECT 1 FROM organizations WHERE id = ?)",
+          [id],
+        ),
+        env.DB.prepare("DELETE FROM operation_guards WHERE id = ?").bind(
+          postDeleteGuardId,
+        ),
+      ],
+      failureCode: "CONFLICT",
+    });
+  } catch (error) {
+    if (!(error instanceof DomainError && error.code === "CONFLICT")) {
+      throw error;
+    }
+    if (!(await findOrganizationState(env.DB, id))) {
+      throw new DomainError("NOT_FOUND");
+    }
+    throw error;
+  }
 }
 
 export async function assignOrganizationManager(

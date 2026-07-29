@@ -1,6 +1,8 @@
 import { env } from "cloudflare:workers";
 import type { OrganizationDetail } from "@event-roster/contracts";
 import { beforeEach, expect, it } from "vitest";
+import { createApp } from "../src/app";
+import type { Env } from "../src/env";
 import {
   authedRequest,
   seedManager,
@@ -17,6 +19,32 @@ import {
 } from "./support/auth";
 
 beforeEach(resetAuthState);
+
+function synchronizeFirstBatches(
+  db: D1Database,
+  participantCount: number,
+): D1Database {
+  let arrivals = 0;
+  let release: (() => void) | undefined;
+  const allArrived = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+
+  return new Proxy(db, {
+    get(target, property) {
+      if (property === "batch") {
+        return async (statements: D1PreparedStatement[]) => {
+          arrivals += 1;
+          if (arrivals === participantCount) release?.();
+          await allArrived;
+          return target.batch(statements);
+        };
+      }
+      const value = Reflect.get(target, property, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+}
 
 it("requires an administrative full session, exact origin, and csrf", async () => {
   const operator = await seedOperator();
@@ -335,6 +363,49 @@ it("rolls back when audit introduces a reference after the authoritative guard",
       "DROP TRIGGER IF EXISTS create_post_guard_organization_reference",
     ).run();
   }
+});
+
+it("returns not found to the loser when two deletes pass preflight", async () => {
+  const operator = await seedOperator();
+  await seedOrganization("concurrent-delete", "동시 삭제 조직", false);
+  const synchronizedEnv = Object.assign(Object.create(env), {
+    DB: synchronizeFirstBatches(env.DB, 2),
+  }) as Env;
+  const app = createApp();
+  const request = () =>
+    app.fetch(
+      new Request(
+        "https://event-roster.test/api/v1/organizations/concurrent-delete",
+        {
+          method: "DELETE",
+          headers: {
+            ...authenticatedHeaders(operator),
+            "Content-Type": "application/json",
+            Origin: "https://event-roster.test",
+          },
+          body: JSON.stringify({ confirmationName: "동시 삭제 조직" }),
+        },
+      ),
+      synchronizedEnv,
+    );
+
+  const responses = await Promise.all([request(), request()]);
+
+  expect(responses.map(({ status }) => status).sort()).toEqual([204, 404]);
+  expect(
+    await env.DB.prepare(
+      "SELECT id FROM organizations WHERE id = 'concurrent-delete'",
+    ).first(),
+  ).toBeNull();
+  expect(
+    (
+      await env.DB.prepare(
+        `SELECT COUNT(*) AS count FROM audit_logs
+         WHERE action = 'ORGANIZATION_DELETED'
+           AND entity_id = 'concurrent-delete'`,
+      ).first<{ count: number }>()
+    )?.count,
+  ).toBe(1);
 });
 
 it("atomically audits and deletes an inactive empty organization", async () => {
