@@ -484,6 +484,10 @@ a {
 .er-project-card--deleted:focus-visible {
   border-color: var(--er-color-primary);
 }
+.er-deleted-project-notice {
+  border-style: dashed;
+  background: var(--er-color-canvas);
+}
 .er-project-card--skeleton {
   align-content: start;
   pointer-events: none;

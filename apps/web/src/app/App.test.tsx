@@ -1189,6 +1189,47 @@ it("routes a project URL to the project roster", async () => {
   expect(mockApi.get).toHaveBeenCalledWith("/projects/project-1");
 });
 
+it("preserves the include-deleted query when routing project detail", async () => {
+  window.history.replaceState(
+    null,
+    "",
+    "/projects/project-1?includeDeleted=true",
+  );
+  mockApi.get.mockImplementation((path: string) => {
+    if (path === "/projects/project-1?includeDeleted=true") {
+      return Promise.resolve({
+        id: "project-1",
+        name: "삭제된 프로젝트",
+        startDate: null,
+        endDate: null,
+        status: "CLOSED",
+        revision: 4,
+        createdAt: "2026-07-01T00:00:00.000Z",
+        createdBy: "operator-1",
+        updatedAt: "2026-07-29T01:00:00.000Z",
+        closedAt: "2026-07-28T01:00:00.000Z",
+        closedBy: "operator-1",
+        closeReason: "MANUAL",
+        isDeleted: true,
+        deletedAt: "2026-07-29T01:00:00.000Z",
+      });
+    }
+    throw new Error(`unexpected path: ${path}`);
+  });
+
+  render(<App />);
+
+  expect(
+    await screen.findByRole("heading", {
+      name: "삭제된 프로젝트",
+      level: 1,
+    }),
+  ).toBeVisible();
+  expect(mockApi.get).toHaveBeenCalledWith(
+    "/projects/project-1?includeDeleted=true",
+  );
+});
+
 function organizationDetail(): OrganizationDetail {
   return {
     id: "org-1",

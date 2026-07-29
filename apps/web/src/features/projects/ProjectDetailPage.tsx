@@ -7,6 +7,7 @@ import type {
 } from "@event-roster/contracts";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "../../components/ui/Button";
+import { Card } from "../../components/ui/Card";
 import { Dialog } from "../../components/ui/Dialog";
 import { LoadingStatus } from "../../components/ui/LoadingStatus";
 import { RetryableError } from "../../components/ui/RetryableError";
@@ -17,6 +18,7 @@ import { AuditPanel, type AuditView } from "../roster/AuditPanel";
 import type { ParticipantView } from "../roster/ParticipantDialog";
 import { ProjectRosterPage } from "../roster/ProjectRosterPage";
 import type { RosterView } from "../roster/RosterTable";
+import { ProjectDeletionDialog } from "./ProjectDeletionDialog";
 import { ProjectEditDialog, type ProjectEditInput } from "./ProjectEditDialog";
 import {
   ProjectHeaderSkeleton,
@@ -117,8 +119,19 @@ const INITIAL_RESOURCE_REQUEST_TOKEN: Record<DetailResource, number> = {
   audit: 0,
 };
 
-export function ProjectDetailPage({ projectId }: { projectId: string }) {
+export function ProjectDetailPage({
+  projectId,
+  includeDeleted = false,
+}: {
+  projectId: string;
+  includeDeleted?: boolean;
+}) {
   const { api, auth } = useAuth();
+  const operator = auth?.session.user.role === "OPERATOR";
+  const deletedDetailForbidden = includeDeleted && !operator;
+  const projectPath = includeDeleted
+    ? `/projects/${projectId}?includeDeleted=true`
+    : `/projects/${projectId}`;
   const [selectedTab, setSelectedTab] = useState<ProjectTab>("overview");
   const [project, setProject] = useState<Project | null>(null);
   const [summary, setSummary] = useState<ProjectSummary>(() =>
@@ -142,7 +155,9 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
   const [message, setMessage] = useState<string | null>(null);
   const [showEdit, setShowEdit] = useState(false);
   const [showTransition, setShowTransition] = useState(false);
+  const [showDeletion, setShowDeletion] = useState(false);
   const [transitioning, setTransitioning] = useState(false);
+  const [restoring, setRestoring] = useState(false);
   const loadGeneration = useRef(0);
   const projectRequestToken = useRef(0);
   const transitionRequestToken = useRef(0);
@@ -288,9 +303,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
       setProjectLoading(true);
       setProjectLoadError(null);
       try {
-        const nextProject = await api.get<Project>(
-          `/projects/${context.projectId}`,
-        );
+        const nextProject = await api.get<Project>(projectPath);
         if (!ownsRequest()) return null;
         setProject(nextProject);
         return nextProject;
@@ -303,7 +316,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
         if (ownsRequest()) setProjectLoading(false);
       }
     },
-    [api, isCurrent],
+    [api, isCurrent, projectPath],
   );
 
   const load = useCallback(() => {
@@ -320,21 +333,31 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
     setAuditPaginationError(null);
     setMessage(null);
 
+    if (deletedDetailForbidden) {
+      setProject(null);
+      setProjectLoading(false);
+      setProjectLoadError("삭제된 프로젝트를 볼 권한이 없습니다.");
+      return;
+    }
     const projectRequest = loadProject(context);
-    const detailRefresh = Promise.all(
-      (
-        [
-          "summary",
-          "memberships",
-          "organizations",
-          "roster",
-          "participants",
-          "audit",
-        ] satisfies DetailResource[]
-      ).map((resource) => loadDetailResource(context, resource)),
-    );
+    const detailRefresh = includeDeleted
+      ? Promise.resolve([])
+      : Promise.all(
+          (
+            [
+              "summary",
+              "memberships",
+              "organizations",
+              "roster",
+              "participants",
+              "audit",
+            ] satisfies DetailResource[]
+          ).map((resource) => loadDetailResource(context, resource)),
+        );
     return { projectRequest, detailRefresh };
   }, [
+    deletedDetailForbidden,
+    includeDeleted,
     isCurrent,
     loadDetailResource,
     loadProject,
@@ -380,7 +403,9 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
     setMessage(null);
     setShowEdit(false);
     setShowTransition(false);
+    setShowDeletion(false);
     setTransitioning(false);
+    setRestoring(false);
     transitionRequestToken.current += 1;
     setProjectLoading(true);
     auditPaginationRequest.current = null;
@@ -388,7 +413,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
     return () => {
       loadGeneration.current += 1;
     };
-  }, [load, projectId, updateAuditNextCursor]);
+  }, [includeDeleted, load, projectId, updateAuditNextCursor]);
 
   async function reloadProjectForContext(context: RequestContext) {
     return loadProject(context);
@@ -481,6 +506,74 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
     }
   }
 
+  async function deleteProject(confirmationName: string) {
+    if (!project || project.isDeleted || project.status !== "CLOSED") return;
+    const context = { projectId, generation: loadGeneration.current };
+    if (!isCurrent(context)) return;
+    try {
+      await api.delete<Project>(`/projects/${context.projectId}`, {
+        confirmationName,
+        expectedRevision: project.revision,
+      });
+      if (!isCurrent(context)) return;
+      navigate("/projects");
+    } catch (error) {
+      if (!isCurrent(context)) return;
+      if (
+        error instanceof ApiError &&
+        error.problem?.code === "STALE_REVISION"
+      ) {
+        const latest = await reloadProjectForContext(context);
+        if (!latest || !isCurrent(context)) return;
+        setShowDeletion(false);
+        setMessage(
+          "다른 변경이 먼저 반영되어 최신 프로젝트를 다시 불러왔습니다.",
+        );
+        return;
+      }
+      if (
+        error instanceof ApiError &&
+        error.problem?.code === "CONFIRMATION_MISMATCH"
+      ) {
+        throw new Error(
+          "프로젝트 이름이 일치하지 않습니다. 정확한 이름을 다시 입력해 주세요.",
+        );
+      }
+      throw new Error("프로젝트를 삭제하지 못했습니다. 다시 시도해 주세요.");
+    }
+  }
+
+  async function restoreProject() {
+    if (!project?.isDeleted || restoring) return;
+    const context = { projectId, generation: loadGeneration.current };
+    if (!isCurrent(context)) return;
+    setRestoring(true);
+    setMessage(null);
+    try {
+      await api.post<Project>(`/projects/${context.projectId}/restore`, {
+        expectedRevision: project.revision,
+      });
+      if (!isCurrent(context)) return;
+      navigate(`/projects/${encodeURIComponent(context.projectId)}`);
+    } catch (error) {
+      if (!isCurrent(context)) return;
+      if (
+        error instanceof ApiError &&
+        error.problem?.code === "STALE_REVISION"
+      ) {
+        const latest = await reloadProjectForContext(context);
+        if (!latest || !isCurrent(context)) return;
+        setMessage(
+          "다른 변경이 먼저 반영되어 최신 프로젝트를 다시 불러왔습니다.",
+        );
+      } else {
+        setMessage("프로젝트를 복구하지 못했습니다.");
+      }
+    } finally {
+      if (isCurrent(context)) setRestoring(false);
+    }
+  }
+
   async function loadMoreAudit(
     expectedGeneration: number,
     expectedCursor: string | null,
@@ -529,6 +622,13 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
     }
   }
 
+  if (deletedDetailForbidden) {
+    return (
+      <StatusMessage tone="error">
+        삭제된 프로젝트를 볼 권한이 없습니다.
+      </StatusMessage>
+    );
+  }
   if (projectLoading && !project) {
     return <ProjectHeaderSkeleton />;
   }
@@ -546,7 +646,49 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
     return <ProjectHeaderSkeleton />;
   }
 
-  const operator = auth?.session.user.role === "OPERATOR";
+  if (project.isDeleted) {
+    return (
+      <div className="er-page-stack">
+        <header className="er-page-heading">
+          <div>
+            <p className="er-eyebrow">DELETED PROJECT</p>
+            <h1>{project.name}</h1>
+            <div className="er-project-meta">
+              <span className="er-badge er-badge--inactive">삭제됨</span>
+              <span>{formatProjectDates(project)}</span>
+              {project.deletedAt ? (
+                <time dateTime={project.deletedAt}>
+                  삭제 {formatKstDate(project.deletedAt)}
+                </time>
+              ) : null}
+            </div>
+          </div>
+          <Button
+            type="button"
+            variant="primary"
+            loading={restoring}
+            loadingText="복구 중…"
+            onClick={() => void restoreProject()}
+          >
+            프로젝트 복구
+          </Button>
+        </header>
+        {message ? (
+          <StatusMessage tone={message.includes("최신") ? "info" : "error"}>
+            {message}
+          </StatusMessage>
+        ) : null}
+        <Card className="er-panel er-deleted-project-notice">
+          <h2>삭제된 프로젝트</h2>
+          <p>
+            참가 명단, 조직, 집계와 변경 이력은 보존되어 있습니다. 복구하면
+            종료 상태로 다시 사용할 수 있습니다.
+          </p>
+        </Card>
+      </div>
+    );
+  }
+
   const action = NEXT_ACTION[project.status];
   const reopenBlocked =
     project.status === "CLOSED" &&
@@ -665,6 +807,16 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
             >
               {action.label}
             </Button>
+            {project.status === "CLOSED" ? (
+              <Button
+                type="button"
+                variant="danger"
+                disabled={projectActionsBlocked}
+                onClick={() => setShowDeletion(true)}
+              >
+                프로젝트 삭제
+              </Button>
+            ) : null}
             {reopenBlocked ? (
               <span className="er-muted">
                 종료일을 미래로 변경하거나 제거한 뒤 재개하세요.
@@ -809,6 +961,12 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
           </Button>
         </Dialog>
       ) : null}
+      <ProjectDeletionDialog
+        open={showDeletion}
+        projectName={project.name}
+        onClose={() => setShowDeletion(false)}
+        onConfirm={deleteProject}
+      />
     </div>
   );
 }
@@ -829,6 +987,23 @@ function currentKstDate(now = new Date()) {
   const part = (type: Intl.DateTimeFormatPartTypes) =>
     parts.find((item) => item.type === type)?.value ?? "";
   return `${part("year")}-${part("month")}-${part("day")}`;
+}
+
+function formatKstDate(value: string) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Seoul",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date(value));
+  const part = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((item) => item.type === type)?.value ?? "";
+  return `${part("year")}.${part("month")}.${part("day")}`;
+}
+
+function navigate(href: string) {
+  window.history.pushState(null, "", href);
+  window.dispatchEvent(new PopStateEvent("popstate"));
 }
 
 function assertNever(value: never): never {

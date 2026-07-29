@@ -16,7 +16,7 @@ const ImportWizard = lazy(() =>
 
 export function AppShell() {
   const { auth, logout } = useAuth();
-  const path = usePathname();
+  const location = useLocationPath();
   const operator = auth?.session.user.role === "OPERATOR";
   const [loggingOut, setLoggingOut] = useState(false);
 
@@ -58,13 +58,15 @@ export function AppShell() {
             </>
           ) : null}
         </nav>
-        <main className="er-content">{route(path, operator)}</main>
+        <main className="er-content">{route(location, operator)}</main>
       </div>
     </div>
   );
 }
 
-function route(path: string, operator: boolean) {
+function route(location: string, operator: boolean) {
+  const url = new URL(location, window.location.origin);
+  const path = url.pathname;
   if (path === "/" || path === "/projects") return <ProjectsPage />;
   if (path === "/organizations" && operator) return <OrganizationsPage />;
   if (path === "/users" && operator) return <UsersPage />;
@@ -97,7 +99,10 @@ function route(path: string, operator: boolean) {
   const projectMatch = path.match(/^\/projects\/([^/]+)$/);
   if (projectMatch?.[1]) {
     return (
-      <ProjectDetailPage projectId={decodeURIComponent(projectMatch[1])} />
+      <ProjectDetailPage
+        projectId={decodeURIComponent(projectMatch[1])}
+        includeDeleted={url.searchParams.get("includeDeleted") === "true"}
+      />
     );
   }
   return <ProjectsPage />;
@@ -118,12 +123,15 @@ function NavLink({ href, children }: { href: string; children: string }) {
   );
 }
 
-function usePathname() {
-  const [path, setPath] = useState(window.location.pathname);
+function useLocationPath() {
+  const [location, setLocation] = useState(
+    () => `${window.location.pathname}${window.location.search}`,
+  );
   useEffect(() => {
-    const update = () => setPath(window.location.pathname);
+    const update = () =>
+      setLocation(`${window.location.pathname}${window.location.search}`);
     window.addEventListener("popstate", update);
     return () => window.removeEventListener("popstate", update);
   }, []);
-  return path;
+  return location;
 }

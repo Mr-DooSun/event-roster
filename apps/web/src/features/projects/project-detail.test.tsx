@@ -15,7 +15,7 @@ import { ProjectDetailPage } from "./ProjectDetailPage";
 import { ProjectOrganizationsPanel } from "./ProjectOrganizationsPanel";
 
 const { mockApi, mockRole } = vi.hoisted(() => ({
-  mockApi: { get: vi.fn(), post: vi.fn(), patch: vi.fn() },
+  mockApi: { get: vi.fn(), post: vi.fn(), patch: vi.fn(), delete: vi.fn() },
   mockRole: {
     current: "OPERATOR" as "OPERATOR" | "ORGANIZATION_MANAGER",
   },
@@ -49,6 +49,7 @@ beforeEach(() => {
   mockApi.get.mockReset();
   mockApi.post.mockReset();
   mockApi.patch.mockReset();
+  mockApi.delete.mockReset();
   mockApi.post.mockResolvedValue({
     organization: organizationMembership(),
     projectRevision: 8,
@@ -62,6 +63,205 @@ beforeEach(() => {
 });
 
 afterEach(cleanup);
+
+it("shows project deletion only to operators on a non-deleted closed project", async () => {
+  mockApi.get.mockImplementation((path: string) => {
+    if (path === "/projects/project-1") return closedProject();
+    return defaultGet(path);
+  });
+  const operatorView = render(<ProjectDetailPage projectId="project-1" />);
+  expect(
+    await screen.findByRole("button", { name: "프로젝트 삭제" }),
+  ).toBeVisible();
+  operatorView.unmount();
+
+  mockRole.current = "ORGANIZATION_MANAGER";
+  render(<ProjectDetailPage projectId="project-1" />);
+  await screen.findByRole("heading", { name: project.name });
+  expect(
+    screen.queryByRole("button", { name: "프로젝트 삭제" }),
+  ).not.toBeInTheDocument();
+});
+
+it("deletes a project with its exact name and navigates to the list", async () => {
+  window.history.replaceState(null, "", "/projects/project-1");
+  const closed = closedProject();
+  mockApi.get.mockImplementation((path: string) => {
+    if (path === "/projects/project-1") return closed;
+    return defaultGet(path);
+  });
+  mockApi.delete.mockResolvedValueOnce({
+    ...closed,
+    revision: closed.revision + 1,
+    isDeleted: true,
+    deletedAt: "2026-07-29T01:00:00.000Z",
+  });
+  render(<ProjectDetailPage projectId="project-1" />);
+
+  fireEvent.click(
+    await screen.findByRole("button", { name: "프로젝트 삭제" }),
+  );
+  fireEvent.change(
+    screen.getByRole("textbox", { name: "삭제할 프로젝트 이름" }),
+    { target: { value: closed.name } },
+  );
+  fireEvent.click(
+    within(screen.getByRole("dialog", { name: "프로젝트 삭제" })).getByRole(
+      "button",
+      { name: "프로젝트 삭제" },
+    ),
+  );
+
+  await waitFor(() =>
+    expect(mockApi.delete).toHaveBeenCalledWith("/projects/project-1", {
+      confirmationName: closed.name,
+      expectedRevision: closed.revision,
+    }),
+  );
+  await waitFor(() => expect(window.location.pathname).toBe("/projects"));
+});
+
+it("reloads a stale project deletion and closes its dialog", async () => {
+  const closed = closedProject();
+  let projectReads = 0;
+  mockApi.get.mockImplementation((path: string) => {
+    if (path === "/projects/project-1") {
+      projectReads += 1;
+      return projectReads === 1
+        ? closed
+        : { ...closed, revision: closed.revision + 1 };
+    }
+    return defaultGet(path);
+  });
+  mockApi.delete.mockRejectedValueOnce(
+    new ApiError(409, {
+      code: "STALE_REVISION",
+      message: "stale",
+      requestId: "delete-stale",
+    }),
+  );
+  render(<ProjectDetailPage projectId="project-1" />);
+
+  fireEvent.click(
+    await screen.findByRole("button", { name: "프로젝트 삭제" }),
+  );
+  fireEvent.change(
+    screen.getByRole("textbox", { name: "삭제할 프로젝트 이름" }),
+    { target: { value: closed.name } },
+  );
+  fireEvent.click(
+    within(screen.getByRole("dialog", { name: "프로젝트 삭제" })).getByRole(
+      "button",
+      { name: "프로젝트 삭제" },
+    ),
+  );
+
+  expect(
+    await screen.findByText(
+      "다른 변경이 먼저 반영되어 최신 프로젝트를 다시 불러왔습니다.",
+    ),
+  ).toBeVisible();
+  expect(
+    screen.queryByRole("dialog", { name: "프로젝트 삭제" }),
+  ).not.toBeInTheDocument();
+  expect(projectReads).toBe(2);
+});
+
+it("keeps deletion open when the server rejects the exact project name", async () => {
+  const closed = closedProject();
+  mockApi.get.mockImplementation((path: string) => {
+    if (path === "/projects/project-1") return closed;
+    return defaultGet(path);
+  });
+  mockApi.delete.mockRejectedValueOnce(
+    new ApiError(409, {
+      code: "CONFIRMATION_MISMATCH",
+      message: "mismatch",
+      requestId: "delete-mismatch",
+    }),
+  );
+  render(<ProjectDetailPage projectId="project-1" />);
+
+  fireEvent.click(
+    await screen.findByRole("button", { name: "프로젝트 삭제" }),
+  );
+  fireEvent.change(
+    screen.getByRole("textbox", { name: "삭제할 프로젝트 이름" }),
+    { target: { value: closed.name } },
+  );
+  fireEvent.click(
+    within(screen.getByRole("dialog", { name: "프로젝트 삭제" })).getByRole(
+      "button",
+      { name: "프로젝트 삭제" },
+    ),
+  );
+
+  expect(
+    await screen.findByText(
+      "프로젝트 이름이 일치하지 않습니다. 정확한 이름을 다시 입력해 주세요.",
+    ),
+  ).toBeVisible();
+  expect(
+    screen.getByRole("dialog", { name: "프로젝트 삭제" }),
+  ).toBeVisible();
+});
+
+it("renders a deleted project read-only and restores it without child reads", async () => {
+  window.history.replaceState(
+    null,
+    "",
+    "/projects/project-1?includeDeleted=true",
+  );
+  const deleted = deletedProject();
+  mockApi.get.mockImplementation((path: string) => {
+    if (path === "/projects/project-1?includeDeleted=true") return deleted;
+    throw new Error(`unexpected deleted-detail request: ${path}`);
+  });
+  mockApi.post.mockResolvedValueOnce({
+    ...deleted,
+    revision: deleted.revision + 1,
+    isDeleted: false,
+    deletedAt: null,
+  });
+  render(
+    <ProjectDetailPage projectId="project-1" includeDeleted />,
+  );
+
+  expect(
+    await screen.findByRole("heading", { name: deleted.name }),
+  ).toBeVisible();
+  expect(screen.getByText("삭제됨", { exact: true })).toBeVisible();
+  expect(screen.queryByRole("tablist")).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("button", { name: /수정|진행|재개|종료/ }),
+  ).not.toBeInTheDocument();
+  expect(mockApi.get).toHaveBeenCalledTimes(1);
+
+  fireEvent.click(screen.getByRole("button", { name: "프로젝트 복구" }));
+  await waitFor(() =>
+    expect(mockApi.post).toHaveBeenCalledWith(
+      "/projects/project-1/restore",
+      { expectedRevision: deleted.revision },
+    ),
+  );
+  await waitFor(() =>
+    expect(`${window.location.pathname}${window.location.search}`).toBe(
+      "/projects/project-1",
+    ),
+  );
+});
+
+it("does not let organization managers request deleted project detail", async () => {
+  mockRole.current = "ORGANIZATION_MANAGER";
+  render(
+    <ProjectDetailPage projectId="project-1" includeDeleted />,
+  );
+
+  expect(
+    await screen.findByText("삭제된 프로젝트를 볼 권한이 없습니다."),
+  ).toBeVisible();
+  expect(mockApi.get).not.toHaveBeenCalled();
+});
 
 it("shows four semantic tabs with only the selected panel mounted", async () => {
   render(<ProjectDetailPage projectId="project-1" />);
@@ -2344,6 +2544,16 @@ function closedProject() {
     closedAt: "2026-07-22T00:00:00.000Z",
     closedBy: "operator-1",
     closeReason: "MANUAL" as const,
+  };
+}
+
+function deletedProject(): Project {
+  return {
+    ...closedProject(),
+    name: "삭제된 수련 법회",
+    revision: 7,
+    isDeleted: true,
+    deletedAt: "2026-07-29T01:00:00.000Z",
   };
 }
 
