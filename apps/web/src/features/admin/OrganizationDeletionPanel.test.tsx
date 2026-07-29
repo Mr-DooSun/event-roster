@@ -100,6 +100,18 @@ it("shows only positive blockers and disables permanent deletion", () => {
   expect(screen.getByRole("button", { name: "조직 영구 삭제" })).toBeDisabled();
 });
 
+it("disables an eligible deletion trigger during another page mutation", () => {
+  render(
+    <OrganizationDeletionPanel
+      organization={organization()}
+      {...controlledProps}
+      disabled
+    />,
+  );
+
+  expect(screen.getByRole("button", { name: "조직 영구 삭제" })).toBeDisabled();
+});
+
 it("requires the exact current name and locks the dialog while deleting", () => {
   const onConfirm = vi.fn();
   const eligibleOrganization = organization();

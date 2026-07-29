@@ -39,6 +39,13 @@ interface AuditPaginationRequest {
   generation: number;
 }
 
+type OrganizationMutationKind = "RENAME" | "STATUS" | "DELETE";
+
+interface OrganizationMutationToken {
+  kind: OrganizationMutationKind;
+  organizationId: string;
+}
+
 export function OrganizationDetailPage({
   organizationId,
 }: {
@@ -60,9 +67,9 @@ export function OrganizationDetailPage({
   const [auditLoading, setAuditLoading] = useState(true);
   const [auditLoaded, setAuditLoaded] = useState(false);
   const [auditLoadingMore, setAuditLoadingMore] = useState(false);
-  const [mutating, setMutating] = useState<
-    "RENAME" | "STATUS" | "DELETE" | null
-  >(null);
+  const [mutating, setMutating] = useState<OrganizationMutationKind | null>(
+    null,
+  );
   const [message, setMessage] = useState<string | null>(null);
   const [showStatusConfirmation, setShowStatusConfirmation] = useState(false);
   const [showDeleteConfirmation, setShowDeleteConfirmation] = useState(false);
@@ -81,6 +88,7 @@ export function OrganizationDetailPage({
   const auditNextCursorRef = useRef<string | null>(null);
   const auditPaginationRequest = useRef<AuditPaginationRequest | null>(null);
   const deleteRequestInFlight = useRef(false);
+  const mutationOwner = useRef<OrganizationMutationToken | null>(null);
 
   const updateAuditNextCursor = useCallback((nextCursor: string | null) => {
     auditNextCursorRef.current = nextCursor;
@@ -94,8 +102,40 @@ export function OrganizationDetailPage({
       detailGeneration.current += 1;
       auditGeneration.current += 1;
       auditPaginationRequest.current = null;
+      mutationOwner.current = null;
     };
   }, []);
+
+  function acquireMutation(
+    kind: OrganizationMutationKind,
+    requestedOrganizationId: string,
+  ): OrganizationMutationToken | null {
+    if (
+      !instanceActive.current ||
+      activeOrganizationId.current !== requestedOrganizationId ||
+      mutationOwner.current
+    ) {
+      return null;
+    }
+    const token = { kind, organizationId: requestedOrganizationId };
+    mutationOwner.current = token;
+    setMutating(kind);
+    return token;
+  }
+
+  function ownsMutation(token: OrganizationMutationToken) {
+    return (
+      instanceActive.current &&
+      activeOrganizationId.current === token.organizationId &&
+      mutationOwner.current === token
+    );
+  }
+
+  function releaseMutation(token: OrganizationMutationToken) {
+    if (!ownsMutation(token)) return;
+    mutationOwner.current = null;
+    setMutating(null);
+  }
 
   const loadDetail = useCallback(async () => {
     const requestedOrganizationId = organizationId;
@@ -216,6 +256,7 @@ export function OrganizationDetailPage({
     setAuditLoading(true);
     setAuditLoaded(false);
     setAuditLoadingMore(false);
+    mutationOwner.current = null;
     setMutating(null);
     setMessage(null);
     setShowStatusConfirmation(false);
@@ -236,12 +277,14 @@ export function OrganizationDetailPage({
 
   async function changeStatus() {
     if (!organization) return;
-    await mutateOrganization("STATUS", {
+    const requestedOrganizationId = organizationId;
+    const completed = await mutateOrganization("STATUS", {
       isActive: !organization.isActive,
     });
     if (
+      completed &&
       instanceActive.current &&
-      activeOrganizationId.current === organizationId
+      activeOrganizationId.current === requestedOrganizationId
     ) {
       setShowStatusConfirmation(false);
     }
@@ -253,48 +296,30 @@ export function OrganizationDetailPage({
       name?: string;
       isActive?: boolean;
     },
-  ) {
+  ): Promise<boolean> {
     const requestedOrganizationId = organizationId;
-    setMutating(kind);
+    const mutationToken = acquireMutation(kind, requestedOrganizationId);
+    if (!mutationToken) return false;
     setMessage(null);
     try {
       await api.patch(`/organizations/${requestedOrganizationId}`, input);
-      if (
-        !instanceActive.current ||
-        activeOrganizationId.current !== requestedOrganizationId
-      ) {
-        return;
-      }
+      if (!ownsMutation(mutationToken)) return false;
       const [detailReloaded] = await Promise.all([
         loadDetail(),
         loadInitialAudit(),
       ]);
-      if (
-        !instanceActive.current ||
-        activeOrganizationId.current !== requestedOrganizationId
-      ) {
-        return;
-      }
+      if (!ownsMutation(mutationToken)) return false;
       if (!detailReloaded) {
         setMessage(
           "조직 변경은 반영됐지만 최신 조직 정보를 불러오지 못했습니다.",
         );
       }
+      return true;
     } catch (error) {
-      if (
-        !instanceActive.current ||
-        activeOrganizationId.current !== requestedOrganizationId
-      ) {
-        return;
-      }
+      if (!ownsMutation(mutationToken)) return false;
       if (error instanceof ApiError && error.status === 409) {
         const reloaded = await loadDetail();
-        if (
-          !instanceActive.current ||
-          activeOrganizationId.current !== requestedOrganizationId
-        ) {
-          return;
-        }
+        if (!ownsMutation(mutationToken)) return false;
         setMessage(
           reloaded
             ? "다른 관리 변경이 먼저 반영되어 최신 조직 정보를 불러왔습니다."
@@ -303,50 +328,32 @@ export function OrganizationDetailPage({
       } else {
         setMessage("조직 정보를 변경하지 못했습니다.");
       }
+      return true;
     } finally {
-      if (
-        instanceActive.current &&
-        activeOrganizationId.current === requestedOrganizationId
-      ) {
-        setMutating(null);
-      }
+      releaseMutation(mutationToken);
     }
   }
 
   async function deleteOrganization() {
     if (!organization || deleteRequestInFlight.current) return;
-    deleteRequestInFlight.current = true;
     const requestedOrganizationId = organizationId;
+    const mutationToken = acquireMutation("DELETE", requestedOrganizationId);
+    if (!mutationToken) return;
+    deleteRequestInFlight.current = true;
     const deletedName = organization.name;
-    setMutating("DELETE");
     setDeleteError(null);
     try {
       await api.delete(
         `/organizations/${encodeURIComponent(requestedOrganizationId)}`,
         { confirmationName: deleteConfirmationName },
       );
-      if (
-        !instanceActive.current ||
-        activeOrganizationId.current !== requestedOrganizationId
-      ) {
-        return;
-      }
+      if (!ownsMutation(mutationToken)) return;
       navigateToOrganizationList(`조직 “${deletedName}”을 영구 삭제했습니다.`);
     } catch (error) {
-      if (
-        !instanceActive.current ||
-        activeOrganizationId.current !== requestedOrganizationId
-      ) {
-        return;
-      }
+      if (!ownsMutation(mutationToken)) return;
       if (error instanceof ApiError && error.status === 409) {
         const reloaded = await loadDetail();
-        if (
-          !instanceActive.current ||
-          activeOrganizationId.current !== requestedOrganizationId
-        ) {
-          return;
-        }
+        if (!ownsMutation(mutationToken)) return;
         setDeleteConfirmationName("");
         setDeleteError(
           reloaded
@@ -361,13 +368,10 @@ export function OrganizationDetailPage({
         setDeleteError("조직을 영구 삭제하지 못했습니다.");
       }
     } finally {
-      if (
-        instanceActive.current &&
-        activeOrganizationId.current === requestedOrganizationId
-      ) {
+      if (ownsMutation(mutationToken)) {
         deleteRequestInFlight.current = false;
-        setMutating(null);
       }
+      releaseMutation(mutationToken);
     }
   }
 
@@ -541,6 +545,7 @@ export function OrganizationDetailPage({
                 required
                 maxLength={100}
                 value={name}
+                disabled={mutating !== null}
                 onChange={(event) => setName(event.currentTarget.value)}
               />
               <Button
@@ -635,8 +640,10 @@ export function OrganizationDetailPage({
           dialogOpen={showDeleteConfirmation}
           confirmationName={deleteConfirmationName}
           deleting={mutating === "DELETE"}
+          disabled={mutating !== null && mutating !== "DELETE"}
           error={deleteError}
           onOpen={() => {
+            if (mutationOwner.current) return;
             setDeleteConfirmationName("");
             setDeleteError(null);
             setShowDeleteConfirmation(true);

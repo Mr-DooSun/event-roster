@@ -20,6 +20,7 @@ export interface OrganizationDeletionPanelProps {
   dialogOpen: boolean;
   confirmationName: string;
   deleting: boolean;
+  disabled?: boolean;
   error: string | null;
   onOpen: () => void;
   onClose: () => void;
@@ -32,6 +33,7 @@ export function OrganizationDeletionPanel({
   dialogOpen,
   confirmationName,
   deleting,
+  disabled = false,
   error,
   onOpen,
   onClose,
@@ -49,7 +51,10 @@ export function OrganizationDeletionPanel({
   const canDelete =
     !organization.isActive && organization.deletionEligibility.canDelete;
   const canConfirm =
-    canDelete && confirmationName === organization.name && !deleting;
+    canDelete &&
+    !disabled &&
+    confirmationName === organization.name &&
+    !deleting;
 
   function closeDialog() {
     if (!deleting) onClose();
@@ -69,7 +74,12 @@ export function OrganizationDeletionPanel({
           {canDelete ? (
             <>
               <p>이 조직은 연결된 데이터가 없어 영구 삭제할 수 있습니다.</p>
-              <Button type="button" variant="danger" onClick={onOpen}>
+              <Button
+                type="button"
+                variant="danger"
+                disabled={disabled}
+                onClick={onOpen}
+              >
                 조직 영구 삭제
               </Button>
             </>

@@ -2285,10 +2285,90 @@ it("keeps the deletion dialog locked while deletion is pending", async () => {
     within(dialog).getByRole("button", { name: "삭제 중…" }),
   ).toBeDisabled();
   expect(within(dialog).getByRole("button", { name: "닫기" })).toBeDisabled();
+  expect(
+    within(dialog).getByLabelText("확인을 위해 조직 이름을 입력하세요."),
+  ).toBeDisabled();
   expect(screen.getByRole("button", { name: "조직 다시 사용" })).toBeDisabled();
+  expect(screen.getByLabelText("조직 이름")).toBeDisabled();
   expect(screen.getByRole("button", { name: "이름 저장" })).toBeDisabled();
   fireEvent.keyDown(dialog, { key: "Escape" });
   expect(screen.getByRole("dialog", { name: "조직 영구 삭제" })).toBeVisible();
+});
+
+it("blocks a captured deletion confirm while rename owns the page mutation", async () => {
+  const rename = deferred<Response>();
+  const deletion = deferred<Response>();
+  const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.endsWith("/auth/login")) {
+      return Promise.resolve(Response.json(auth()));
+    }
+    if (url.endsWith("/organizations/org-empty") && init?.method === "PATCH") {
+      return rename.promise;
+    }
+    if (url.endsWith("/organizations/org-empty") && init?.method === "DELETE") {
+      return deletion.promise;
+    }
+    if (url.endsWith("/organizations/org-empty")) {
+      return Promise.resolve(
+        Response.json(
+          organizationDetail({
+            id: "org-empty",
+            name: "빈 조직",
+            isActive: false,
+          }),
+        ),
+      );
+    }
+    if (url.endsWith("/organizations/org-empty/audit?limit=50")) {
+      return Promise.resolve(Response.json(emptyAuditPage()));
+    }
+    throw new Error(`unexpected request: ${url}`);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderOrganizationDetail("org-empty");
+  await login();
+  const dangerZone = await screen.findByRole("region", { name: "위험 구역" });
+  fireEvent.click(
+    within(dangerZone).getByRole("button", { name: "조직 영구 삭제" }),
+  );
+  fireEvent.change(
+    screen.getByLabelText("확인을 위해 조직 이름을 입력하세요."),
+    { target: { value: "빈 조직" } },
+  );
+  const capturedConfirm = captureReactClickHandler(
+    within(screen.getByRole("dialog", { name: "조직 영구 삭제" })).getByRole(
+      "button",
+      { name: "조직 영구 삭제" },
+    ),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "닫기" }));
+
+  fireEvent.change(screen.getByLabelText("조직 이름"), {
+    target: { value: "빈 조직 변경" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "이름 저장" }));
+  expect(screen.getByRole("button", { name: "저장 중…" })).toBeDisabled();
+
+  await act(async () => {
+    capturedConfirm();
+    await Promise.resolve();
+  });
+
+  expect(
+    fetchMock.mock.calls.filter(
+      ([input, init]) =>
+        String(input).endsWith("/organizations/org-empty") &&
+        init?.method === "DELETE",
+    ),
+  ).toHaveLength(0);
+  expect(
+    within(screen.getByRole("region", { name: "위험 구역" })).getByRole(
+      "button",
+      { name: "조직 영구 삭제" },
+    ),
+  ).toBeDisabled();
 });
 
 it("reloads deletion blockers and clears the name after a conflict", async () => {
