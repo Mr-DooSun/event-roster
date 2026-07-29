@@ -2,6 +2,7 @@ import type {
   OrganizationDeletionBlockers,
   OrganizationDetail,
 } from "@event-roster/contracts";
+import { useEffect, useRef } from "react";
 import { Button } from "../../components/ui/Button";
 import { Dialog } from "../../components/ui/Dialog";
 import { TextInput } from "../../components/ui/TextInput";
@@ -37,6 +38,14 @@ export function OrganizationDeletionPanel({
   onConfirmationNameChange,
   onConfirm,
 }: OrganizationDeletionPanelProps) {
+  const confirmationLockedRef = useRef(false);
+
+  if (!dialogOpen) confirmationLockedRef.current = false;
+
+  useEffect(() => {
+    if (!deleting) confirmationLockedRef.current = false;
+  }, [deleting]);
+
   if (organization.isActive) return null;
 
   const canDelete = organization.deletionEligibility.canDelete;
@@ -47,7 +56,9 @@ export function OrganizationDeletionPanel({
   }
 
   function confirmDeletion() {
-    if (canConfirm) onConfirm();
+    if (!canConfirm || confirmationLockedRef.current) return;
+    confirmationLockedRef.current = true;
+    onConfirm();
   }
 
   return (

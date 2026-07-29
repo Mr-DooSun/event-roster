@@ -178,7 +178,7 @@ it("shows the deletion error and wraps a long target name", () => {
   ).toHaveClass("er-danger-zone__target");
 });
 
-it("confirms once only for the exact name while not deleting", () => {
+it("blocks repeated exact-name confirms before the parent rerenders", () => {
   const onConfirm = vi.fn();
   render(
     <OrganizationDeletionPanel
@@ -194,14 +194,57 @@ it("confirms once only for the exact name while not deleting", () => {
     />,
   );
 
+  const confirm = within(
+    screen.getByRole("dialog", { name: "조직 영구 삭제" }),
+  ).getByRole("button", { name: "조직 영구 삭제" });
+  fireEvent.click(confirm);
+  fireEvent.click(confirm);
+
+  expect(onConfirm).toHaveBeenCalledOnce();
+});
+
+it("allows another confirmation after a deleting cycle or a new dialog attempt", () => {
+  const onConfirm = vi.fn();
+  const props = {
+    organization: organization(),
+    confirmationName: "황룡사",
+    error: null,
+    onOpen: vi.fn(),
+    onClose: vi.fn(),
+    onConfirmationNameChange: vi.fn(),
+    onConfirm,
+  };
+  const { rerender } = render(
+    <OrganizationDeletionPanel dialogOpen deleting={false} {...props} />,
+  );
+
   fireEvent.click(
     within(screen.getByRole("dialog", { name: "조직 영구 삭제" })).getByRole(
       "button",
       { name: "조직 영구 삭제" },
     ),
   );
+  expect(onConfirm).toHaveBeenCalledTimes(1);
 
-  expect(onConfirm).toHaveBeenCalledOnce();
+  rerender(<OrganizationDeletionPanel dialogOpen deleting {...props} />);
+  rerender(<OrganizationDeletionPanel dialogOpen deleting={false} {...props} />);
+  fireEvent.click(
+    within(screen.getByRole("dialog", { name: "조직 영구 삭제" })).getByRole(
+      "button",
+      { name: "조직 영구 삭제" },
+    ),
+  );
+  expect(onConfirm).toHaveBeenCalledTimes(2);
+
+  rerender(<OrganizationDeletionPanel dialogOpen={false} deleting={false} {...props} />);
+  rerender(<OrganizationDeletionPanel dialogOpen deleting={false} {...props} />);
+  fireEvent.click(
+    within(screen.getByRole("dialog", { name: "조직 영구 삭제" })).getByRole(
+      "button",
+      { name: "조직 영구 삭제" },
+    ),
+  );
+  expect(onConfirm).toHaveBeenCalledTimes(3);
 });
 
 it("returns focus to the deletion trigger after closing the dialog", () => {
