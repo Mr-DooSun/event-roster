@@ -56,6 +56,21 @@ export const UpdateProjectRequestSchema = z
     message: "종료일은 시작일보다 빠를 수 없습니다.",
   });
 
+export const DeleteProjectRequestSchema = z.object({
+  confirmationName: z.string().min(1).max(100),
+  expectedRevision: z.number().int().nonnegative(),
+});
+export type DeleteProjectRequest = z.infer<
+  typeof DeleteProjectRequestSchema
+>;
+
+export const RestoreProjectRequestSchema = z.object({
+  expectedRevision: z.number().int().nonnegative(),
+});
+export type RestoreProjectRequest = z.infer<
+  typeof RestoreProjectRequestSchema
+>;
+
 export interface Project {
   id: string;
   name: string;
@@ -69,6 +84,8 @@ export interface Project {
   closedAt: string | null;
   closedBy: string | null;
   closeReason: "MANUAL" | "SCHEDULED" | null;
+  isDeleted: boolean;
+  deletedAt: string | null;
 }
 
 export interface ProjectSummaryOrganization {

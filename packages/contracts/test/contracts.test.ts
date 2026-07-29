@@ -11,6 +11,7 @@ import {
   AddProjectOrganizationSchema,
   BulkRosterCreateRequestSchema,
   CreateProjectRequestSchema,
+  DeleteProjectRequestSchema,
   LoginIdSchema,
   NormalizedImportRowSchema,
   OrganizationDeleteRequestSchema,
@@ -25,6 +26,7 @@ import {
   RosterCreateRequestSchema,
   RosterParticipantProfileSchema,
   RosterSourceSchema,
+  RestoreProjectRequestSchema,
   UpdateProjectRequestSchema,
 } from "../src";
 
@@ -397,6 +399,38 @@ it("accepts duplicate-name project payloads with independently optional dates", 
       expectedRevision: 2,
     }),
   ).toEqual({ startDate: null, endDate: null, expectedRevision: 2 });
+});
+
+it("keeps project delete confirmation exact and validates revisions", () => {
+  expect(
+    DeleteProjectRequestSchema.parse({
+      confirmationName: "1회 수련 법회",
+      expectedRevision: 7,
+    }),
+  ).toEqual({
+    confirmationName: "1회 수련 법회",
+    expectedRevision: 7,
+  });
+  expect(
+    DeleteProjectRequestSchema.parse({
+      confirmationName: " 1회 수련 법회 ",
+      expectedRevision: 7,
+    }).confirmationName,
+  ).toBe(" 1회 수련 법회 ");
+  expect(
+    DeleteProjectRequestSchema.safeParse({
+      confirmationName: "",
+      expectedRevision: 7,
+    }).success,
+  ).toBe(false);
+  expect(
+    RestoreProjectRequestSchema.safeParse({ expectedRevision: -1 }).success,
+  ).toBe(false);
+});
+
+it("exposes project deletion summary fields", () => {
+  expectTypeOf<Project["isDeleted"]>().toEqualTypeOf<boolean>();
+  expectTypeOf<Project["deletedAt"]>().toEqualTypeOf<string | null>();
 });
 
 it("exposes required project audit creator fields", () => {
