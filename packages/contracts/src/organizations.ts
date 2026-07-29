@@ -39,9 +39,23 @@ export interface OrganizationSummary extends Organization {
   projectCount: number;
 }
 
+export interface OrganizationDeletionBlockers {
+  managerAssignments: number;
+  participants: number;
+  projectLinks: number;
+  rosterEntries: number;
+  expectedSnapshots: number;
+}
+
+export interface OrganizationDeletionEligibility {
+  canDelete: boolean;
+  blockers: OrganizationDeletionBlockers;
+}
+
 export interface OrganizationDetail extends OrganizationSummary {
   managers: OrganizationManager[];
   projects: OrganizationProject[];
+  deletionEligibility: OrganizationDeletionEligibility;
 }
 
 export const OrganizationPatchRequestSchema = z
@@ -51,6 +65,15 @@ export const OrganizationPatchRequestSchema = z
   })
   .strict()
   .refine((value) => value.name !== undefined || value.isActive !== undefined);
+
+export const OrganizationDeleteRequestSchema = z
+  .object({
+    confirmationName: z.string().min(1).max(100),
+  })
+  .strict();
+export type OrganizationDeleteRequest = z.infer<
+  typeof OrganizationDeleteRequestSchema
+>;
 
 export const OrganizationManagerCreateRequestSchema = z.discriminatedUnion(
   "kind",

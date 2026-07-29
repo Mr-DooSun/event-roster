@@ -1,5 +1,7 @@
 import { describe, expect, expectTypeOf, it } from "vitest";
 import type {
+  OrganizationDeletionBlockers,
+  OrganizationDeletionEligibility,
   Participant,
   ParticipantRole,
   Project,
@@ -11,6 +13,7 @@ import {
   CreateProjectRequestSchema,
   LoginIdSchema,
   NormalizedImportRowSchema,
+  OrganizationDeleteRequestSchema,
   OrganizationManagerCreateRequestSchema,
   OrganizationPatchRequestSchema,
   OrganizationPrimaryPatchRequestSchema,
@@ -50,6 +53,42 @@ describe("authentication contracts", () => {
 });
 
 describe("organization contracts", () => {
+  it("requires an exact unnormalized organization deletion confirmation", () => {
+    expect(
+      OrganizationDeleteRequestSchema.parse({
+        confirmationName: "황룡사",
+      }),
+    ).toEqual({ confirmationName: "황룡사" });
+    expect(
+      OrganizationDeleteRequestSchema.parse({
+        confirmationName: "  황룡사  ",
+      }),
+    ).toEqual({ confirmationName: "  황룡사  " });
+    expect(
+      OrganizationDeleteRequestSchema.safeParse({
+        confirmationName: "황룡사",
+        cascade: true,
+      }).success,
+    ).toBe(false);
+    expect(
+      OrganizationDeleteRequestSchema.safeParse({
+        confirmationName: "",
+      }).success,
+    ).toBe(false);
+
+    expectTypeOf<OrganizationDeletionBlockers>().toEqualTypeOf<{
+      managerAssignments: number;
+      participants: number;
+      projectLinks: number;
+      rosterEntries: number;
+      expectedSnapshots: number;
+    }>();
+    expectTypeOf<OrganizationDeletionEligibility>().toEqualTypeOf<{
+      canDelete: boolean;
+      blockers: OrganizationDeletionBlockers;
+    }>();
+  });
+
   it("accepts the minimal global deactivation payload", () => {
     expect(OrganizationPatchRequestSchema.parse({ isActive: false })).toEqual({
       isActive: false,
