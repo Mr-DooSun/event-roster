@@ -6,7 +6,9 @@ afterEach(() => {
 });
 
 it("sends an optional json body and csrf header with DELETE", async () => {
-  const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+  const fetchMock = vi
+    .fn()
+    .mockResolvedValue(new Response(null, { status: 204 }));
   vi.stubGlobal("fetch", fetchMock);
   const client = createApiClient({
     getAuth: () => ({

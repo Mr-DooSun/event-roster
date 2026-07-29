@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
-import { beforeEach, expect, it } from "vitest";
 import type { OrganizationDetail } from "@event-roster/contracts";
+import { beforeEach, expect, it } from "vitest";
 import type { Env } from "../src/env";
 import { requireActor } from "../src/middleware/authentication";
 import { assignOrganizationManager } from "../src/services/organizations";
