@@ -10,7 +10,7 @@ import {
   screen,
   within,
 } from "@testing-library/react";
-import { useState } from "react";
+import { Suspense, startTransition, useState } from "react";
 import { afterEach, expect, it, vi } from "vitest";
 import { OrganizationDeletionPanel } from "./OrganizationDeletionPanel";
 
@@ -203,6 +203,23 @@ it("blocks repeated exact-name confirms before the parent rerenders", () => {
   expect(onConfirm).toHaveBeenCalledOnce();
 });
 
+it("keeps confirmation locked when a suspended close transition is discarded", () => {
+  const onConfirm = vi.fn();
+  render(<SuspendedCloseHarness onConfirm={onConfirm} />);
+
+  const confirm = within(
+    screen.getByRole("dialog", { name: "조직 영구 삭제" }),
+  ).getByRole("button", { name: "조직 영구 삭제" });
+  fireEvent.click(confirm);
+  expect(onConfirm).toHaveBeenCalledOnce();
+
+  fireEvent.click(screen.getByRole("button", { name: "닫힘 전환 시작" }));
+  expect(screen.getByRole("dialog", { name: "조직 영구 삭제" })).toBeVisible();
+
+  fireEvent.click(confirm);
+  expect(onConfirm).toHaveBeenCalledOnce();
+});
+
 it("allows another confirmation after a deleting cycle or a new dialog attempt", () => {
   const onConfirm = vi.fn();
   const props = {
@@ -278,4 +295,42 @@ function DeletionPanelHarness() {
       onConfirm={vi.fn()}
     />
   );
+}
+
+function SuspendedCloseHarness({ onConfirm }: { onConfirm: () => void }) {
+  const [dialogOpen, setDialogOpen] = useState(true);
+  const [suspend, setSuspend] = useState(false);
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => {
+          startTransition(() => {
+            setDialogOpen(false);
+            setSuspend(true);
+          });
+        }}
+      >
+        닫힘 전환 시작
+      </button>
+      <Suspense fallback={null}>
+        <OrganizationDeletionPanel
+          organization={organization()}
+          dialogOpen={dialogOpen}
+          confirmationName="황룡사"
+          deleting={false}
+          error={null}
+          onOpen={vi.fn()}
+          onClose={vi.fn()}
+          onConfirmationNameChange={vi.fn()}
+          onConfirm={onConfirm}
+        />
+        {suspend ? <NeverResolving /> : null}
+      </Suspense>
+    </>
+  );
+}
+
+function NeverResolving(): never {
+  throw new Promise(() => undefined);
 }

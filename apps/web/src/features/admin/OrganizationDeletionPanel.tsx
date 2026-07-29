@@ -40,11 +40,9 @@ export function OrganizationDeletionPanel({
 }: OrganizationDeletionPanelProps) {
   const confirmationLockedRef = useRef(false);
 
-  if (!dialogOpen) confirmationLockedRef.current = false;
-
   useEffect(() => {
-    if (!deleting) confirmationLockedRef.current = false;
-  }, [deleting]);
+    if (!dialogOpen || !deleting) confirmationLockedRef.current = false;
+  }, [dialogOpen, deleting]);
 
   if (organization.isActive) return null;
 
