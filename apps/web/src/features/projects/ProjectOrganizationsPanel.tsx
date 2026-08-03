@@ -158,7 +158,7 @@ export function ProjectOrganizationsPanel({
           setReservedOrganizationId(reservedId);
           setMessage({
             tone: "error",
-            text: "같은 이름의 삭제된 조직이 있습니다.",
+            text: "삭제된 동일 이름의 조직이 있습니다.",
           });
           return false;
         }

@@ -393,8 +393,24 @@ export function OrganizationDetailPage({
       setName(restored.name);
       setMessage("조직을 사용 중지 상태로 복구했습니다.");
       await loadInitialAudit();
-    } catch {
-      if (ownsMutation(mutationToken)) {
+    } catch (error) {
+      if (!ownsMutation(mutationToken)) return;
+      if (error instanceof ApiError && error.status === 409) {
+        const [detailReloaded] = await Promise.all([
+          loadDetail(),
+          loadInitialAudit(),
+        ]);
+        if (!ownsMutation(mutationToken)) return;
+        if (detailReloaded) {
+          setMessage(
+            "다른 관리 변경이 먼저 반영되어 최신 조직 정보를 불러왔습니다.",
+          );
+        } else {
+          setRestoreError(
+            "복구 상태가 변경됐지만 최신 조직 정보를 불러오지 못했습니다.",
+          );
+        }
+      } else {
         setRestoreError("조직을 복구하지 못했습니다.");
       }
     } finally {

@@ -117,9 +117,11 @@ export function OrganizationsPage() {
       const reservedId = getReservedOrganizationId(caught);
       setReservedOrganizationId(reservedId);
       setCreateError(
-        reservedId || (caught instanceof ApiError && caught.status === 409)
-          ? "같은 이름의 조직이 이미 있습니다."
-          : "조직을 만들지 못했습니다.",
+        reservedId
+          ? "삭제된 동일 이름의 조직이 있습니다."
+          : caught instanceof ApiError && caught.status === 409
+            ? "같은 이름의 조직이 이미 있습니다."
+            : "조직을 만들지 못했습니다.",
       );
     } finally {
       setCreating(false);

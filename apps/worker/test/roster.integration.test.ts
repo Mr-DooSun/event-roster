@@ -709,9 +709,14 @@ it("keeps deleted-organization roster history readable while rejecting every new
   ).toEqual({ count: 0 });
 });
 
-it.each(["INACTIVE", "DELETED"] as const)(
-  "rejects PATCH roster reactivation for a %s organization",
-  async (organizationState) => {
+it.each([
+  { organizationState: "INACTIVE", nextStatus: "ACTIVE" },
+  { organizationState: "INACTIVE", nextStatus: "CANCELLED" },
+  { organizationState: "DELETED", nextStatus: "ACTIVE" },
+  { organizationState: "DELETED", nextStatus: "CANCELLED" },
+] as const)(
+  "rejects PATCH roster $nextStatus for a $organizationState organization",
+  async ({ organizationState, nextStatus }) => {
     const fixture = await setupPreRegistration();
     const added = await addRoster(fixture, fixture.firstParticipant.id);
     const active = await added.json<{
@@ -719,22 +724,26 @@ it.each(["INACTIVE", "DELETED"] as const)(
       revision: number;
       projectRevision: number;
     }>();
-    const cancelled = await authedRequest(
-      fixture.operator,
-      `/api/v1/projects/${fixture.project.id}/roster/${active.id}`,
-      {
-        method: "PATCH",
-        body: JSON.stringify({
-          status: "CANCELLED",
-          expectedRevision: active.projectRevision,
-          expectedEntryRevision: active.revision,
-        }),
-      },
-    );
-    const cancelledBody = await cancelled.json<{
-      revision: number;
-      projectRevision: number;
-    }>();
+    let current = active;
+    if (nextStatus === "ACTIVE") {
+      const cancelled = await authedRequest(
+        fixture.operator,
+        `/api/v1/projects/${fixture.project.id}/roster/${active.id}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({
+            status: "CANCELLED",
+            expectedRevision: active.projectRevision,
+            expectedEntryRevision: active.revision,
+          }),
+        },
+      );
+      current = await cancelled.json<{
+        id: string;
+        revision: number;
+        projectRevision: number;
+      }>();
+    }
     const changedAt = "2026-08-03T00:00:00.000Z";
     if (organizationState === "DELETED") {
       await env.DB.prepare(
@@ -759,9 +768,9 @@ it.each(["INACTIVE", "DELETED"] as const)(
       {
         method: "PATCH",
         body: JSON.stringify({
-          status: "ACTIVE",
-          expectedRevision: cancelledBody.projectRevision,
-          expectedEntryRevision: cancelledBody.revision,
+          status: nextStatus,
+          expectedRevision: current.projectRevision,
+          expectedEntryRevision: current.revision,
         }),
       },
     );
@@ -773,42 +782,17 @@ it.each(["INACTIVE", "DELETED"] as const)(
       )
         .bind(active.id)
         .first(),
-    ).toEqual({ status: "CANCELLED", revision: 1 });
+    ).toEqual({
+      status: nextStatus === "ACTIVE" ? "CANCELLED" : "ACTIVE",
+      revision: current.revision,
+    });
+    expect(
+      await env.DB.prepare("SELECT revision FROM projects WHERE id = ?")
+        .bind(fixture.project.id)
+        .first(),
+    ).toEqual({ revision: current.projectRevision });
   },
 );
-
-it("allows an operator to cancel historical roster state after organization deletion", async () => {
-  const fixture = await setupPreRegistration();
-  const added = await addRoster(fixture, fixture.firstParticipant.id);
-  const active = await added.json<{
-    id: string;
-    revision: number;
-    projectRevision: number;
-  }>();
-  const changedAt = "2026-08-03T00:00:00.000Z";
-  await env.DB.prepare(
-    `UPDATE organizations
-     SET is_active = 0, deleted_at = ?, deleted_by = ?, updated_at = ?
-     WHERE id = 'org-1'`,
-  )
-    .bind(changedAt, fixture.operator.userId, changedAt)
-    .run();
-
-  const response = await authedRequest(
-    fixture.operator,
-    `/api/v1/projects/${fixture.project.id}/roster/${active.id}`,
-    {
-      method: "PATCH",
-      body: JSON.stringify({
-        status: "CANCELLED",
-        expectedRevision: active.projectRevision,
-        expectedEntryRevision: active.revision,
-      }),
-    },
-  );
-
-  expect(response.status).toBe(200);
-});
 
 it("rechecks organization deletion atomically before PATCH roster reactivation", async () => {
   const fixture = await setupPreRegistration();
@@ -879,6 +863,66 @@ it("rechecks organization deletion atomically before PATCH roster reactivation",
       .bind(active.id)
       .first(),
   ).toEqual({ status: "CANCELLED", revision: 1 });
+});
+
+it("rechecks organization deletion atomically before PATCH roster cancellation", async () => {
+  const fixture = await setupPreRegistration();
+  const added = await addRoster(fixture, fixture.firstParticipant.id);
+  const active = await added.json<{
+    id: string;
+    revision: number;
+    projectRevision: number;
+  }>();
+  const actor = await requireActor(
+    new Request("https://event-roster.test", {
+      headers: authenticatedHeaders(fixture.operator),
+    }),
+    env as Env,
+  );
+  let pending = true;
+  const raceDb = {
+    prepare: (query: string) => env.DB.prepare(query),
+    batch: async (statements: D1PreparedStatement[]) => {
+      if (pending) {
+        pending = false;
+        const changedAt = "2026-08-03T00:00:00.000Z";
+        await env.DB.prepare(
+          `UPDATE organizations
+           SET is_active = 0, deleted_at = ?, deleted_by = ?, updated_at = ?
+           WHERE id = 'org-1'`,
+        )
+          .bind(changedAt, fixture.operator.userId, changedAt)
+          .run();
+      }
+      return env.DB.batch(statements);
+    },
+  } as D1Database;
+
+  await expect(
+    updateRosterEntry(
+      { ...(env as Env), DB: raceDb },
+      actor,
+      fixture.project.id,
+      active.id,
+      {
+        status: "CANCELLED",
+        expectedRevision: active.projectRevision,
+        expectedEntryRevision: active.revision,
+      },
+    ),
+  ).rejects.toMatchObject({ code: "STALE_REVISION" });
+  expect(
+    await env.DB.prepare(
+      `SELECT status, revision FROM project_roster_entries WHERE id = ?`,
+    )
+      .bind(active.id)
+      .first(),
+  ).toEqual({ status: "ACTIVE", revision: 0 });
+  expect(
+    await env.DB.prepare("SELECT revision FROM projects WHERE id = ?")
+      .bind(fixture.project.id)
+      .first(),
+  ).toEqual({ revision: active.projectRevision });
 });
 
 it("warns about input and existing duplicates without writing rows", async () => {

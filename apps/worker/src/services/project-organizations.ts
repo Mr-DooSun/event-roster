@@ -250,6 +250,7 @@ export async function setProjectOrganizationActive(
     organizationId,
   );
   if (!current?.isActive) throw new DomainError("NOT_FOUND");
+  if (current.masterIsDeleted) throw new DomainError("CONFLICT");
   const timestamp = now.toISOString();
   const today = toKstDate(now);
   const guardId = crypto.randomUUID();
@@ -312,12 +313,16 @@ export async function setProjectOrganizationActive(
          ) AND EXISTS (
            SELECT 1 FROM project_organizations
            WHERE project_id = ? AND organization_id = ? AND is_active = 1
+         ) AND EXISTS (
+           SELECT 1 FROM organizations
+           WHERE id = ? AND deleted_at IS NULL
          )`,
         [
           projectId,
           input.expectedProjectRevision,
           today,
           projectId,
+          organizationId,
           organizationId,
         ],
       ),

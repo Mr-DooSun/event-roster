@@ -574,6 +574,9 @@ it("guides an administrator to recover a deleted organization whose name is rese
   const recovery = await within(dialog).findByRole("link", {
     name: "삭제된 조직 복구하기",
   });
+  expect(
+    within(dialog).getByText("삭제된 동일 이름의 조직이 있습니다."),
+  ).toBeVisible();
   expect(recovery).toHaveAttribute("href", "/organizations/deleted%20org%2F1");
   expect(within(dialog).getByLabelText("조직 이름")).toHaveValue("삭제된 조직");
 });
@@ -2513,6 +2516,76 @@ it("renders deleted organization history read-only and restores it to inactive",
   expect(
     screen.getByText("조직을 사용 중지 상태로 복구했습니다."),
   ).toBeVisible();
+});
+
+it("reloads deleted organization detail and audit when a concurrent restore returns conflict", async () => {
+  let detailReads = 0;
+  let auditReads = 0;
+  const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.endsWith("/auth/login")) {
+      return Promise.resolve(Response.json(auth()));
+    }
+    if (
+      url.endsWith("/organizations/org-deleted/restore") &&
+      init?.method === "POST"
+    ) {
+      return Promise.resolve(
+        Response.json(
+          {
+            code: "CONFLICT",
+            message: "already restored",
+            requestId: "request-restore-race",
+          },
+          { status: 409 },
+        ),
+      );
+    }
+    if (url.endsWith("/organizations/org-deleted")) {
+      detailReads += 1;
+      return Promise.resolve(
+        Response.json(
+          organizationDetail({
+            id: "org-deleted",
+            name: "삭제 조직",
+            isActive: false,
+            isDeleted: detailReads === 1,
+            deletedAt: detailReads === 1 ? "2026-08-03T06:15:00.000Z" : null,
+          }),
+        ),
+      );
+    }
+    if (url.endsWith("/organizations/org-deleted/audit?limit=50")) {
+      auditReads += 1;
+      return Promise.resolve(
+        Response.json({
+          items: [
+            auditItem(
+              auditReads === 1
+                ? "ORGANIZATION_DELETED"
+                : "ORGANIZATION_RESTORED",
+            ),
+          ],
+          nextCursor: null,
+        }),
+      );
+    }
+    throw new Error(`unexpected request: ${url}`);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderOrganizationDetail("org-deleted");
+  await login();
+  fireEvent.click(await screen.findByRole("button", { name: "조직 복구" }));
+
+  expect(await screen.findByText("사용 중지")).toBeVisible();
+  expect(screen.getByRole("button", { name: "조직 다시 사용" })).toBeEnabled();
+  expect(
+    screen.queryByRole("button", { name: "조직 복구" }),
+  ).not.toBeInTheDocument();
+  expect(await screen.findByText("ORGANIZATION_RESTORED")).toBeVisible();
+  expect(detailReads).toBe(2);
+  expect(auditReads).toBe(2);
 });
 
 it("announces an organization restore failure as an error", async () => {

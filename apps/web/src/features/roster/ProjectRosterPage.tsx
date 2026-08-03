@@ -110,6 +110,18 @@ export function ProjectRosterPage({
       ),
     [memberships],
   );
+  const readOnlyOrganizationIds = useMemo(
+    () =>
+      new Set(
+        memberships
+          .filter(
+            (membership) =>
+              !membership.masterIsActive || membership.masterIsDeleted,
+          )
+          .map((membership) => membership.organizationId),
+      ),
+    [memberships],
+  );
   const recentOrganizationContextRef = useRef<RecentOrganizationContext>({
     generation: 0,
     userId: authenticatedUserId,
@@ -430,11 +442,13 @@ export function ProjectRosterPage({
           canMutate={canMutate}
           busyRowIds={busyRowIds}
           canMutateRow={(row) =>
-            auth?.session.user.role === "OPERATOR" ||
-            validOrganizationIds.has(row.organizationId)
+            !readOnlyOrganizationIds.has(row.organizationId) &&
+            (auth?.session.user.role === "OPERATOR" ||
+              validOrganizationIds.has(row.organizationId))
           }
           canEditRow={(row) =>
             participantCandidatesAvailable &&
+            !readOnlyOrganizationIds.has(row.organizationId) &&
             (auth?.session.user.role === "OPERATOR" ||
               validOrganizationIds.has(row.organizationId))
           }

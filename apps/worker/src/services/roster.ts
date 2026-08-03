@@ -326,14 +326,12 @@ export async function updateRosterEntry(
     projectId,
     entry.organizationId,
   );
-  if (input.status === "ACTIVE") {
-    const organization = await findOrganizationState(
-      env.DB,
-      entry.organizationId,
-    );
-    if (!organization?.isActive || organization.isDeleted) {
-      throw new DomainError("VALIDATION_FAILED");
-    }
+  const organization = await findOrganizationState(
+    env.DB,
+    entry.organizationId,
+  );
+  if (!organization?.isActive || organization.isDeleted) {
+    throw new DomainError("VALIDATION_FAILED");
   }
   if (entry.status === input.status) throw new DomainError("CONFLICT");
   const timestamp = now.toISOString();
@@ -344,17 +342,12 @@ export async function updateRosterEntry(
       ? "IN_PROGRESS"
       : entry.source;
   const guardId = crypto.randomUUID();
-  const activationPredicate =
-    input.status === "ACTIVE"
-      ? ` AND EXISTS (
-           SELECT 1 FROM organizations activation_organization
-           WHERE activation_organization.id = ?
-             AND activation_organization.is_active = 1
-             AND activation_organization.deleted_at IS NULL
-         )`
-      : "";
-  const activationBindings =
-    input.status === "ACTIVE" ? [entry.organizationId] : [];
+  const mutableOrganizationPredicate = ` AND EXISTS (
+    SELECT 1 FROM organizations mutable_organization
+    WHERE mutable_organization.id = ?
+      AND mutable_organization.is_active = 1
+      AND mutable_organization.deleted_at IS NULL
+  )`;
   try {
     await runGuardedAtomic(env.DB, {
       guardId,
@@ -371,13 +364,13 @@ export async function updateRosterEntry(
         `EXISTS (
            SELECT 1 FROM project_roster_entries
            WHERE id = ? AND project_id = ? AND revision = ? AND status = ?
-         )${activationPredicate}`,
+         )${mutableOrganizationPredicate}`,
         [
           entryId,
           projectId,
           input.expectedEntryRevision,
           entry.status,
-          ...activationBindings,
+          entry.organizationId,
         ],
       ),
       statements: [

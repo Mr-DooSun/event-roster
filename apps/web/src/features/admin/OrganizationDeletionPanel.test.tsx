@@ -87,6 +87,26 @@ it("does not offer deletion for an already deleted organization", () => {
   expect(container).toBeEmptyDOMElement();
 });
 
+it("explains selector visibility and automatic deactivation before deleting an active organization", () => {
+  render(
+    <OrganizationDeletionPanel
+      organization={organization({ isActive: true })}
+      {...controlledProps}
+      dialogOpen
+    />,
+  );
+
+  const dialog = screen.getByRole("dialog", { name: "조직 삭제" });
+  expect(
+    within(dialog).getByText(
+      "삭제하면 일반 조직 목록과 조직 선택기에서 숨겨집니다.",
+    ),
+  ).toBeVisible();
+  expect(
+    within(dialog).getByText("사용 중인 조직은 자동으로 사용 중지됩니다."),
+  ).toBeVisible();
+});
+
 it("requires the exact organization name and disables confirmation during another mutation", () => {
   const { rerender } = render(
     <OrganizationDeletionPanel

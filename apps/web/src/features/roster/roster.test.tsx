@@ -1344,6 +1344,90 @@ it("keeps the roster snapshot name and labels rows from deleted organizations", 
   );
 });
 
+it("hides roster row actions from operators when the master organization is inactive or deleted", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL) => {
+      if (String(input).endsWith("/auth/login")) {
+        return Promise.resolve(Response.json(auth("OPERATOR")));
+      }
+      throw new Error(`unexpected request: ${String(input)}`);
+    }),
+  );
+  render(
+    <AuthProvider restoreOnMount={false}>
+      <Gate>
+        <ProjectRosterPage
+          project={project()}
+          rows={[
+            entry("ACTIVE"),
+            {
+              ...entry("CANCELLED"),
+              id: "entry-2",
+              participantId: "person-2",
+              participantNumber: "P-002",
+              participantName: "김민수",
+              organizationId: "org-2",
+              organizationName: "2팀",
+            },
+          ]}
+          participants={[]}
+          organizations={[]}
+          memberships={[
+            {
+              organizationId: "org-1",
+              name: "1팀",
+              isActive: false,
+              masterIsActive: false,
+              masterIsDeleted: true,
+              activeProjectCount: 0,
+              hasBusinessHistory: true,
+              primaryLeader: null,
+              managerCount: 0,
+              rosterCount: 1,
+            },
+            {
+              organizationId: "org-2",
+              name: "2팀",
+              isActive: true,
+              masterIsActive: false,
+              masterIsDeleted: false,
+              activeProjectCount: 1,
+              hasBusinessHistory: true,
+              primaryLeader: null,
+              managerCount: 0,
+              rosterCount: 1,
+            },
+          ]}
+          canMutate
+          onChanged={vi.fn().mockResolvedValue(undefined)}
+        />
+      </Gate>
+    </AuthProvider>,
+  );
+  await login();
+
+  const row = (await screen.findByText("박민수")).closest("tr");
+  expect(row).not.toBeNull();
+  expect(within(row as HTMLElement).getByText("읽기 전용")).toBeVisible();
+  expect(
+    within(row as HTMLElement).queryByRole("button", { name: "박민수 취소" }),
+  ).not.toBeInTheDocument();
+  expect(
+    within(row as HTMLElement).queryByRole("button", { name: "정보 수정" }),
+  ).not.toBeInTheDocument();
+  const inactiveRow = screen.getByText("김민수").closest("tr");
+  expect(inactiveRow).not.toBeNull();
+  expect(
+    within(inactiveRow as HTMLElement).getByText("읽기 전용"),
+  ).toBeVisible();
+  expect(
+    within(inactiveRow as HTMLElement).queryByRole("button", {
+      name: "김민수 복원",
+    }),
+  ).not.toBeInTheDocument();
+});
+
 it("excludes teachers with stale grades from exact grade filters", () => {
   render(
     <RosterTable

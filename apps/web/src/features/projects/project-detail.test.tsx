@@ -896,6 +896,7 @@ it("guides an administrator to recover a deleted organization reserved during in
   const recovery = await screen.findByRole("link", {
     name: "삭제된 조직 복구하기",
   });
+  expect(screen.getByText("삭제된 동일 이름의 조직이 있습니다.")).toBeVisible();
   expect(recovery).toHaveAttribute("href", "/organizations/deleted%20org%2F1");
   expect(input).toHaveValue("삭제된 조직");
   expect(mockApi.post).toHaveBeenCalledTimes(1);

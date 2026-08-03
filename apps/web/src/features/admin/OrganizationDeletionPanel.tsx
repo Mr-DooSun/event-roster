@@ -75,6 +75,10 @@ export function OrganizationDeletionPanel({
               조직을 삭제합니다.
             </p>
             <p>담당자, 참가자, 프로젝트 기록은 보존됩니다.</p>
+            <p>삭제하면 일반 조직 목록과 조직 선택기에서 숨겨집니다.</p>
+            {organization.isActive ? (
+              <p>사용 중인 조직은 자동으로 사용 중지됩니다.</p>
+            ) : null}
             <p>나중에 복구할 수 있습니다.</p>
             <TextInput
               label="확인을 위해 조직 이름을 입력하세요."

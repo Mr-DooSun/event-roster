@@ -724,6 +724,103 @@ it("does not treat LIKE-wildcard lookalike audit actions as membership history",
   ).toBe(0);
 });
 
+it("rejects removing a membership whose master organization is already deleted", async () => {
+  const fixture = await setupPreRegistration();
+  const deletedAt = "2026-08-03T00:00:00.000Z";
+  await env.DB.prepare(
+    `UPDATE organizations
+     SET is_active = 0, deleted_at = ?, deleted_by = ?, updated_at = ?
+     WHERE id = 'org-1'`,
+  )
+    .bind(deletedAt, fixture.operator.userId, deletedAt)
+    .run();
+
+  const response = await authedRequest(
+    fixture.operator,
+    `/api/v1/projects/${fixture.project.id}/organizations/org-1`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        isActive: false,
+        expectedProjectRevision: fixture.project.revision,
+      }),
+    },
+  );
+
+  expect(response.status).toBe(409);
+  expect(
+    await env.DB.prepare(
+      `SELECT is_active FROM project_organizations
+       WHERE project_id = ? AND organization_id = 'org-1'`,
+    )
+      .bind(fixture.project.id)
+      .first(),
+  ).toEqual({ is_active: 1 });
+  expect(
+    await env.DB.prepare("SELECT revision FROM projects WHERE id = ?")
+      .bind(fixture.project.id)
+      .first(),
+  ).toEqual({ revision: fixture.project.revision });
+});
+
+it("rechecks master organization deletion atomically before deactivating a historical membership", async () => {
+  const fixture = await setupPreRegistration();
+  const added = await addRoster(fixture, fixture.firstParticipant.id);
+  const active = await added.json<{ projectRevision: number }>();
+  const actor = await requireActor(
+    new Request("https://event-roster.test", {
+      headers: {
+        Authorization: `Bearer ${fixture.operator.body.accessToken}`,
+      },
+    }),
+    env as Env,
+  );
+  let pending = true;
+  const raceDb = {
+    prepare: (query: string) => env.DB.prepare(query),
+    batch: async (statements: D1PreparedStatement[]) => {
+      if (pending) {
+        pending = false;
+        const deletedAt = "2026-08-03T00:00:00.000Z";
+        await env.DB.prepare(
+          `UPDATE organizations
+           SET is_active = 0, deleted_at = ?, deleted_by = ?, updated_at = ?
+           WHERE id = 'org-1'`,
+        )
+          .bind(deletedAt, fixture.operator.userId, deletedAt)
+          .run();
+      }
+      return env.DB.batch(statements);
+    },
+  } as D1Database;
+
+  await expect(
+    setProjectOrganizationActive(
+      { ...(env as Env), DB: raceDb },
+      actor,
+      fixture.project.id,
+      "org-1",
+      {
+        isActive: false,
+        expectedProjectRevision: active.projectRevision,
+      },
+    ),
+  ).rejects.toMatchObject({ code: "CONFLICT" });
+  expect(
+    await env.DB.prepare(
+      `SELECT is_active FROM project_organizations
+       WHERE project_id = ? AND organization_id = 'org-1'`,
+    )
+      .bind(fixture.project.id)
+      .first(),
+  ).toEqual({ is_active: 1 });
+  expect(
+    await env.DB.prepare("SELECT revision FROM projects WHERE id = ?")
+      .bind(fixture.project.id)
+      .first(),
+  ).toEqual({ revision: active.projectRevision });
+});
+
 it("globally deactivates an organization with audit and blocks subsequent usage", async () => {
   const fixture = await setupPreRegistration();
   const added = await addRoster(fixture, fixture.firstParticipant.id);
@@ -765,8 +862,8 @@ it("globally deactivates an organization with audit and blocks subsequent usage"
       }),
     },
   );
-  expect(cancelled.status).toBe(200);
-  const cancelledBody = await cancelled.json<{ projectRevision: number }>();
+  expect(cancelled.status).toBe(422);
+  const unchangedProjectRevision = active.projectRevision;
   const updated = await authedRequest(
     fixture.operator,
     `/api/v1/projects/${fixture.project.id}/participants/${fixture.firstParticipant.id}`,
@@ -775,7 +872,7 @@ it("globally deactivates an organization with audit and blocks subsequent usage"
       body: JSON.stringify({
         name: "비활성 마스터 이력 수정",
         expectedRevision: 0,
-        expectedProjectRevision: cancelledBody.projectRevision,
+        expectedProjectRevision: unchangedProjectRevision,
       }),
     },
   );
@@ -785,7 +882,7 @@ it("globally deactivates an organization with audit and blocks subsequent usage"
       ...fixture,
       project: {
         ...fixture.project,
-        revision: cancelledBody.projectRevision,
+        revision: unchangedProjectRevision,
       },
     },
     fixture.secondParticipant.id,
@@ -843,7 +940,7 @@ it("globally deactivates an organization with audit and blocks subsequent usage"
             grade: "M1",
           },
         ],
-        expectedProjectRevision: cancelledBody.projectRevision,
+        expectedProjectRevision: unchangedProjectRevision,
       }),
     },
   );
