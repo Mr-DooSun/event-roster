@@ -17,6 +17,7 @@ import {
   resetAuthState,
   seedUser,
 } from "./support/auth";
+import { addRoster, setupPreRegistration } from "./support/roster";
 
 beforeEach(resetAuthState);
 afterEach(async () => {
@@ -357,6 +358,141 @@ it("restores a deleted organization as inactive and audits both lifecycle change
       )
     ).status,
   ).toBe(409);
+});
+
+it("preserves manager assignments but revokes deleted and restored-inactive organization authority", async () => {
+  const fixture = await setupPreRegistration();
+  const manager = await seedManager("org-1");
+
+  expect(manager.body.session.user.organizationIds).toContain("org-1");
+  expect(
+    (await authedRequest(manager, `/api/v1/projects/${fixture.project.id}`))
+      .status,
+  ).toBe(200);
+
+  expect(
+    (
+      await authedRequest(fixture.operator, "/api/v1/organizations/org-1", {
+        method: "DELETE",
+        body: JSON.stringify({ confirmationName: "1팀" }),
+      })
+    ).status,
+  ).toBe(204);
+
+  const deletedSession = await login("manager-02", "manager-password-123");
+  expect(deletedSession.body.session.user.organizationIds).not.toContain(
+    "org-1",
+  );
+  expect(
+    (
+      await authedRequest(
+        deletedSession,
+        `/api/v1/projects/${fixture.project.id}`,
+      )
+    ).status,
+  ).toBe(403);
+  expect(
+    await env.DB.prepare(
+      `SELECT 1 AS assigned FROM user_organizations
+       WHERE user_id = ? AND organization_id = ?`,
+    )
+      .bind(manager.userId, "org-1")
+      .first(),
+  ).toEqual({ assigned: 1 });
+
+  expect(
+    (
+      await authedRequest(
+        fixture.operator,
+        "/api/v1/organizations/org-1/restore",
+        { method: "POST" },
+      )
+    ).status,
+  ).toBe(200);
+  const restoredSession = await login("manager-02", "manager-password-123");
+  expect(restoredSession.body.session.user.organizationIds).not.toContain(
+    "org-1",
+  );
+  expect(
+    (
+      await authedRequest(
+        restoredSession,
+        `/api/v1/projects/${fixture.project.id}`,
+      )
+    ).status,
+  ).toBe(403);
+
+  expect(
+    (
+      await authedRequest(fixture.operator, "/api/v1/organizations/org-1", {
+        method: "PATCH",
+        body: JSON.stringify({ isActive: true }),
+      })
+    ).status,
+  ).toBe(200);
+  const reactivatedSession = await login("manager-02", "manager-password-123");
+  expect(reactivatedSession.body.session.user.organizationIds).toContain(
+    "org-1",
+  );
+  expect(
+    (
+      await authedRequest(
+        reactivatedSession,
+        `/api/v1/projects/${fixture.project.id}`,
+      )
+    ).status,
+  ).toBe(200);
+  expect(
+    (
+      await addRoster(
+        {
+          ...fixture,
+          operator: { ...reactivatedSession, userId: manager.userId },
+        },
+        fixture.firstParticipant.id,
+      )
+    ).status,
+  ).toBe(201);
+});
+
+it("rejects adding or reactivating a deleted organization in a project", async () => {
+  const fixture = await setupPreRegistration();
+  await env.DB.prepare(
+    `UPDATE project_organizations SET is_active = 0
+     WHERE project_id = ? AND organization_id = 'org-1'`,
+  )
+    .bind(fixture.project.id)
+    .run();
+  const secondProject = await seedProject(fixture.operator, {
+    name: "삭제 조직 연결 차단",
+  });
+  await markOrganizationDeleted("org-1", fixture.operator.userId);
+
+  const add = await authedRequest(
+    fixture.operator,
+    `/api/v1/projects/${secondProject.id}/organizations`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        organizationId: "org-1",
+        expectedProjectRevision: secondProject.revision,
+      }),
+    },
+  );
+  expect(add.status).toBe(409);
+
+  const reactivate = await authedRequest(
+    fixture.operator,
+    `/api/v1/projects/${fixture.project.id}/organizations/org-1`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        isActive: true,
+        expectedProjectRevision: fixture.project.revision,
+      }),
+    },
+  );
+  expect(reactivate.status).toBe(409);
 });
 
 it("requires administrative full-session protections for delete and restore", async () => {

@@ -288,7 +288,8 @@ async function resolveRows(
     await db
       .prepare(
         `SELECT o.id, o.name, o.canonical_name,
-                (o.is_active = 1 AND po.is_active = 1) AS is_active
+                (o.is_active = 1 AND o.deleted_at IS NULL
+                 AND po.is_active = 1) AS is_active
          FROM project_organizations po
          JOIN organizations o ON o.id = po.organization_id
          WHERE po.project_id = ?`,
@@ -426,6 +427,7 @@ function rosterUpsert(
                          AND p.organization_id = i.expected_organization_id
                          AND p.revision = i.expected_revision
                          AND o.is_active = 1
+                         AND o.deleted_at IS NULL
                          AND EXISTS (
                            SELECT 1 FROM project_organizations po
                            WHERE po.project_id = ? AND po.organization_id = o.id

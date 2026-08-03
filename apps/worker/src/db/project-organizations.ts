@@ -117,6 +117,7 @@ export async function listActorProjectOrganizationIds(
          JOIN organizations o ON o.id = po.organization_id
          WHERE actor_org.user_id = ? AND po.project_id = ?
            AND o.is_active = 1
+           AND o.deleted_at IS NULL
            AND (? = 0 OR po.is_active = 1)
          ORDER BY po.organization_id`,
       )

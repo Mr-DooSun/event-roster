@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { beforeEach, expect, it } from "vitest";
+import { afterEach, beforeEach, expect, it } from "vitest";
 import type { Env } from "../src/env";
 import { requireActor } from "../src/middleware/authentication";
 import { createBulkParticipantsAndAddToProject } from "../src/services/bulk-participants";
@@ -14,6 +14,13 @@ import { authenticatedHeaders, resetAuthState } from "./support/auth";
 import { addRoster, setupPreRegistration } from "./support/roster";
 
 beforeEach(resetAuthState);
+afterEach(async () => {
+  await env.DB.prepare(
+    `UPDATE organizations
+     SET deleted_at = NULL, deleted_by = NULL
+     WHERE deleted_at IS NOT NULL`,
+  ).run();
+});
 
 async function markProjectDeleted(
   projectId: string,
@@ -601,6 +608,105 @@ it("creates a participant and roster entry atomically", async () => {
       ).first<{ count: number }>()
     )?.count,
   ).toBe(0);
+});
+
+it("keeps deleted-organization roster history readable while rejecting every new roster path", async () => {
+  const fixture = await setupPreRegistration();
+  const added = await addRoster(fixture, fixture.firstParticipant.id);
+  const addedBody = await added.json<{
+    id: string;
+    revision: number;
+    projectRevision: number;
+  }>();
+  const cancelled = await authedRequest(
+    fixture.operator,
+    `/api/v1/projects/${fixture.project.id}/roster/${addedBody.id}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        status: "CANCELLED",
+        expectedRevision: addedBody.projectRevision,
+        expectedEntryRevision: addedBody.revision,
+      }),
+    },
+  );
+  const cancelledBody = await cancelled.json<{ projectRevision: number }>();
+  const deletedAt = "2026-08-03T00:00:00.000Z";
+  await env.DB.prepare(
+    `UPDATE organizations
+     SET is_active = 0, deleted_at = ?, deleted_by = ?, updated_at = ?
+     WHERE id = 'org-1'`,
+  )
+    .bind(deletedAt, fixture.operator.userId, deletedAt)
+    .run();
+
+  const historicalRoster = await authedRequest(
+    fixture.operator,
+    `/api/v1/projects/${fixture.project.id}/roster`,
+  );
+  expect(historicalRoster.status).toBe(200);
+  expect(
+    await historicalRoster.json<Array<{ participantNumber: string }>>(),
+  ).toEqual([expect.objectContaining({ participantNumber: "P-FIRST" })]);
+
+  const reactivated = await addRoster(
+    {
+      ...fixture,
+      project: { ...fixture.project, revision: cancelledBody.projectRevision },
+    },
+    fixture.firstParticipant.id,
+    cancelledBody.projectRevision,
+  );
+  const existing = await addRoster(
+    {
+      ...fixture,
+      project: { ...fixture.project, revision: cancelledBody.projectRevision },
+    },
+    fixture.secondParticipant.id,
+    cancelledBody.projectRevision,
+  );
+  const created = await authedRequest(
+    fixture.operator,
+    `/api/v1/projects/${fixture.project.id}/roster`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        newParticipant: {
+          name: "삭제 조직 신규 참가자",
+          organizationId: "org-1",
+          role: "TEACHER",
+          grade: null,
+        },
+        expectedRevision: cancelledBody.projectRevision,
+      }),
+    },
+  );
+  const bulk = await authedRequest(
+    fixture.operator,
+    `/api/v1/projects/${fixture.project.id}/roster/bulk`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        organizationId: "org-1",
+        participants: [
+          { name: "삭제 조직 일괄 참가자", role: "STUDENT", grade: "H1" },
+        ],
+        confirmDuplicateNames: false,
+        expectedRevision: cancelledBody.projectRevision,
+      }),
+    },
+  );
+
+  expect(reactivated.status).toBe(409);
+  expect(existing.status).toBe(422);
+  expect(created.status).toBe(422);
+  expect(bulk.status).toBe(422);
+  expect(
+    await env.DB.prepare(
+      `SELECT COUNT(*) AS count FROM participants
+       WHERE name IN ('삭제 조직 신규 참가자', '삭제 조직 일괄 참가자')`,
+    ).first(),
+  ).toEqual({ count: 0 });
 });
 
 it("warns about input and existing duplicates without writing rows", async () => {

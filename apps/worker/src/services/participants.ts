@@ -51,6 +51,7 @@ export async function getParticipants(env: Env, actor: Actor) {
          ON actor_scope.organization_id = p.organization_id
        JOIN organizations o ON o.id = p.organization_id
        WHERE actor_scope.user_id = ? AND o.is_active = 1
+         AND o.deleted_at IS NULL
        ORDER BY p.name, p.participant_id`
     : `SELECT p.id, p.participant_id, p.name, p.organization_id, p.revision,
               ${suggestionColumns}
@@ -123,6 +124,7 @@ export async function createParticipantAndAddToProject(
            JOIN organizations o ON o.id = po.organization_id
            WHERE po.project_id = ? AND po.organization_id = ?
              AND po.is_active = 1 AND o.is_active = 1
+             AND o.deleted_at IS NULL
          )`,
         [projectId, input.organizationId],
       ),
@@ -294,6 +296,7 @@ export async function updateProjectParticipant(
            JOIN organizations o ON o.id = po.organization_id
            WHERE po.project_id = ? AND po.organization_id = ?
              AND po.is_active = 1 AND o.is_active = 1
+             AND o.deleted_at IS NULL
          )`;
   const membershipBindings =
     nextOrganizationId === current.organizationId
@@ -333,6 +336,7 @@ export async function updateProjectParticipant(
                    AND master_scope.user_id = scoped_user.id
                    AND master_membership.is_active = 1
                    AND master_organization.is_active = 1
+                   AND master_organization.deleted_at IS NULL
                ) AND EXISTS (
                  SELECT 1 FROM project_roster_entries scoped_roster
                  JOIN user_organizations roster_scope
@@ -347,6 +351,7 @@ export async function updateProjectParticipant(
                    AND roster_scope.user_id = scoped_user.id
                    AND roster_membership.is_active = 1
                    AND roster_organization.is_active = 1
+                   AND roster_organization.deleted_at IS NULL
                )
              )
            )
@@ -519,6 +524,7 @@ export function projectParticipantGuard(
                AND scoped_membership.organization_id = ?
                AND scoped_membership.is_active = 1
                AND scoped_master.is_active = 1
+               AND scoped_master.deleted_at IS NULL
            )))
        ) AND EXISTS (
          SELECT 1 FROM projects

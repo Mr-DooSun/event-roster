@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import type { OrganizationDetail } from "@event-roster/contracts";
-import { beforeEach, expect, it } from "vitest";
+import { afterEach, beforeEach, expect, it } from "vitest";
 import type { Env } from "../src/env";
 import { requireActor } from "../src/middleware/authentication";
 import { assignOrganizationManager } from "../src/services/organizations";
@@ -18,6 +18,13 @@ import {
 } from "./support/organization-leadership";
 
 beforeEach(resetAuthState);
+afterEach(async () => {
+  await env.DB.prepare(
+    `UPDATE organizations
+     SET deleted_at = NULL, deleted_by = NULL
+     WHERE deleted_at IS NOT NULL`,
+  ).run();
+});
 
 it("returns searchable organization summaries and a complete operator detail", async () => {
   const { operator } = await seedLeadershipFixture();
@@ -227,6 +234,107 @@ it("searches only active unassigned manager accounts and validates the organizat
       )
     ).status,
   ).toBe(404);
+});
+
+it("rejects every administrative mutation against a deleted organization", async () => {
+  const { operator } = await seedTwoManagersAndPrimary();
+  await seedUser({
+    id: "deleted-assignment-candidate",
+    loginId: "deleted-assignment-candidate",
+  });
+  await env.DB.prepare(
+    `UPDATE users SET role = 'ORGANIZATION_MANAGER'
+     WHERE id = 'deleted-assignment-candidate'`,
+  ).run();
+  const deletedAt = "2026-08-03T00:00:00.000Z";
+  await env.DB.prepare(
+    `UPDATE organizations
+     SET is_active = 0, deleted_at = ?, deleted_by = ?, updated_at = ?
+     WHERE id = 'org-1'`,
+  )
+    .bind(deletedAt, operator.userId, deletedAt)
+    .run();
+
+  const requests = [
+    authedRequest(operator, "/api/v1/organizations/org-1", {
+      method: "PATCH",
+      body: JSON.stringify({ name: "삭제 후 변경 금지" }),
+    }),
+    authedRequest(operator, "/api/v1/organizations/org-1", {
+      method: "PATCH",
+      body: JSON.stringify({ isActive: true }),
+    }),
+    authedRequest(operator, "/api/v1/organizations/org-1/managers", {
+      method: "POST",
+      body: JSON.stringify({
+        kind: "EXISTING",
+        userId: "deleted-assignment-candidate",
+        assignmentRole: "MANAGER",
+      }),
+    }),
+    authedRequest(operator, "/api/v1/organizations/org-1/managers", {
+      method: "POST",
+      body: JSON.stringify({
+        kind: "NEW",
+        loginId: "deleted-new-manager",
+        displayName: "삭제 조직 신규 담당자",
+        assignmentRole: "MANAGER",
+      }),
+    }),
+    authedRequest(operator, "/api/v1/organizations/org-1/primary", {
+      method: "PATCH",
+      body: JSON.stringify({
+        userId: "manager-2",
+        expectedPrimaryUserId: "leader-1",
+        previousPrimaryDisposition: "MANAGER",
+      }),
+    }),
+    authedRequest(operator, "/api/v1/organizations/org-1/managers/manager-2", {
+      method: "DELETE",
+    }),
+  ];
+
+  for (const response of await Promise.all(requests)) {
+    expect(response.status).toBe(409);
+  }
+  expect(
+    (
+      await authedRequest(
+        operator,
+        "/api/v1/organizations/org-1/assignable-users?query=manager",
+      )
+    ).status,
+  ).toBe(409);
+  expect(
+    await env.DB.prepare(
+      `SELECT name, is_active, deleted_at FROM organizations WHERE id = 'org-1'`,
+    ).first(),
+  ).toEqual({ name: "1팀", is_active: 0, deleted_at: deletedAt });
+  expect(
+    await env.DB.prepare(
+      `SELECT user_id, assignment_role FROM user_organizations
+       WHERE organization_id = 'org-1' ORDER BY user_id`,
+    ).all(),
+  ).toMatchObject({
+    results: [
+      { user_id: "leader-1", assignment_role: "PRIMARY_LEADER" },
+      { user_id: "manager-2", assignment_role: "MANAGER" },
+      { user_id: "manager-3", assignment_role: "MANAGER" },
+    ],
+  });
+  expect(
+    await env.DB.prepare(
+      `SELECT COUNT(*) AS count FROM user_organizations
+       WHERE organization_id = 'org-1'
+         AND user_id = 'deleted-assignment-candidate'`,
+    ).first(),
+  ).toEqual({ count: 0 });
+  expect(
+    await env.DB.prepare(
+      `SELECT COUNT(*) AS count FROM users
+       WHERE login_id = 'deleted-new-manager'`,
+    ).first(),
+  ).toEqual({ count: 0 });
 });
 
 it("paginates organization audit by timestamp and id and sanitizes all details", async () => {

@@ -141,28 +141,39 @@ export async function addRosterEntry(
     expectedParticipantRevision,
     confirmedParticipant.organizationId,
   ];
+  const mutableOrganizationPredicate = `EXISTS (
+    SELECT 1 FROM organizations o
+    WHERE o.id = ? AND o.is_active = 1 AND o.deleted_at IS NULL
+  )`;
+  const activeMembershipPredicate = `EXISTS (
+    SELECT 1 FROM project_organizations po
+    WHERE po.project_id = ? AND po.organization_id = ? AND po.is_active = 1
+  )`;
   const operationPredicate = existing
     ? `EXISTS (
          SELECT 1 FROM project_roster_entries
          WHERE id = ? AND project_id = ? AND status = 'CANCELLED' AND revision = ?
-       ) AND ${participantStatePredicate}`
+       ) AND ${participantStatePredicate} AND ${mutableOrganizationPredicate}`
     : `NOT EXISTS (
          SELECT 1 FROM project_roster_entries
          WHERE project_id = ? AND participant_id = ?
-       ) AND ${participantStatePredicate} AND EXISTS (
-         SELECT 1 FROM project_organizations po
-         JOIN organizations o ON o.id = po.organization_id
-         WHERE po.project_id = ? AND po.organization_id = ?
-           AND po.is_active = 1 AND o.is_active = 1
-       )`;
+       ) AND ${participantStatePredicate} AND ${mutableOrganizationPredicate}
+         AND ${activeMembershipPredicate}`;
   const operationBindings = existing
-    ? [existing.id, projectId, existing.revision, ...participantStateBindings]
+    ? [
+        existing.id,
+        projectId,
+        existing.revision,
+        ...participantStateBindings,
+        organizationId,
+      ]
     : [
         projectId,
         participantId,
         ...participantStateBindings,
+        organizationId,
         projectId,
-        confirmedParticipant.organizationId,
+        organizationId,
       ];
   const statements: D1PreparedStatement[] = existing
     ? [
@@ -632,6 +643,7 @@ function rosterGuard(
                AND scoped_membership.organization_id = ?
                AND scoped_membership.is_active = 1
                AND scoped_master.is_active = 1
+               AND scoped_master.deleted_at IS NULL
            ) AND EXISTS (
              SELECT 1 FROM user_organizations confirmed_scope
              WHERE confirmed_scope.user_id = u.id
@@ -644,6 +656,7 @@ function rosterGuard(
                AND confirmed_membership.organization_id = ?
                AND confirmed_membership.is_active = 1
                AND confirmed_master.is_active = 1
+               AND confirmed_master.deleted_at IS NULL
            )))
        ) AND EXISTS (
          SELECT 1 FROM projects

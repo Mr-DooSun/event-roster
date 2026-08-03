@@ -162,6 +162,7 @@ export async function createBulkParticipantsAndAddToProject(
            JOIN organizations o ON o.id = po.organization_id
            WHERE po.project_id = ? AND po.organization_id = ?
              AND po.is_active = 1 AND o.is_active = 1
+             AND o.deleted_at IS NULL
          )${snapshotPredicate}`,
         [projectId, input.organizationId, ...snapshotBindings],
       ),

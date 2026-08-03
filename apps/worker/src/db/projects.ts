@@ -77,6 +77,7 @@ export async function listProjects(
           WHERE po.project_id = projects.id
             AND uo.user_id = ?
             AND o.is_active = 1
+            AND o.deleted_at IS NULL
         )`);
     bindings.push(options.actorUserId);
   }

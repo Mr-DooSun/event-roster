@@ -17,6 +17,7 @@ import {
   listOrganizationAuditRows,
   listOrganizationSummaries,
   type OrganizationListFilters,
+  type OrganizationState,
 } from "../db/organizations";
 import type { Env } from "../env";
 import type { Actor } from "../middleware/authentication";
@@ -68,9 +69,9 @@ export async function getAssignableManagerAccounts(
   >
 > {
   requireAdministrativeOperator(actor);
-  if (!(await findOrganizationState(env.DB, organizationId))) {
-    throw new DomainError("NOT_FOUND");
-  }
+  requireMutableOrganization(
+    await findOrganizationState(env.DB, organizationId),
+  );
   return listAssignableManagerAccounts(env.DB, organizationId, query.trim());
 }
 
@@ -172,7 +173,7 @@ export async function updateOrganization(
   input: { name?: string | undefined; isActive?: boolean | undefined },
 ) {
   const current = await findOrganizationState(env.DB, id);
-  if (!current) throw new DomainError("NOT_FOUND");
+  requireMutableOrganization(current);
   const name = input.name ?? current.name;
   const isActive = input.isActive ?? current.isActive;
   const renamed = input.name !== undefined && input.name !== current.name;
@@ -189,6 +190,7 @@ export async function updateOrganization(
         `EXISTS (
            SELECT 1 FROM organizations
            WHERE id = ? AND name = ? AND canonical_name = ? AND is_active = ?
+             AND deleted_at IS NULL
          )`,
         [id, current.name, current.canonicalName, current.isActive ? 1 : 0],
       ),
@@ -210,7 +212,8 @@ export async function updateOrganization(
     env.DB.prepare(
       `UPDATE organizations
        SET name = ?, canonical_name = ?, is_active = ?, updated_at = ?
-       WHERE id = ? AND name = ? AND canonical_name = ? AND is_active = ?`,
+       WHERE id = ? AND name = ? AND canonical_name = ? AND is_active = ?
+         AND deleted_at IS NULL`,
     ).bind(
       name,
       canonicalizeOrganizationName(name),
@@ -259,6 +262,7 @@ export async function updateOrganization(
         `EXISTS (
            SELECT 1 FROM organizations
            WHERE id = ? AND name = ? AND canonical_name = ? AND is_active = ?
+             AND deleted_at IS NULL
          )`,
         [id, current.name, current.canonicalName, current.isActive ? 1 : 0],
       ),
@@ -401,6 +405,9 @@ export async function assignOrganizationManager(
   manager: OrganizationManager;
   temporaryPassword?: string;
 }> {
+  requireMutableOrganization(
+    await findOrganizationState(env.DB, organizationId),
+  );
   const now = new Date().toISOString();
   const userId = input.kind === "NEW" ? crypto.randomUUID() : input.userId;
   const assignmentAction =
@@ -518,12 +525,14 @@ export async function assignOrganizationManager(
   const operationPredicate =
     input.kind === "NEW"
       ? `EXISTS (
-           SELECT 1 FROM organizations WHERE id = ? AND is_active = 1
+           SELECT 1 FROM organizations
+           WHERE id = ? AND is_active = 1 AND deleted_at IS NULL
          ) AND NOT EXISTS (
            SELECT 1 FROM users WHERE login_id_canonical = ?
          ) ${primaryPredicate}`
       : `EXISTS (
-           SELECT 1 FROM organizations WHERE id = ? AND is_active = 1
+           SELECT 1 FROM organizations
+           WHERE id = ? AND is_active = 1 AND deleted_at IS NULL
          ) AND EXISTS (
            SELECT 1 FROM users
            WHERE id = ? AND role = 'ORGANIZATION_MANAGER'
@@ -565,7 +574,7 @@ export async function replaceOrganizationPrimary(
 ): Promise<OrganizationDetail> {
   const currentPrimaryUserId = await findPrimaryUserId(env.DB, organizationId);
   const organization = await findOrganizationState(env.DB, organizationId);
-  if (!organization) throw new DomainError("NOT_FOUND");
+  requireMutableOrganization(organization);
   if (currentPrimaryUserId !== input.expectedPrimaryUserId) {
     throw new DomainError("CONFLICT");
   }
@@ -586,7 +595,8 @@ export async function replaceOrganizationPrimary(
        )`
     : "";
   const operationPredicate = `EXISTS (
-    SELECT 1 FROM organizations WHERE id = ? AND is_active = 1
+    SELECT 1 FROM organizations
+    WHERE id = ? AND is_active = 1 AND deleted_at IS NULL
   ) AND ${exactPrimaryPredicate} ${targetPredicate}`;
   const operationBindings: Array<string | number> = [
     organizationId,
@@ -611,7 +621,8 @@ export async function replaceOrganizationPrimary(
         )`
       : "";
     const noOpPredicate = `EXISTS (
-      SELECT 1 FROM organizations WHERE id = ? AND is_active = 1
+      SELECT 1 FROM organizations
+      WHERE id = ? AND is_active = 1 AND deleted_at IS NULL
     ) AND ${exactPrimaryPredicate} ${currentAccountPredicate}`;
     const noOpBindings: Array<string | number> = [
       organizationId,
@@ -719,9 +730,9 @@ export async function removeOrganizationManager(
   organizationId: string,
   userId: string,
 ): Promise<void> {
-  if (!(await findOrganizationState(env.DB, organizationId))) {
-    throw new DomainError("NOT_FOUND");
-  }
+  requireMutableOrganization(
+    await findOrganizationState(env.DB, organizationId),
+  );
   const now = new Date().toISOString();
   const guardId = crypto.randomUUID();
   await runGuardedAtomic(env.DB, {
@@ -731,11 +742,14 @@ export async function removeOrganizationManager(
       guardId,
       actor,
       `EXISTS (
+         SELECT 1 FROM organizations
+         WHERE id = ? AND deleted_at IS NULL
+       ) AND EXISTS (
          SELECT 1 FROM user_organizations
          WHERE organization_id = ? AND user_id = ?
            AND assignment_role = 'MANAGER'
        )`,
-      [organizationId, userId],
+      [organizationId, organizationId, userId],
     ),
     statements: [
       env.DB.prepare(
@@ -955,6 +969,13 @@ function organizationMutationResult(
     masterIsActive: isActive,
     activeProjectCount,
   };
+}
+
+function requireMutableOrganization(
+  current: OrganizationState | null,
+): asserts current is OrganizationState {
+  if (!current) throw new DomainError("NOT_FOUND");
+  if (current.isDeleted) throw new DomainError("CONFLICT");
 }
 
 function throwConstraintConflict(error: unknown): never {

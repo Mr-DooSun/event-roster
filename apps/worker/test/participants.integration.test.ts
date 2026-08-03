@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { beforeEach, expect, it } from "vitest";
+import { afterEach, beforeEach, expect, it } from "vitest";
 import {
   authedRequest,
   seedManager,
@@ -10,6 +10,13 @@ import { resetAuthState } from "./support/auth";
 import { addRoster, setupPreRegistration } from "./support/roster";
 
 beforeEach(resetAuthState);
+afterEach(async () => {
+  await env.DB.prepare(
+    `UPDATE organizations
+     SET deleted_at = NULL, deleted_by = NULL
+     WHERE deleted_at IS NOT NULL`,
+  ).run();
+});
 
 async function markProjectDeleted(
   projectId: string,
@@ -82,6 +89,57 @@ it("keeps global participants read-only", async () => {
   );
   expect(create.status).toBe(404);
   expect(update.status).toBe(404);
+});
+
+it("rejects moving a participant into a deleted organization", async () => {
+  const fixture = await setupPreRegistration();
+  const roster = await addRoster(fixture, fixture.firstParticipant.id);
+  const rosterBody = await roster.json<{ projectRevision: number }>();
+  const target = await seedOrganization("org-2", "삭제 대상 조직");
+  const linked = await authedRequest(
+    fixture.operator,
+    `/api/v1/projects/${fixture.project.id}/organizations`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        organizationId: target.id,
+        expectedProjectRevision: rosterBody.projectRevision,
+      }),
+    },
+  );
+  const linkedBody = await linked.json<{ projectRevision: number }>();
+  const deletedAt = "2026-08-03T00:00:00.000Z";
+  await env.DB.prepare(
+    `UPDATE organizations
+     SET is_active = 0, deleted_at = ?, deleted_by = ?, updated_at = ?
+     WHERE id = ?`,
+  )
+    .bind(deletedAt, fixture.operator.userId, deletedAt, target.id)
+    .run();
+
+  const response = await authedRequest(
+    fixture.operator,
+    `/api/v1/projects/${fixture.project.id}/participants/${fixture.firstParticipant.id}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        organizationId: target.id,
+        role: "STUDENT",
+        grade: "M2",
+        expectedRevision: fixture.firstParticipant.revision,
+        expectedProjectRevision: linkedBody.projectRevision,
+      }),
+    },
+  );
+
+  expect(response.status).toBe(422);
+  expect(
+    await env.DB.prepare(
+      `SELECT organization_id, revision FROM participants WHERE id = ?`,
+    )
+      .bind(fixture.firstParticipant.id)
+      .first(),
+  ).toEqual({ organization_id: "org-1", revision: 0 });
 });
 
 it("returns the newest roster profile as a suggestion without writing the master", async () => {

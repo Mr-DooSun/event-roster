@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { beforeEach, expect, it } from "vitest";
+import { afterEach, beforeEach, expect, it } from "vitest";
 import type { Env } from "../src/env";
 import { requireActor } from "../src/middleware/authentication";
 import { commitImport } from "../src/services/imports";
@@ -12,6 +12,13 @@ import {
 import { setupPreRegistration } from "./support/roster";
 
 beforeEach(resetAuthState);
+afterEach(async () => {
+  await env.DB.prepare(
+    `UPDATE organizations
+     SET deleted_at = NULL, deleted_by = NULL
+     WHERE deleted_at IS NOT NULL`,
+  ).run();
+});
 
 const studentProfile = { role: "STUDENT" as const, grade: "M1" as const };
 
@@ -65,6 +72,55 @@ it("rejects import validation after the project is deleted", async () => {
     },
   );
   expect(response.status).toBe(404);
+});
+
+it("treats a deleted organization as unavailable for import validation and commit", async () => {
+  const fixture = await setupPreRegistration();
+  const deletedAt = "2026-08-03T00:00:00.000Z";
+  await env.DB.prepare(
+    `UPDATE organizations
+     SET is_active = 0, deleted_at = ?, deleted_by = ?, updated_at = ?
+     WHERE id = 'org-1'`,
+  )
+    .bind(deletedAt, fixture.operator.userId, deletedAt)
+    .run();
+  const rows = [
+    {
+      rowNumber: 2,
+      name: "삭제 조직 가져오기",
+      organizationName: "1팀",
+      ...studentProfile,
+    },
+  ];
+
+  const validation = await authedRequest(
+    fixture.operator,
+    `/api/v1/projects/${fixture.project.id}/imports/validate`,
+    { method: "POST", body: JSON.stringify(rows) },
+  );
+  expect(validation.status).toBe(200);
+  expect(await validation.json()).toMatchObject({
+    rows: [{ issues: ["UNKNOWN_ORGANIZATION"] }],
+  });
+
+  const commit = await authedRequest(
+    fixture.operator,
+    `/api/v1/projects/${fixture.project.id}/imports/commit`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        rows,
+        expectedProjectRevision: fixture.project.revision,
+      }),
+    },
+  );
+  expect(commit.status).toBe(422);
+  expect(
+    await env.DB.prepare(
+      `SELECT COUNT(*) AS count FROM participants
+       WHERE name = '삭제 조직 가져오기'`,
+    ).first(),
+  ).toEqual({ count: 0 });
 });
 
 it("commits 130 valid normalized rows atomically", async () => {

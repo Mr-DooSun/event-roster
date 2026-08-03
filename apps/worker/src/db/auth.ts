@@ -194,7 +194,13 @@ export async function revokeUserSessions(
 async function mapUser(db: D1Database, row: UserRow): Promise<AuthUserRecord> {
   const organizations = await db
     .prepare(
-      "SELECT organization_id FROM user_organizations WHERE user_id = ? ORDER BY organization_id",
+      `SELECT uo.organization_id
+       FROM user_organizations uo
+       JOIN organizations o ON o.id = uo.organization_id
+       WHERE uo.user_id = ?
+         AND o.is_active = 1
+         AND o.deleted_at IS NULL
+       ORDER BY uo.organization_id`,
     )
     .bind(row.id)
     .all<{ organization_id: string }>();

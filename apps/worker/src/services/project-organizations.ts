@@ -97,7 +97,8 @@ export async function addProjectOrganization(
            AND status <> 'CLOSED'
            AND (end_date IS NULL OR end_date >= ?)
        ) AND EXISTS (
-         SELECT 1 FROM organizations WHERE id = ? AND is_active = 1
+         SELECT 1 FROM organizations
+         WHERE id = ? AND is_active = 1 AND deleted_at IS NULL
        ) AND NOT EXISTS (
          SELECT 1 FROM project_organizations
          WHERE project_id = ? AND organization_id = ? AND is_active = 1
