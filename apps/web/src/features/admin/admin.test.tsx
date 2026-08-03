@@ -2435,7 +2435,7 @@ it("renders deleted organization history read-only and restores it to inactive",
             name: "삭제 조직",
             isActive: false,
             isDeleted: !restored,
-            deletedAt: restored ? null : "2026-08-03T00:15:00.000Z",
+            deletedAt: restored ? null : "2026-08-03T06:15:00.000Z",
             managerCount: 1,
             projectCount: 1,
             managers: [
@@ -2479,7 +2479,7 @@ it("renders deleted organization history read-only and restores it to inactive",
     await screen.findByRole("heading", { name: "삭제 조직" }),
   ).toBeVisible();
   expect(screen.getAllByText("삭제됨").length).toBeGreaterThan(0);
-  expect(screen.getByText("삭제 시각 2026.08.03 09:15")).toBeVisible();
+  expect(screen.getByText("삭제 시각 2026.08.03 15:15")).toBeVisible();
   expect(screen.getByText("보존 담당자")).toBeVisible();
   expect(screen.getByText("보존 프로젝트")).toBeVisible();
   expect(screen.getByText("ORGANIZATION_DELETED")).toBeVisible();
@@ -2513,6 +2513,49 @@ it("renders deleted organization history read-only and restores it to inactive",
   expect(
     screen.getByText("조직을 사용 중지 상태로 복구했습니다."),
   ).toBeVisible();
+});
+
+it("announces an organization restore failure as an error", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/auth/login")) {
+        return Promise.resolve(Response.json(auth()));
+      }
+      if (
+        url.endsWith("/organizations/org-deleted/restore") &&
+        init?.method === "POST"
+      ) {
+        return Promise.resolve(new Response(null, { status: 503 }));
+      }
+      if (url.endsWith("/organizations/org-deleted")) {
+        return Promise.resolve(
+          Response.json(
+            organizationDetail({
+              id: "org-deleted",
+              name: "삭제 조직",
+              isActive: false,
+              isDeleted: true,
+              deletedAt: "2026-08-03T06:15:00.000Z",
+            }),
+          ),
+        );
+      }
+      if (url.endsWith("/organizations/org-deleted/audit?limit=50")) {
+        return Promise.resolve(Response.json(emptyAuditPage()));
+      }
+      throw new Error(`unexpected request: ${url}`);
+    }),
+  );
+
+  renderOrganizationDetail("org-deleted");
+  await login();
+  fireEvent.click(await screen.findByRole("button", { name: "조직 복구" }));
+
+  const alert = await screen.findByRole("alert");
+  expect(alert).toHaveTextContent("조직을 복구하지 못했습니다.");
+  expect(alert).toHaveClass("er-status--error");
 });
 
 it("keeps the deletion dialog locked while deletion is pending", async () => {

@@ -71,6 +71,7 @@ export function OrganizationDetailPage({
     null,
   );
   const [message, setMessage] = useState<string | null>(null);
+  const [restoreError, setRestoreError] = useState<string | null>(null);
   const [showStatusConfirmation, setShowStatusConfirmation] = useState(false);
   const [showDeleteConfirmation, setShowDeleteConfirmation] = useState(false);
   const [deleteConfirmationName, setDeleteConfirmationName] = useState("");
@@ -259,6 +260,7 @@ export function OrganizationDetailPage({
     mutationOwner.current = null;
     setMutating(null);
     setMessage(null);
+    setRestoreError(null);
     setShowStatusConfirmation(false);
     setShowDeleteConfirmation(false);
     setDeleteConfirmationName("");
@@ -381,6 +383,7 @@ export function OrganizationDetailPage({
     const mutationToken = acquireMutation("RESTORE", requestedOrganizationId);
     if (!mutationToken) return;
     setMessage(null);
+    setRestoreError(null);
     try {
       const restored = await api.post<OrganizationDetail>(
         `/organizations/${encodeURIComponent(requestedOrganizationId)}/restore`,
@@ -392,7 +395,7 @@ export function OrganizationDetailPage({
       await loadInitialAudit();
     } catch {
       if (ownsMutation(mutationToken)) {
-        setMessage("조직을 복구하지 못했습니다.");
+        setRestoreError("조직을 복구하지 못했습니다.");
       }
     } finally {
       releaseMutation(mutationToken);
@@ -512,6 +515,9 @@ export function OrganizationDetailPage({
         >
           {message}
         </StatusMessage>
+      ) : null}
+      {restoreError ? (
+        <StatusMessage tone="error">{restoreError}</StatusMessage>
       ) : null}
       {!organization && detailLoading && !detailError ? (
         <OrganizationDetailSkeleton />
@@ -803,6 +809,7 @@ function formatKstDate(value: string) {
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
+    hourCycle: "h23",
   }).formatToParts(new Date(value));
   const get = (type: Intl.DateTimeFormatPartTypes) =>
     parts.find((part) => part.type === type)?.value ?? "";
