@@ -9,6 +9,7 @@ import { Card } from "../../components/ui/Card";
 import { Dialog } from "../../components/ui/Dialog";
 import { StatusMessage } from "../../components/ui/StatusMessage";
 import { ApiError } from "../../lib/api";
+import { getReservedOrganizationId } from "../../lib/organization-errors";
 import { getTotalOrganizationManagerCount } from "../../lib/organization-summary";
 import { useAuth } from "../auth/AuthProvider";
 import {
@@ -83,6 +84,9 @@ export function ProjectOrganizationsPanel({
   const [busy, setBusy] = useState(false);
   const [busyAction, setBusyAction] = useState<OrganizationAction>(null);
   const [message, setMessage] = useState<PanelMessage | null>(null);
+  const [reservedOrganizationId, setReservedOrganizationId] = useState<
+    string | null
+  >(null);
   const [observedProjectRevision, setObservedProjectRevision] =
     useState(projectRevision);
 
@@ -104,6 +108,7 @@ export function ProjectOrganizationsPanel({
     setMessage(null);
     if (selection.kind === "NEW") {
       setPendingSelection(null);
+      setReservedOrganizationId(null);
       setNewConfirmation(selection);
       return;
     }
@@ -124,6 +129,7 @@ export function ProjectOrganizationsPanel({
       setObservedProjectRevision(result.projectRevision);
       setPendingSelection(null);
       setNewConfirmation(null);
+      setReservedOrganizationId(null);
       try {
         await onChanged();
       } catch {
@@ -143,6 +149,15 @@ export function ProjectOrganizationsPanel({
           setMessage({
             tone: "info",
             text: "다른 변경이 먼저 반영되어 최신 프로젝트 정보를 불러왔습니다. 조직을 다시 선택해 주세요.",
+          });
+          return false;
+        }
+        const reservedId = getReservedOrganizationId(error);
+        if (reservedId) {
+          setReservedOrganizationId(reservedId);
+          setMessage({
+            tone: "error",
+            text: "같은 이름의 삭제된 조직이 있습니다.",
           });
           return false;
         }
@@ -288,12 +303,23 @@ export function ProjectOrganizationsPanel({
       {canMutateMemberships && newConfirmation ? (
         <Dialog
           title="새 조직 생성 후 추가"
-          onClose={() => setNewConfirmation(null)}
+          onClose={() => {
+            setNewConfirmation(null);
+            setReservedOrganizationId(null);
+          }}
         >
           <p>
             새 조직 이름: <strong>{newConfirmation.name}</strong>
           </p>
           <p>전역 조직으로 생성한 뒤 이 프로젝트에 추가합니다.</p>
+          {reservedOrganizationId ? (
+            <a
+              className="er-organization-recovery-link"
+              href={`/organizations/${encodeURIComponent(reservedOrganizationId)}`}
+            >
+              삭제된 조직 복구하기
+            </a>
+          ) : null}
           <Button
             type="button"
             variant="primary"

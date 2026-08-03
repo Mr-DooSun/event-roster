@@ -277,7 +277,7 @@ it("searches and filters organization summaries", async () => {
 
   await waitFor(() =>
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/v1/organizations?query=%EC%9A%B4%EC%98%81%20%ED%8C%80&status=INACTIVE&leaderStatus=UNASSIGNED",
+      "/api/v1/organizations?query=%EC%9A%B4%EC%98%81%20%ED%8C%80&status=INACTIVE&leaderStatus=UNASSIGNED&includeDeleted=false",
       expect.objectContaining({ method: "GET" }),
     ),
   );
@@ -287,6 +287,70 @@ it("searches and filters organization summaries", async () => {
   expect(
     screen.queryByText("조직 목록을 불러오지 못했습니다."),
   ).not.toBeInTheDocument();
+});
+
+it("shows deleted organizations only when requested and labels their deleted state", async () => {
+  let organizationReads = 0;
+  const fetchMock = vi.fn((input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.endsWith("/auth/login")) {
+      return Promise.resolve(Response.json(auth()));
+    }
+    if (url.includes("/organizations?")) {
+      organizationReads += 1;
+      return Promise.resolve(
+        Response.json(
+          organizationReads === 1
+            ? [
+                {
+                  id: "org-active",
+                  name: "사용 중 조직",
+                  isActive: true,
+                  isDeleted: false,
+                  deletedAt: null,
+                  primaryLeader: null,
+                  managerCount: 0,
+                  projectCount: 0,
+                },
+              ]
+            : [
+                {
+                  id: "org-deleted",
+                  name: "삭제된 조직",
+                  isActive: false,
+                  isDeleted: true,
+                  deletedAt: "2026-08-03T00:00:00.000Z",
+                  primaryLeader: null,
+                  managerCount: 0,
+                  projectCount: 1,
+                },
+              ],
+        ),
+      );
+    }
+    throw new Error(`unexpected request: ${url}`);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  renderOrganizationsPage();
+  await login();
+
+  await screen.findByText("사용 중 조직");
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/v1/organizations?query=&status=ALL&leaderStatus=ALL&includeDeleted=false",
+    expect.objectContaining({ method: "GET" }),
+  );
+
+  fireEvent.click(screen.getByRole("checkbox", { name: "삭제된 조직 보기" }));
+
+  const deletedCard = (await screen.findByText("삭제된 조직")).closest(
+    ".er-organization-summary-card",
+  );
+  expect(deletedCard).toHaveClass("er-organization-summary-card--deleted");
+  expect(within(deletedCard as HTMLElement).getByText("삭제됨")).toBeVisible();
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/v1/organizations?query=&status=ALL&leaderStatus=ALL&includeDeleted=true",
+    expect.objectContaining({ method: "GET" }),
+  );
 });
 
 it("distinguishes organization loading from an empty result", async () => {
@@ -472,6 +536,49 @@ it("keeps a duplicate organization name in its creation dialog", async () => {
     await within(dialog).findByText("같은 이름의 조직이 이미 있습니다."),
   ).toBeVisible();
   expect(within(dialog).getByLabelText("조직 이름")).toHaveValue("중복 조직");
+});
+
+it("guides an administrator to recover a deleted organization whose name is reserved", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/auth/login")) {
+        return Promise.resolve(Response.json(auth()));
+      }
+      if (url.includes("/organizations?")) {
+        return Promise.resolve(Response.json([]));
+      }
+      if (url.endsWith("/organizations") && init?.method === "POST") {
+        return Promise.resolve(
+          Response.json(
+            {
+              code: "ORGANIZATION_NAME_RESERVED",
+              message: "삭제된 동일 이름의 조직이 있습니다.",
+              requestId: "request-1",
+              details: { organizationId: "deleted org/1" },
+            },
+            { status: 409 },
+          ),
+        );
+      }
+      throw new Error(`unexpected request: ${url}`);
+    }),
+  );
+  renderOrganizationsPage();
+  await login();
+  fireEvent.click(await screen.findByRole("button", { name: "새 조직" }));
+  const dialog = screen.getByRole("dialog", { name: "새 조직" });
+  fireEvent.change(within(dialog).getByLabelText("조직 이름"), {
+    target: { value: "삭제된 조직" },
+  });
+  fireEvent.click(within(dialog).getByRole("button", { name: "조직 만들기" }));
+
+  const recovery = await within(dialog).findByRole("link", {
+    name: "삭제된 조직 복구하기",
+  });
+  expect(recovery).toHaveAttribute("href", "/organizations/deleted%20org%2F1");
+  expect(within(dialog).getByLabelText("조직 이름")).toHaveValue("삭제된 조직");
 });
 
 it("keeps the newest organization search when responses arrive out of order", async () => {

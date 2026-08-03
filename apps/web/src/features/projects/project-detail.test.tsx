@@ -865,6 +865,42 @@ it("reloads a recoverable name conflict without replaying or clearing the query"
   expect(mockApi.post).toHaveBeenCalledTimes(1);
 });
 
+it("guides an administrator to recover a deleted organization reserved during inline creation", async () => {
+  mockApi.post.mockRejectedValueOnce(
+    new ApiError(409, {
+      code: "ORGANIZATION_NAME_RESERVED",
+      message: "삭제된 동일 이름의 조직이 있습니다.",
+      requestId: "request-1",
+      details: { organizationId: "deleted org/1" },
+    }),
+  );
+  render(
+    <ProjectOrganizationsPanel
+      projectId="project-1"
+      projectRevision={7}
+      memberships={[]}
+      allOrganizations={[]}
+      canMutateMemberships
+      canManageOrganizations
+      onChanged={vi.fn().mockResolvedValue(undefined)}
+    />,
+  );
+
+  const input = screen.getByRole("combobox", {
+    name: "조직 이름 검색 또는 입력",
+  });
+  fireEvent.change(input, { target: { value: "삭제된 조직" } });
+  fireEvent.click(screen.getByRole("option", { name: /새 조직 생성 후 추가/ }));
+  fireEvent.click(screen.getByRole("button", { name: "생성 후 추가" }));
+
+  const recovery = await screen.findByRole("link", {
+    name: "삭제된 조직 복구하기",
+  });
+  expect(recovery).toHaveAttribute("href", "/organizations/deleted%20org%2F1");
+  expect(input).toHaveValue("삭제된 조직");
+  expect(mockApi.post).toHaveBeenCalledTimes(1);
+});
+
 it("reloads a stale project revision without replaying or clearing the query", async () => {
   const onChanged = vi.fn().mockResolvedValue(undefined);
   mockApi.post.mockRejectedValueOnce(

@@ -15,6 +15,7 @@ import { Skeleton } from "../../components/ui/Skeleton";
 import { StatusMessage } from "../../components/ui/StatusMessage";
 import { TextInput } from "../../components/ui/TextInput";
 import { ApiError } from "../../lib/api";
+import { getReservedOrganizationId } from "../../lib/organization-errors";
 import { getTotalOrganizationManagerCount } from "../../lib/organization-summary";
 import { useAuth } from "../auth/AuthProvider";
 
@@ -35,10 +36,14 @@ export function OrganizationsPage() {
   const [submittedQuery, setSubmittedQuery] = useState("");
   const [status, setStatus] = useState<OrganizationStatus>("ALL");
   const [leaderStatus, setLeaderStatus] = useState<LeaderStatus>("ALL");
+  const [includeDeleted, setIncludeDeleted] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [createError, setCreateError] = useState<string | null>(null);
+  const [reservedOrganizationId, setReservedOrganizationId] = useState<
+    string | null
+  >(null);
   const [loadState, setLoadState] = useState<ListLoadState>("INITIAL");
   const [creating, setCreating] = useState(false);
   const hasLoaded = useRef(false);
@@ -49,7 +54,7 @@ export function OrganizationsPage() {
     setLoadState(hasLoaded.current ? "REFRESHING" : "INITIAL");
     const search = `query=${encodeURIComponent(
       submittedQuery,
-    )}&status=${status}&leaderStatus=${leaderStatus}`;
+    )}&status=${status}&leaderStatus=${leaderStatus}&includeDeleted=${includeDeleted}`;
     try {
       const next = await api.get<OrganizationSummary[]>(
         `/organizations?${search}`,
@@ -64,7 +69,7 @@ export function OrganizationsPage() {
     } finally {
       if (generation === loadGeneration.current) setLoadState(null);
     }
-  }, [api, leaderStatus, status, submittedQuery]);
+  }, [api, includeDeleted, leaderStatus, status, submittedQuery]);
 
   useEffect(() => {
     void load();
@@ -86,15 +91,19 @@ export function OrganizationsPage() {
   async function create(event: FormEvent) {
     event.preventDefault();
     setCreateError(null);
+    setReservedOrganizationId(null);
     setCreating(true);
     try {
       await api.post("/organizations", { name: name.trim() });
       setName("");
       setShowCreate(false);
+      setReservedOrganizationId(null);
       await load();
     } catch (caught) {
+      const reservedId = getReservedOrganizationId(caught);
+      setReservedOrganizationId(reservedId);
       setCreateError(
-        caught instanceof ApiError && caught.status === 409
+        reservedId || (caught instanceof ApiError && caught.status === 409)
           ? "같은 이름의 조직이 이미 있습니다."
           : "조직을 만들지 못했습니다.",
       );
@@ -115,6 +124,7 @@ export function OrganizationsPage() {
           variant="primary"
           onClick={() => {
             setCreateError(null);
+            setReservedOrganizationId(null);
             setShowCreate(true);
           }}
         >
@@ -174,6 +184,18 @@ export function OrganizationsPage() {
           <Button type="submit" variant="primary">
             검색
           </Button>
+          <label className="er-checkbox">
+            <input
+              className="er-checkbox__input"
+              type="checkbox"
+              checked={includeDeleted}
+              onChange={(event) =>
+                setIncludeDeleted(event.currentTarget.checked)
+              }
+            />
+            <span className="er-checkbox__box" aria-hidden="true" />
+            <span>삭제된 조직 보기</span>
+          </label>
           {loadState === "REFRESHING" ? (
             <LoadingStatus>검색 중…</LoadingStatus>
           ) : null}
@@ -208,18 +230,30 @@ export function OrganizationsPage() {
           <ul className="er-organization-summary-grid">
             {organizations.map((organization) => (
               <li key={organization.id}>
-                <Card className="er-organization-summary-card">
+                <Card
+                  className={`er-organization-summary-card${
+                    organization.isDeleted
+                      ? " er-organization-summary-card--deleted"
+                      : ""
+                  }`}
+                >
                   <div className="er-organization-summary-heading">
                     <div>
                       <h3>{organization.name}</h3>
                       <span
                         className={`er-badge ${
-                          organization.isActive
-                            ? "er-badge--active"
-                            : "er-badge--inactive"
+                          organization.isDeleted
+                            ? "er-badge--deleted"
+                            : organization.isActive
+                              ? "er-badge--active"
+                              : "er-badge--inactive"
                         }`}
                       >
-                        {organization.isActive ? "사용 중" : "사용 중지"}
+                        {organization.isDeleted
+                          ? "삭제됨"
+                          : organization.isActive
+                            ? "사용 중"
+                            : "사용 중지"}
                       </span>
                     </div>
                     <a
@@ -258,12 +292,23 @@ export function OrganizationsPage() {
       {showCreate ? (
         <Dialog
           title="새 조직"
-          onClose={() => setShowCreate(false)}
+          onClose={() => {
+            setShowCreate(false);
+            setReservedOrganizationId(null);
+          }}
           hideDefaultCloseAction
         >
           <form className="er-dialog-form" onSubmit={create}>
             {createError ? (
               <StatusMessage tone="error">{createError}</StatusMessage>
+            ) : null}
+            {reservedOrganizationId ? (
+              <a
+                className="er-organization-recovery-link"
+                href={`/organizations/${encodeURIComponent(reservedOrganizationId)}`}
+              >
+                삭제된 조직 복구하기
+              </a>
             ) : null}
             <TextInput
               label="조직 이름"
