@@ -328,9 +328,28 @@ test("operator preserves organization history through deletion, restoration, and
     await deletionDialog
       .getByLabel("확인을 위해 조직 이름을 입력하세요.")
       .fill(organizationName);
+    const defaultListResponsePromise = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return (
+        response.request().method() === "GET" &&
+        url.pathname.endsWith("/api/v1/organizations") &&
+        url.searchParams.get("includeDeleted") === "false"
+      );
+    });
     await deletionDialog.getByRole("button", { name: "조직 삭제" }).click();
+    const defaultListResponse = await defaultListResponsePromise;
 
     await expect(page).toHaveURL(/\/organizations$/);
+    expect(defaultListResponse.ok()).toBe(true);
+    const defaultOrganizations = (await defaultListResponse.json()) as Array<{
+      id: string;
+    }>;
+    expect(
+      defaultOrganizations.some((item) => item.id === organization.id),
+    ).toBe(false);
+    await expect(
+      page.getByRole("link", { name: "E2E 1팀 상세 관리" }),
+    ).toBeVisible();
     await expect(page.getByText(organizationName, { exact: true })).toHaveCount(
       0,
     );
