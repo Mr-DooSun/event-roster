@@ -88,6 +88,22 @@ export function OrganizationsPage() {
     setSubmittedQuery(nextQuery);
   }
 
+  function resetCreateForm() {
+    setName("");
+    setCreateError(null);
+    setReservedOrganizationId(null);
+  }
+
+  function openCreateDialog() {
+    resetCreateForm();
+    setShowCreate(true);
+  }
+
+  function closeCreateDialog() {
+    setShowCreate(false);
+    resetCreateForm();
+  }
+
   async function create(event: FormEvent) {
     event.preventDefault();
     setCreateError(null);
@@ -95,9 +111,7 @@ export function OrganizationsPage() {
     setCreating(true);
     try {
       await api.post("/organizations", { name: name.trim() });
-      setName("");
-      setShowCreate(false);
-      setReservedOrganizationId(null);
+      closeCreateDialog();
       await load();
     } catch (caught) {
       const reservedId = getReservedOrganizationId(caught);
@@ -119,15 +133,7 @@ export function OrganizationsPage() {
           <p className="er-eyebrow">ADMIN</p>
           <h1>조직 관리</h1>
         </div>
-        <Button
-          type="button"
-          variant="primary"
-          onClick={() => {
-            setCreateError(null);
-            setReservedOrganizationId(null);
-            setShowCreate(true);
-          }}
-        >
+        <Button type="button" variant="primary" onClick={openCreateDialog}>
           새 조직
         </Button>
       </header>
@@ -292,10 +298,7 @@ export function OrganizationsPage() {
       {showCreate ? (
         <Dialog
           title="새 조직"
-          onClose={() => {
-            setShowCreate(false);
-            setReservedOrganizationId(null);
-          }}
+          onClose={closeCreateDialog}
           hideDefaultCloseAction
         >
           <form className="er-dialog-form" onSubmit={create}>
@@ -318,7 +321,7 @@ export function OrganizationsPage() {
               onChange={(event) => setName(event.currentTarget.value)}
             />
             <div className="er-dialog-actions">
-              <Button type="button" onClick={() => setShowCreate(false)}>
+              <Button type="button" onClick={closeCreateDialog}>
                 닫기
               </Button>
               <Button

@@ -581,6 +581,56 @@ it("guides an administrator to recover a deleted organization whose name is rese
   expect(within(dialog).getByLabelText("조직 이름")).toHaveValue("삭제된 조직");
 });
 
+it("resets reserved organization creation state when its dialog is closed and reopened", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/auth/login")) {
+        return Promise.resolve(Response.json(auth()));
+      }
+      if (url.includes("/organizations?")) {
+        return Promise.resolve(Response.json([]));
+      }
+      if (url.endsWith("/organizations") && init?.method === "POST") {
+        return Promise.resolve(
+          Response.json(
+            {
+              code: "ORGANIZATION_NAME_RESERVED",
+              message: "삭제된 동일 이름의 조직이 있습니다.",
+              requestId: "request-1",
+              details: { organizationId: "deleted-org" },
+            },
+            { status: 409 },
+          ),
+        );
+      }
+      throw new Error(`unexpected request: ${url}`);
+    }),
+  );
+  renderOrganizationsPage();
+  await login();
+  fireEvent.click(await screen.findByRole("button", { name: "새 조직" }));
+  const dialog = screen.getByRole("dialog", { name: "새 조직" });
+  fireEvent.change(within(dialog).getByLabelText("조직 이름"), {
+    target: { value: "삭제된 조직" },
+  });
+  fireEvent.click(within(dialog).getByRole("button", { name: "조직 만들기" }));
+  await within(dialog).findByRole("link", { name: "삭제된 조직 복구하기" });
+
+  fireEvent.click(within(dialog).getByRole("button", { name: "닫기" }));
+  fireEvent.click(screen.getByRole("button", { name: "새 조직" }));
+
+  const reopened = screen.getByRole("dialog", { name: "새 조직" });
+  expect(
+    within(reopened).queryByRole("link", { name: "삭제된 조직 복구하기" }),
+  ).not.toBeInTheDocument();
+  expect(
+    within(reopened).queryByText("같은 이름의 조직이 이미 있습니다."),
+  ).not.toBeInTheDocument();
+  expect(within(reopened).getByLabelText("조직 이름")).toHaveValue("");
+});
+
 it("keeps the newest organization search when responses arrive out of order", async () => {
   const first = deferred<Response>();
   const second = deferred<Response>();

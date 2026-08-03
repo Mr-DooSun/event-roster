@@ -901,6 +901,50 @@ it("guides an administrator to recover a deleted organization reserved during in
   expect(mockApi.post).toHaveBeenCalledTimes(1);
 });
 
+it("clears a reserved recovery link when an inline creation retry has a generic error", async () => {
+  mockApi.post
+    .mockRejectedValueOnce(
+      new ApiError(409, {
+        code: "ORGANIZATION_NAME_RESERVED",
+        message: "삭제된 동일 이름의 조직이 있습니다.",
+        requestId: "request-reserved",
+        details: { organizationId: "deleted-org" },
+      }),
+    )
+    .mockRejectedValueOnce(new Error("network failure"));
+  render(
+    <ProjectOrganizationsPanel
+      projectId="project-1"
+      projectRevision={7}
+      memberships={[]}
+      allOrganizations={[]}
+      canMutateMemberships
+      canManageOrganizations
+      onChanged={vi.fn().mockResolvedValue(undefined)}
+    />,
+  );
+
+  fireEvent.change(
+    screen.getByRole("combobox", { name: "조직 이름 검색 또는 입력" }),
+    { target: { value: "삭제된 조직" } },
+  );
+  fireEvent.click(screen.getByRole("option", { name: /새 조직 생성 후 추가/ }));
+  fireEvent.click(screen.getByRole("button", { name: "생성 후 추가" }));
+  expect(
+    await screen.findByRole("link", { name: "삭제된 조직 복구하기" }),
+  ).toBeVisible();
+
+  fireEvent.click(screen.getByRole("button", { name: "생성 후 추가" }));
+
+  expect(
+    await screen.findByText("조직 변경을 반영하지 못했습니다."),
+  ).toBeVisible();
+  expect(
+    screen.queryByRole("link", { name: "삭제된 조직 복구하기" }),
+  ).not.toBeInTheDocument();
+  expect(mockApi.post).toHaveBeenCalledTimes(2);
+});
+
 it("reloads a stale project revision without replaying or clearing the query", async () => {
   const onChanged = vi.fn().mockResolvedValue(undefined);
   mockApi.post.mockRejectedValueOnce(

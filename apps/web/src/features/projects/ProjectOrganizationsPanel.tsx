@@ -124,6 +124,7 @@ export function ProjectOrganizationsPanel({
     setBusy(true);
     setBusyAction(action);
     setMessage(null);
+    setReservedOrganizationId(null);
     try {
       const result = await operation();
       setObservedProjectRevision(result.projectRevision);
