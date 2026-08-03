@@ -22,6 +22,7 @@ import {
   getOrganizationSummaries,
   removeOrganizationManager,
   replaceOrganizationPrimary,
+  restoreOrganization,
   updateOrganization,
 } from "../services/organizations";
 
@@ -152,6 +153,15 @@ organizationRoutes.delete("/organizations/:id", async (c) => {
   const input = OrganizationDeleteRequestSchema.parse(await c.req.json());
   await deleteOrganization(c.env, actor, c.req.param("id"), input);
   return c.body(null, 204);
+});
+
+organizationRoutes.post("/organizations/:id/restore", async (c) => {
+  assertExactOrigin(c.req.raw, c.env.APP_ORIGIN);
+  const actor = await requireActor(c.req.raw, c.env);
+  requireFullSession(actor);
+  await requireCsrf(c.req.raw, actor);
+  requireAdministrativeOperator(actor);
+  return c.json(await restoreOrganization(c.env, actor, c.req.param("id")));
 });
 
 organizationRoutes.post("/organizations", async (c) => {

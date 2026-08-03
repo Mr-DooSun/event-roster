@@ -10,14 +10,13 @@ import { DomainError } from "@event-roster/domain";
 import { BcryptPasswordHasher } from "../auth/password";
 import { runGuardedAtomic } from "../db/atomic";
 import {
-  findOrganizationDeletionBlockers,
+  findOrganizationByCanonicalName,
   findOrganizationDetail,
   findOrganizationState,
   listAssignableManagerAccounts,
   listOrganizationAuditRows,
   listOrganizationSummaries,
   type OrganizationListFilters,
-  toOrganizationDeletionEligibility,
 } from "../db/organizations";
 import type { Env } from "../env";
 import type { Actor } from "../middleware/authentication";
@@ -125,6 +124,8 @@ export async function createOrganization(env: Env, actor: Actor, name: string) {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
   const canonicalName = canonicalizeOrganizationName(name);
+  const existing = await findOrganizationByCanonicalName(env.DB, canonicalName);
+  if (existing?.isDeleted) throwOrganizationNameReserved(existing.id);
   const guardId = crypto.randomUUID();
   try {
     await runGuardedAtomic(env.DB, {
@@ -157,6 +158,8 @@ export async function createOrganization(env: Env, actor: Actor, name: string) {
       failureCode: "CONFLICT",
     });
   } catch (error) {
+    const raced = await findOrganizationByCanonicalName(env.DB, canonicalName);
+    if (raced?.isDeleted) throwOrganizationNameReserved(raced.id);
     throwConstraintConflict(error);
   }
   return { id, name, isActive: true };
@@ -281,93 +284,112 @@ export async function deleteOrganization(
 ): Promise<void> {
   const current = await findOrganizationState(env.DB, id);
   if (!current) throw new DomainError("NOT_FOUND");
+  if (current.isDeleted) throw new DomainError("CONFLICT");
   if (current.name !== input.confirmationName) {
     throw new DomainError("CONFLICT");
   }
-  const blockers = await findOrganizationDeletionBlockers(env.DB, id);
-  if (
-    !toOrganizationDeletionEligibility(current.isActive, blockers).canDelete
-  ) {
-    throw new DomainError("CONFLICT");
-  }
-
-  const noDeletionReferences = `NOT EXISTS (
-      SELECT 1 FROM user_organizations WHERE organization_id = ?
-    )
-    AND NOT EXISTS (
-      SELECT 1 FROM participants WHERE organization_id = ?
-    )
-    AND NOT EXISTS (
-      SELECT 1 FROM project_organizations WHERE organization_id = ?
-    )
-    AND NOT EXISTS (
-      SELECT 1 FROM project_roster_entries WHERE organization_id = ?
-    )
-    AND NOT EXISTS (
-      SELECT 1 FROM project_expected_snapshots WHERE organization_id = ?
-    )`;
   const deleteGuard = `EXISTS (
       SELECT 1 FROM organizations
-      WHERE id = ? AND name = ? AND is_active = 0
-    )
-    AND ${noDeletionReferences}`;
+      WHERE id = ? AND name = ? AND canonical_name = ?
+        AND is_active = ? AND deleted_at IS NULL AND deleted_by IS NULL
+    )`;
   const now = new Date().toISOString();
   const guardId = crypto.randomUUID();
-  const postDeleteGuardId = crypto.randomUUID();
   const auditDetails = {
-    before: { name: current.name, isActive: false },
-    after: { name: null, isActive: null },
-    deletionEligibility: blockers,
+    before: {
+      name: current.name,
+      isActive: current.isActive,
+      isDeleted: false,
+    },
+    after: {
+      name: current.name,
+      isActive: false,
+      isDeleted: true,
+      deletedAt: now,
+    },
   };
 
-  try {
-    await runGuardedAtomic(env.DB, {
+  await runGuardedAtomic(env.DB, {
+    guardId,
+    guardStatement: createOperatorGuard(env.DB, guardId, actor, deleteGuard, [
+      id,
+      current.name,
+      current.canonicalName,
+      current.isActive ? 1 : 0,
+    ]),
+    statements: [
+      env.DB.prepare(
+        `UPDATE organizations
+         SET is_active = 0, deleted_at = ?, deleted_by = ?, updated_at = ?
+         WHERE id = ? AND deleted_at IS NULL`,
+      ).bind(now, actor.session.user.id, now, id),
+      organizationAuditStatement(
+        env.DB,
+        actor.session.user.id,
+        "ORGANIZATION_DELETED",
+        id,
+        now,
+        auditDetails,
+      ),
+    ],
+    failureCode: "CONFLICT",
+  });
+}
+
+export async function restoreOrganization(
+  env: Env,
+  actor: Actor,
+  id: string,
+): Promise<OrganizationDetail> {
+  const current = await findOrganizationState(env.DB, id);
+  if (!current) throw new DomainError("NOT_FOUND");
+  if (!current.isDeleted || !current.deletedAt || !current.deletedBy) {
+    throw new DomainError("CONFLICT");
+  }
+  const now = new Date().toISOString();
+  const guardId = crypto.randomUUID();
+  await runGuardedAtomic(env.DB, {
+    guardId,
+    guardStatement: createOperatorGuard(
+      env.DB,
       guardId,
-      guardStatement: createOperatorGuard(env.DB, guardId, actor, deleteGuard, [
+      actor,
+      `EXISTS (
+        SELECT 1 FROM organizations
+        WHERE id = ? AND name = ? AND canonical_name = ? AND is_active = 0
+          AND deleted_at = ? AND deleted_by = ?
+      )`,
+      [
         id,
         current.name,
-        id,
-        id,
-        id,
-        id,
-        id,
-      ]),
-      statements: [
-        organizationAuditStatement(
-          env.DB,
-          actor.session.user.id,
-          "ORGANIZATION_DELETED",
-          id,
-          now,
-          auditDetails,
-        ),
-        env.DB.prepare(
-          `DELETE FROM organizations
-             WHERE id = ? AND name = ? AND is_active = 0
-               AND ${noDeletionReferences}`,
-        ).bind(id, current.name, id, id, id, id, id),
-        createOperatorGuard(
-          env.DB,
-          postDeleteGuardId,
-          actor,
-          "NOT EXISTS (SELECT 1 FROM organizations WHERE id = ?)",
-          [id],
-        ),
-        env.DB.prepare("DELETE FROM operation_guards WHERE id = ?").bind(
-          postDeleteGuardId,
-        ),
+        current.canonicalName,
+        current.deletedAt,
+        current.deletedBy,
       ],
-      failureCode: "CONFLICT",
-    });
-  } catch (error) {
-    if (!(error instanceof DomainError && error.code === "CONFLICT")) {
-      throw error;
-    }
-    if (!(await findOrganizationState(env.DB, id))) {
-      throw new DomainError("NOT_FOUND");
-    }
-    throw error;
-  }
+    ),
+    statements: [
+      env.DB.prepare(
+        `UPDATE organizations
+         SET deleted_at = NULL, deleted_by = NULL, is_active = 0, updated_at = ?
+         WHERE id = ? AND is_active = 0 AND deleted_at = ? AND deleted_by = ?`,
+      ).bind(now, id, current.deletedAt, current.deletedBy),
+      organizationAuditStatement(
+        env.DB,
+        actor.session.user.id,
+        "ORGANIZATION_RESTORED",
+        id,
+        now,
+        {
+          before: { name: current.name, isActive: false, isDeleted: true },
+          after: { name: current.name, isActive: false, isDeleted: false },
+        },
+      ),
+    ],
+    failureCode: "CONFLICT",
+  });
+  const restored = await findOrganizationDetail(env.DB, id);
+  if (!restored) throw new DomainError("INTERNAL_ERROR");
+  return restored;
 }
 
 export async function assignOrganizationManager(
@@ -940,4 +962,8 @@ function throwConstraintConflict(error: unknown): never {
     throw new DomainError("CONFLICT");
   }
   throw error;
+}
+
+function throwOrganizationNameReserved(organizationId: string): never {
+  throw new DomainError("ORGANIZATION_NAME_RESERVED", { organizationId });
 }

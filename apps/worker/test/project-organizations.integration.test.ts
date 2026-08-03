@@ -14,7 +14,14 @@ import { resetAuthState } from "./support/auth";
 import { addRoster, setupPreRegistration } from "./support/roster";
 
 beforeEach(resetAuthState);
-afterEach(() => vi.useRealTimers());
+afterEach(async () => {
+  vi.useRealTimers();
+  await env.DB.prepare(
+    `UPDATE organizations
+     SET deleted_at = NULL, deleted_by = NULL
+     WHERE deleted_at IS NOT NULL`,
+  ).run();
+});
 
 async function markProjectDeleted(
   projectId: string,
@@ -357,6 +364,55 @@ it("returns the existing organization after a canonical-name create race", async
         .first<{ count: number }>()
     )?.count,
   ).toBe(1);
+});
+
+it("reserves a deleted canonical name during inline organization creation", async () => {
+  const operator = await seedOperator();
+  await seedOrganization("inline-reserved", "인라인 예약 조직", false);
+  await env.DB.prepare(
+    `UPDATE organizations
+     SET deleted_at = ?, deleted_by = ?, updated_at = ?
+     WHERE id = 'inline-reserved'`,
+  )
+    .bind(
+      "2026-08-03T00:00:00.000Z",
+      operator.userId,
+      "2026-08-03T00:00:00.000Z",
+    )
+    .run();
+  const project = await seedProject(operator);
+
+  const response = await authedRequest(
+    operator,
+    `/api/v1/projects/${project.id}/organizations`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        newOrganizationName: "  인라인 예약 조직  ",
+        expectedProjectRevision: project.revision,
+      }),
+    },
+  );
+
+  expect(response.status).toBe(409);
+  expect(await response.json()).toMatchObject({
+    code: "ORGANIZATION_NAME_RESERVED",
+    details: { organizationId: "inline-reserved" },
+  });
+  expect(
+    await env.DB.prepare("SELECT revision FROM projects WHERE id = ?")
+      .bind(project.id)
+      .first(),
+  ).toEqual({ revision: project.revision });
+  expect(
+    (
+      await env.DB.prepare(
+        "SELECT COUNT(*) AS count FROM project_organizations WHERE project_id = ?",
+      )
+        .bind(project.id)
+        .first<{ count: number }>()
+    )?.count,
+  ).toBe(0);
 });
 
 it("creates and links a new organization atomically, then deletes a no-history link", async () => {

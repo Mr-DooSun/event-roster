@@ -132,6 +132,37 @@ export async function findOrganizationState(
     : null;
 }
 
+export async function findOrganizationByCanonicalName(
+  db: D1Database,
+  canonicalName: string,
+): Promise<OrganizationState | null> {
+  const row = await db
+    .prepare(
+      `SELECT id, name, canonical_name, is_active, deleted_at, deleted_by
+       FROM organizations WHERE canonical_name = ?`,
+    )
+    .bind(canonicalName)
+    .first<{
+      id: string;
+      name: string;
+      canonical_name: string;
+      is_active: number;
+      deleted_at: string | null;
+      deleted_by: string | null;
+    }>();
+  return row
+    ? {
+        id: row.id,
+        name: row.name,
+        canonicalName: row.canonical_name,
+        isActive: row.is_active === 1,
+        isDeleted: row.deleted_at !== null,
+        deletedAt: row.deleted_at,
+        deletedBy: row.deleted_by,
+      }
+    : null;
+}
+
 export async function findOrganizationDeletionBlockers(
   db: D1Database,
   organizationId: string,

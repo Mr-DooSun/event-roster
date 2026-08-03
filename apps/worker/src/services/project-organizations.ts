@@ -6,6 +6,7 @@ import type {
 } from "@event-roster/contracts";
 import { DomainError, toKstDate } from "@event-roster/domain";
 import { runGuardedAtomic } from "../db/atomic";
+import { findOrganizationByCanonicalName } from "../db/organizations";
 import {
   countActiveProjectOrganizations,
   findProjectOrganization,
@@ -411,20 +412,16 @@ async function translateMutationFailure(
   throwConstraintConflict(error);
 }
 
-async function findOrganizationByCanonicalName(
-  db: D1Database,
-  canonicalName: string,
-): Promise<{ id: string; name: string } | null> {
-  return db
-    .prepare("SELECT id, name FROM organizations WHERE canonical_name = ?")
-    .bind(canonicalName)
-    .first<{ id: string; name: string }>();
-}
-
 function throwOrganizationNameConflict(organization: {
   id: string;
   name: string;
+  isDeleted: boolean;
 }): never {
+  if (organization.isDeleted) {
+    throw new DomainError("ORGANIZATION_NAME_RESERVED", {
+      organizationId: organization.id,
+    });
+  }
   throw new DomainError("CONFLICT", {
     organizationId: organization.id,
     organizationName: organization.name,
