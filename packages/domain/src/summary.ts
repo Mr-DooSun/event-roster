@@ -13,6 +13,7 @@ export interface ProjectSummaryInput {
     organizationName: string;
     isActive: boolean;
     masterIsActive: boolean;
+    masterIsDeleted: boolean;
   }>;
   expectedSnapshots: Array<{
     organizationId: string;
@@ -31,13 +32,19 @@ export function shouldIncludeProjectSummaryOrganization(
     ProjectSummaryOrganization,
     | "isActive"
     | "masterIsActive"
+    | "masterIsDeleted"
     | "expected"
     | "inProgressAdded"
     | "inProgressCancelled"
     | "final"
   >,
 ): boolean {
-  if (organization.isActive && organization.masterIsActive) return true;
+  if (
+    !organization.masterIsDeleted &&
+    organization.isActive &&
+    organization.masterIsActive
+  )
+    return true;
   return (
     organization.expected !== 0 ||
     organization.inProgressAdded !== 0 ||

@@ -50,7 +50,11 @@ export function SummaryCards({ summary }: { summary: ProjectSummary }) {
                   <td>
                     <span className="er-table-organization">
                       <span>{row.organizationName}</span>
-                      {!row.isActive || !row.masterIsActive ? (
+                      {row.masterIsDeleted ? (
+                        <span className="er-badge er-badge--deleted">
+                          삭제됨
+                        </span>
+                      ) : !row.isActive || !row.masterIsActive ? (
                         <span className="er-badge er-badge--inactive">
                           비활성
                         </span>

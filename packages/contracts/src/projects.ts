@@ -89,6 +89,7 @@ export interface ProjectSummaryOrganization {
   organizationName: string;
   isActive: boolean;
   masterIsActive: boolean;
+  masterIsDeleted: boolean;
   expected: number;
   inProgressAdded: number;
   inProgressCancelled: number;

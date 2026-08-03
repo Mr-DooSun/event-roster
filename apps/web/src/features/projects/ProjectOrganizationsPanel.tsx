@@ -54,7 +54,10 @@ export function ProjectOrganizationsPanel({
   const visibleMemberships = useMemo(
     () =>
       memberships.filter(
-        (membership) => membership.isActive && membership.masterIsActive,
+        (membership) =>
+          membership.isActive &&
+          membership.masterIsActive &&
+          !membership.masterIsDeleted,
       ),
     [memberships],
   );
@@ -62,7 +65,9 @@ export function ProjectOrganizationsPanel({
     () =>
       new Set(
         memberships
-          .filter((membership) => membership.isActive)
+          .filter(
+            (membership) => membership.isActive && !membership.masterIsDeleted,
+          )
           .map((membership) => membership.organizationId),
       ),
     [memberships],
@@ -90,7 +95,8 @@ export function ProjectOrganizationsPanel({
       ? memberships.find(
           (membership) =>
             membership.organizationId === pendingSelection.organizationId &&
-            !membership.isActive,
+            !membership.isActive &&
+            !membership.masterIsDeleted,
         )
       : undefined;
 

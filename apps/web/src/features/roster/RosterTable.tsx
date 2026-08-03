@@ -23,6 +23,7 @@ export interface RosterView {
 
 export function RosterTable({
   rows,
+  deletedOrganizationIds = new Set<string>(),
   canMutate,
   busyRowIds,
   canMutateRow = () => true,
@@ -31,6 +32,7 @@ export function RosterTable({
   onEdit,
 }: {
   rows: RosterView[];
+  deletedOrganizationIds?: ReadonlySet<string>;
   canMutate: boolean;
   busyRowIds?: ReadonlySet<string>;
   canMutateRow?: (row: RosterView) => boolean;
@@ -174,7 +176,14 @@ export function RosterTable({
               <tr key={row.id}>
                 <td>{row.participantNumber}</td>
                 <td>{row.participantName}</td>
-                <td>{row.organizationName}</td>
+                <td>
+                  <span className="er-table-organization">
+                    <span>{row.organizationName}</span>
+                    {deletedOrganizationIds.has(row.organizationId) ? (
+                      <span className="er-badge er-badge--deleted">삭제됨</span>
+                    ) : null}
+                  </span>
+                </td>
                 <td>{row.role ? ROLE_LABEL[row.role] : "미지정"}</td>
                 <td>
                   {row.role === "TEACHER"

@@ -4,6 +4,7 @@ import {
   type Organization,
   type ParticipantRole,
   type Project,
+  type ProjectOrganization,
   type StudentGrade,
 } from "@event-roster/contracts";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -34,6 +35,7 @@ export interface ProjectRosterPageProps {
   rows: RosterView[];
   participants: ParticipantView[];
   organizations: Organization[];
+  memberships?: ProjectOrganization[];
   canMutate: boolean;
   participantCandidatesAvailable?: boolean;
   onChanged(): Promise<void>;
@@ -71,6 +73,7 @@ export function ProjectRosterPage({
   rows,
   participants,
   organizations,
+  memberships = [],
   canMutate,
   participantCandidatesAvailable = true,
   onChanged,
@@ -97,6 +100,15 @@ export function ProjectRosterPage({
           .map((organization) => organization.id),
       ),
     [organizations],
+  );
+  const deletedOrganizationIds = useMemo(
+    () =>
+      new Set(
+        memberships
+          .filter((membership) => membership.masterIsDeleted)
+          .map((membership) => membership.organizationId),
+      ),
+    [memberships],
   );
   const recentOrganizationContextRef = useRef<RecentOrganizationContext>({
     generation: 0,
@@ -414,6 +426,7 @@ export function ProjectRosterPage({
         <h2>참가 명단</h2>
         <RosterTable
           rows={rows}
+          deletedOrganizationIds={deletedOrganizationIds}
           canMutate={canMutate}
           busyRowIds={busyRowIds}
           canMutateRow={(row) =>

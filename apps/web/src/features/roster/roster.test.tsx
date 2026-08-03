@@ -1306,6 +1306,44 @@ it("shows participant profiles and combines role and grade filters with existing
   expect(screen.queryByText("기존 참가자")).not.toBeInTheDocument();
 });
 
+it("keeps the roster snapshot name and labels rows from deleted organizations", () => {
+  render(
+    <AuthProvider restoreOnMount={false}>
+      <ProjectRosterPage
+        project={project()}
+        rows={[{ ...entry("ACTIVE"), organizationName: "등록 당시 조직명" }]}
+        participants={[]}
+        organizations={[]}
+        memberships={[
+          {
+            organizationId: "org-1",
+            name: "현재 조직명",
+            isActive: false,
+            masterIsActive: false,
+            masterIsDeleted: true,
+            activeProjectCount: 0,
+            hasBusinessHistory: true,
+            primaryLeader: null,
+            managerCount: 0,
+            rosterCount: 1,
+          },
+        ]}
+        canMutate={false}
+        onChanged={vi.fn().mockResolvedValue(undefined)}
+      />
+    </AuthProvider>,
+  );
+
+  const row = screen.getByText("박민수").closest("tr");
+  expect(row).not.toBeNull();
+  expect(
+    within(row as HTMLElement).getByText("등록 당시 조직명"),
+  ).toBeVisible();
+  expect(within(row as HTMLElement).getByText("삭제됨")).toHaveClass(
+    "er-badge--deleted",
+  );
+});
+
 it("excludes teachers with stale grades from exact grade filters", () => {
   render(
     <RosterTable
@@ -1686,6 +1724,7 @@ it("updates expected and actual totals after an in-progress cancellation", async
               name: "1팀",
               isActive: true,
               masterIsActive: true,
+              masterIsDeleted: false,
               activeProjectCount: 1,
               hasBusinessHistory: false,
             },
@@ -1756,6 +1795,7 @@ it("reloads a stale roster without replaying the mutation", async () => {
             name: "1팀",
             isActive: true,
             masterIsActive: true,
+            masterIsDeleted: false,
             activeProjectCount: 1,
             hasBusinessHistory: false,
           },
@@ -1864,6 +1904,7 @@ it("preserves an existing-participant draft after a stale add reload", async () 
             name: "1팀",
             isActive: true,
             masterIsActive: true,
+            masterIsDeleted: false,
             activeProjectCount: 1,
             hasBusinessHistory: false,
           },
@@ -1872,6 +1913,7 @@ it("preserves an existing-participant draft after a stale add reload", async () 
             name: "2팀",
             isActive: true,
             masterIsActive: true,
+            masterIsDeleted: false,
             activeProjectCount: 1,
             hasBusinessHistory: false,
           },
@@ -1944,6 +1986,7 @@ it("creates and adds a participant with one atomic roster request", async () => 
             name: "1팀",
             isActive: true,
             masterIsActive: true,
+            masterIsDeleted: false,
             activeProjectCount: 1,
             hasBusinessHistory: false,
           },
@@ -2047,6 +2090,7 @@ it("confirms reusable participant details in one existing-roster request", async
             name: "1팀",
             isActive: true,
             masterIsActive: true,
+            masterIsDeleted: false,
             activeProjectCount: 1,
             hasBusinessHistory: true,
           },
@@ -2055,6 +2099,7 @@ it("confirms reusable participant details in one existing-roster request", async
             name: "2팀",
             isActive: true,
             masterIsActive: true,
+            masterIsDeleted: false,
             activeProjectCount: 1,
             hasBusinessHistory: false,
           },
@@ -2169,6 +2214,7 @@ it("keeps a manager reuse confirmation in the participant master organization", 
             name: "1팀",
             isActive: true,
             masterIsActive: true,
+            masterIsDeleted: false,
             activeProjectCount: 1,
             hasBusinessHistory: false,
           },
@@ -2177,6 +2223,7 @@ it("keeps a manager reuse confirmation in the participant master organization", 
             name: "2팀",
             isActive: true,
             masterIsActive: true,
+            masterIsDeleted: false,
             activeProjectCount: 1,
             hasBusinessHistory: false,
           },
@@ -2308,6 +2355,7 @@ it("hides participants from an inactive project membership in a manager add dial
             name: "활성 연결",
             isActive: true,
             masterIsActive: true,
+            masterIsDeleted: false,
             activeProjectCount: 1,
             hasBusinessHistory: false,
             primaryLeader: null,
@@ -2319,6 +2367,7 @@ it("hides participants from an inactive project membership in a manager add dial
             name: "비활성 연결",
             isActive: false,
             masterIsActive: true,
+            masterIsDeleted: false,
             activeProjectCount: 0,
             hasBusinessHistory: true,
             primaryLeader: null,
@@ -2383,6 +2432,7 @@ it("keeps in-progress roster controls read-only for managers and available to op
               name: "1팀",
               isActive: true,
               masterIsActive: true,
+              masterIsDeleted: false,
               activeProjectCount: 1,
               hasBusinessHistory: true,
               primaryLeader: null,
@@ -2510,6 +2560,7 @@ it("keeps the participant profile draft after a stale revision reload", async ()
             name: "1팀",
             isActive: true,
             masterIsActive: true,
+            masterIsDeleted: false,
             activeProjectCount: 1,
             hasBusinessHistory: false,
           },
@@ -2518,6 +2569,7 @@ it("keeps the participant profile draft after a stale revision reload", async ()
             name: "2팀",
             isActive: true,
             masterIsActive: true,
+            masterIsDeleted: false,
             activeProjectCount: 1,
             hasBusinessHistory: false,
           },
@@ -2623,6 +2675,7 @@ it("shows a project-closed message and reloads after a rejected mutation", async
             name: "1팀",
             isActive: true,
             masterIsActive: true,
+            masterIsDeleted: false,
             activeProjectCount: 1,
             hasBusinessHistory: false,
           },
@@ -2762,6 +2815,7 @@ function summary(final: number) {
         organizationName: "1팀",
         isActive: true,
         masterIsActive: true,
+        masterIsDeleted: false,
         expected: 100,
         inProgressAdded: 0,
         inProgressCancelled: 100 - final,

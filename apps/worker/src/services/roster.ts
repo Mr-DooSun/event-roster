@@ -439,6 +439,7 @@ export async function getSummary(env: Env, actor: Actor, projectId: string) {
     await env.DB.prepare(
       `SELECT po.organization_id, o.name AS organization_name,
          po.is_active, o.is_active AS master_is_active,
+         o.deleted_at IS NOT NULL AS master_is_deleted,
          CASE WHEN p.status = 'PRE_REGISTRATION' THEN
            SUM(CASE WHEN r.source = 'PRE_REGISTRATION' AND r.status = 'ACTIVE'
                     THEN 1 ELSE 0 END)
@@ -465,6 +466,7 @@ export async function getSummary(env: Env, actor: Actor, projectId: string) {
          ON r.project_id = p.id AND r.organization_id = po.organization_id
        WHERE p.id = ? AND p.deleted_at IS NULL${scopeSql}
        GROUP BY po.organization_id, o.name, po.is_active, o.is_active,
+                o.deleted_at,
                 p.status, s.expected_count
        ORDER BY o.name, po.organization_id`,
     )
@@ -474,6 +476,7 @@ export async function getSummary(env: Env, actor: Actor, projectId: string) {
         organization_name: string;
         is_active: number;
         master_is_active: number;
+        master_is_deleted: number;
         expected: number;
         in_progress_added: number;
         in_progress_cancelled: number;
@@ -488,6 +491,7 @@ export async function getSummary(env: Env, actor: Actor, projectId: string) {
       organizationName: row.organization_name,
       isActive: row.is_active === 1,
       masterIsActive: row.master_is_active === 1,
+      masterIsDeleted: row.master_is_deleted === 1,
       expected: row.expected,
       inProgressAdded: row.in_progress_added,
       inProgressCancelled: row.in_progress_cancelled,

@@ -358,6 +358,7 @@ it("marks inactive historical organizations in the overview summary", async () =
             organizationName: "과거 조직",
             isActive: false,
             masterIsActive: true,
+            masterIsDeleted: false,
             expected: 2,
             inProgressAdded: 0,
             inProgressCancelled: 1,
@@ -383,6 +384,49 @@ it("marks inactive historical organizations in the overview summary", async () =
   expect(screen.getByText("담당교사 2명")).toBeVisible();
   expect(screen.getByRole("columnheader", { name: "학생" })).toBeVisible();
   expect(screen.getByRole("columnheader", { name: "담당교사" })).toBeVisible();
+});
+
+it("marks deleted historical organizations before inactive state", async () => {
+  mockApi.get.mockImplementation((path: string) => {
+    if (path === "/projects/project-1/summary") {
+      return {
+        projectId: "project-1",
+        expectedTotal: 2,
+        finalTotal: 1,
+        deltaTotal: -1,
+        studentTotal: 1,
+        teacherTotal: 0,
+        organizations: [
+          {
+            organizationId: "org-deleted-history",
+            organizationName: "삭제 이력 조직",
+            isActive: false,
+            masterIsActive: false,
+            masterIsDeleted: true,
+            expected: 2,
+            inProgressAdded: 0,
+            inProgressCancelled: 1,
+            final: 1,
+            delta: -1,
+            studentCount: 1,
+            teacherCount: 0,
+          },
+        ],
+      };
+    }
+    return defaultGet(path);
+  });
+
+  render(<ProjectDetailPage projectId="project-1" />);
+
+  const row = (await screen.findByText("삭제 이력 조직")).closest("tr");
+  expect(row).not.toBeNull();
+  expect(within(row as HTMLElement).getByText("삭제됨")).toHaveClass(
+    "er-badge--deleted",
+  );
+  expect(
+    within(row as HTMLElement).queryByText("비활성"),
+  ).not.toBeInTheDocument();
 });
 
 it("shows a project header skeleton while the project shell is loading", async () => {
@@ -908,6 +952,31 @@ it("renders leadership metadata and only operator management links", () => {
   ).not.toBeInTheDocument();
 });
 
+it("hides deleted memberships from project organization management", () => {
+  render(
+    <ProjectOrganizationsPanel
+      projectId="project-1"
+      projectRevision={7}
+      memberships={[
+        organizationMembership({
+          organizationId: "org-deleted",
+          name: "삭제된 연결",
+          isActive: true,
+          masterIsActive: true,
+          masterIsDeleted: true,
+        }),
+      ]}
+      allOrganizations={[]}
+      canMutateMemberships
+      canManageOrganizations
+      onChanged={vi.fn().mockResolvedValue(undefined)}
+    />,
+  );
+
+  expect(screen.queryByText("삭제된 연결")).not.toBeInTheDocument();
+  expect(screen.getByText("연결된 조직이 없습니다.")).toBeVisible();
+});
+
 it("separates disabled membership mutations from operator organization management", () => {
   render(
     <ProjectOrganizationsPanel
@@ -1204,6 +1273,7 @@ it("allows manager roster changes only for an active pre-registration membership
           name: "중지 조직",
           isActive: membershipActive,
           masterIsActive: true,
+          masterIsDeleted: false,
           activeProjectCount: 0,
           hasBusinessHistory: true,
           primaryLeader: null,
@@ -2463,6 +2533,7 @@ it("refreshes once and hides organization controls when the project closes", asy
           name: "1팀",
           isActive: true,
           masterIsActive: true,
+          masterIsDeleted: false,
           activeProjectCount: 1,
           hasBusinessHistory: true,
           primaryLeader: null,
@@ -2604,6 +2675,7 @@ function organizationMembership(
     name: "Ｅ２Ｅ 1팀",
     isActive: true,
     masterIsActive: true,
+    masterIsDeleted: false,
     activeProjectCount: 1,
     hasBusinessHistory: true,
     primaryLeader: null,

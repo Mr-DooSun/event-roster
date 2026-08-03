@@ -207,6 +207,85 @@ it("counts a pre-registration row reactivated after IN_PROGRESS as an in-progres
   });
 });
 
+it("hides empty deleted rows and preserves deleted rows with historical counts", async () => {
+  const fixture = await setupPreRegistration();
+  const now = "2026-07-21T00:00:00.000Z";
+  await seedOrganization("org-empty-inactive", "빈 비활성");
+  await seedOrganization("org-history-inactive", "이력 비활성");
+  await env.DB.batch([
+    env.DB.prepare(
+      `INSERT INTO project_organizations
+       (project_id, organization_id, is_active, added_at, added_by, updated_by)
+       VALUES (?, 'org-empty-inactive', 0, ?, ?, ?)`,
+    ).bind(
+      fixture.project.id,
+      now,
+      fixture.operator.userId,
+      fixture.operator.userId,
+    ),
+    env.DB.prepare(
+      `INSERT INTO project_organizations
+       (project_id, organization_id, is_active, added_at, added_by, updated_by)
+       VALUES (?, 'org-history-inactive', 0, ?, ?, ?)`,
+    ).bind(
+      fixture.project.id,
+      now,
+      fixture.operator.userId,
+      fixture.operator.userId,
+    ),
+    env.DB.prepare(
+      `INSERT INTO project_expected_snapshots
+       (project_id, organization_id, expected_count, captured_at)
+       VALUES (?, 'org-history-inactive', 3, ?)`,
+    ).bind(fixture.project.id, now),
+  ]);
+  await env.DB.prepare(
+    `UPDATE projects SET status = 'IN_PROGRESS' WHERE id = ?`,
+  )
+    .bind(fixture.project.id)
+    .run();
+  await env.DB.prepare(
+    `UPDATE organizations
+     SET is_active = 0, deleted_at = ?, deleted_by = ?
+     WHERE id IN ('org-empty-inactive', 'org-history-inactive')`,
+  )
+    .bind(now, fixture.operator.userId)
+    .run();
+
+  const response = await authedRequest(
+    fixture.operator,
+    `/api/v1/projects/${fixture.project.id}/summary`,
+  );
+  const body = await response.json<{
+    expectedTotal: number;
+    organizations: Array<{
+      organizationId: string;
+      isActive: boolean;
+      masterIsActive: boolean;
+      masterIsDeleted: boolean;
+      expected: number;
+    }>;
+  }>();
+  await env.DB.prepare(
+    `UPDATE organizations
+     SET deleted_at = NULL, deleted_by = NULL
+     WHERE id IN ('org-empty-inactive', 'org-history-inactive')`,
+  ).run();
+
+  expect(body.organizations.map((row) => row.organizationId)).toEqual([
+    "org-1",
+    "org-history-inactive",
+  ]);
+  expect(body.organizations[1]).toMatchObject({
+    organizationId: "org-history-inactive",
+    isActive: false,
+    masterIsActive: false,
+    masterIsDeleted: true,
+    expected: 3,
+  });
+  expect(body.expectedTotal).toBe(3);
+});
+
 it("hides inactive zero rows and preserves inactive rows with historical counts", async () => {
   const fixture = await setupPreRegistration();
   const now = "2026-07-21T00:00:00.000Z";
@@ -255,6 +334,7 @@ it("hides inactive zero rows and preserves inactive rows with historical counts"
       organizationId: string;
       isActive: boolean;
       masterIsActive: boolean;
+      masterIsDeleted: boolean;
       expected: number;
     }>;
   }>();
@@ -267,6 +347,7 @@ it("hides inactive zero rows and preserves inactive rows with historical counts"
     organizationId: "org-history-inactive",
     isActive: false,
     masterIsActive: true,
+    masterIsDeleted: false,
     expected: 3,
   });
   expect(body.expectedTotal).toBe(3);

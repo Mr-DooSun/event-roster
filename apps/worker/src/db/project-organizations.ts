@@ -5,6 +5,7 @@ interface ProjectOrganizationRow {
   name: string;
   is_active: number;
   master_is_active: number;
+  master_is_deleted: number;
   active_project_count: number;
   has_business_history: number;
   primary_user_id: string | null;
@@ -18,6 +19,7 @@ const SELECT_PROJECT_ORGANIZATION = `SELECT
   o.name,
   po.is_active,
   o.is_active AS master_is_active,
+  o.deleted_at IS NOT NULL AS master_is_deleted,
   (SELECT u.id FROM user_organizations uo
    JOIN users u ON u.id = uo.user_id
    WHERE uo.organization_id = po.organization_id
@@ -135,6 +137,7 @@ function mapProjectOrganization(
     name: row.name,
     isActive: row.is_active === 1,
     masterIsActive: row.master_is_active === 1,
+    masterIsDeleted: row.master_is_deleted === 1,
     activeProjectCount: row.active_project_count,
     hasBusinessHistory: row.has_business_history === 1,
     primaryLeader:

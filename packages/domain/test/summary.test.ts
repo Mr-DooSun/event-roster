@@ -1,5 +1,8 @@
 import { expect, it } from "vitest";
-import { calculateProjectSummary } from "../src";
+import {
+  calculateProjectSummary,
+  shouldIncludeProjectSummaryOrganization,
+} from "../src";
 
 function organization(
   organizationId: string,
@@ -7,6 +10,7 @@ function organization(
   overrides: Partial<{
     isActive: boolean;
     masterIsActive: boolean;
+    masterIsDeleted: boolean;
   }> = {},
 ) {
   return {
@@ -14,6 +18,7 @@ function organization(
     organizationName,
     isActive: true,
     masterIsActive: true,
+    masterIsDeleted: false,
     ...overrides,
   };
 }
@@ -76,6 +81,7 @@ it("computes project totals from pre-registration and in-progress entries", () =
         organizationName: "조직 A",
         isActive: true,
         masterIsActive: true,
+        masterIsDeleted: false,
         expected: 2,
         inProgressAdded: 1,
         inProgressCancelled: 1,
@@ -89,6 +95,7 @@ it("computes project totals from pre-registration and in-progress entries", () =
         organizationName: "조직 B",
         isActive: true,
         masterIsActive: true,
+        masterIsDeleted: false,
         expected: 1,
         inProgressAdded: 0,
         inProgressCancelled: 0,
@@ -155,6 +162,7 @@ it("keeps an active zero-count organization", () => {
       organizationId: "org-active",
       isActive: true,
       masterIsActive: true,
+      masterIsDeleted: false,
       expected: 0,
       final: 0,
     }),
@@ -168,6 +176,7 @@ it("hides inactive zero-count organizations but preserves inactive history", () 
       organization("org-empty", "빈 비활성", { isActive: false }),
       organization("org-history", "이력 비활성", {
         masterIsActive: false,
+        masterIsDeleted: false,
       }),
     ],
     expectedSnapshots: [{ organizationId: "org-history", expectedCount: 2 }],
@@ -190,4 +199,30 @@ it("hides inactive zero-count organizations but preserves inactive history", () 
       },
     ],
   });
+});
+
+it("preserves deleted organizations only when they have project history", () => {
+  expect(
+    shouldIncludeProjectSummaryOrganization({
+      isActive: true,
+      masterIsActive: false,
+      masterIsDeleted: true,
+      expected: 1,
+      inProgressAdded: 0,
+      inProgressCancelled: 0,
+      final: 1,
+    }),
+  ).toBe(true);
+
+  expect(
+    shouldIncludeProjectSummaryOrganization({
+      isActive: true,
+      masterIsActive: false,
+      masterIsDeleted: true,
+      expected: 0,
+      inProgressAdded: 0,
+      inProgressCancelled: 0,
+      final: 0,
+    }),
+  ).toBe(false);
 });

@@ -909,6 +909,7 @@ export function ProjectDetailPage({
                 rows={rows}
                 participants={participants}
                 organizations={rosterOrganizations}
+                memberships={memberships}
                 canMutate={canMutateRoster}
                 participantCandidatesAvailable={participantsLoaded}
                 onChanged={reloadAfterChildMutation}

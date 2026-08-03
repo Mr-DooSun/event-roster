@@ -151,6 +151,7 @@ it("links an existing organization, deactivates it, and reuses the row", async (
       name: organization.name,
       isActive: true,
       masterIsActive: true,
+      masterIsDeleted: false,
       activeProjectCount: 1,
       hasBusinessHistory: true,
       primaryLeader: null,
@@ -741,6 +742,7 @@ it("globally deactivates an organization with audit and blocks subsequent usage"
     id: "org-1",
     isActive: false,
     masterIsActive: false,
+    masterIsDeleted: false,
     activeProjectCount: 1,
   });
   expect(

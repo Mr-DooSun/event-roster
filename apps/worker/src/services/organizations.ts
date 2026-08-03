@@ -967,6 +967,7 @@ function organizationMutationResult(
     name,
     isActive,
     masterIsActive: isActive,
+    masterIsDeleted: false,
     activeProjectCount,
   };
 }

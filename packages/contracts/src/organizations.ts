@@ -151,6 +151,7 @@ export interface ProjectOrganization {
   name: string;
   isActive: boolean;
   masterIsActive: boolean;
+  masterIsDeleted: boolean;
   activeProjectCount: number;
   hasBusinessHistory: boolean;
   primaryLeader: Pick<OrganizationManager, "userId" | "displayName"> | null;
