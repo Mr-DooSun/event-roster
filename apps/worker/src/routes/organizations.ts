@@ -34,6 +34,10 @@ const OrganizationListQuerySchema = z
     query: z.string().trim().max(100).default(""),
     status: z.enum(["ALL", "ACTIVE", "INACTIVE"]).default("ALL"),
     leaderStatus: z.enum(["ALL", "ASSIGNED", "UNASSIGNED"]).default("ALL"),
+    includeDeleted: z
+      .enum(["true", "false"])
+      .default("false")
+      .transform((value) => value === "true"),
   })
   .strict();
 

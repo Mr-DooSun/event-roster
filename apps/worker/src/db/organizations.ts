@@ -10,6 +10,7 @@ export interface OrganizationListFilters {
   query: string;
   status: "ALL" | "ACTIVE" | "INACTIVE";
   leaderStatus: "ALL" | "ASSIGNED" | "UNASSIGNED";
+  includeDeleted: boolean;
   visibleOrganizationIds?: string[];
 }
 
@@ -18,19 +19,23 @@ export interface OrganizationState {
   name: string;
   canonicalName: string;
   isActive: boolean;
+  isDeleted: boolean;
+  deletedAt: string | null;
+  deletedBy: string | null;
 }
 
 interface OrganizationSummaryRow {
   id: string;
   name: string;
   is_active: number;
+  deleted_at: string | null;
   primary_user_id: string | null;
   primary_display_name: string | null;
   manager_count: number;
   project_count: number;
 }
 
-const ORGANIZATION_SUMMARY_SELECT = `SELECT o.id, o.name, o.is_active,
+const ORGANIZATION_SUMMARY_SELECT = `SELECT o.id, o.name, o.is_active, o.deleted_at,
   (SELECT u.id
    FROM user_organizations uo JOIN users u ON u.id = uo.user_id
    WHERE uo.organization_id = o.id
@@ -58,6 +63,9 @@ export async function listOrganizationSummaries(
 
   const predicates: string[] = [];
   const bindings: Array<string | number> = [];
+  if (!filters.includeDeleted) {
+    predicates.push("o.deleted_at IS NULL");
+  }
   if (filters.query) {
     predicates.push("o.name LIKE ? ESCAPE '\\'");
     bindings.push(`%${escapeLike(filters.query)}%`);
@@ -99,7 +107,7 @@ export async function findOrganizationState(
 ): Promise<OrganizationState | null> {
   const row = await db
     .prepare(
-      `SELECT id, name, canonical_name, is_active
+      `SELECT id, name, canonical_name, is_active, deleted_at, deleted_by
        FROM organizations WHERE id = ?`,
     )
     .bind(organizationId)
@@ -108,6 +116,8 @@ export async function findOrganizationState(
       name: string;
       canonical_name: string;
       is_active: number;
+      deleted_at: string | null;
+      deleted_by: string | null;
     }>();
   return row
     ? {
@@ -115,6 +125,9 @@ export async function findOrganizationState(
         name: row.name,
         canonicalName: row.canonical_name,
         isActive: row.is_active === 1,
+        isDeleted: row.deleted_at !== null,
+        deletedAt: row.deleted_at,
+        deletedBy: row.deleted_by,
       }
     : null;
 }
@@ -342,6 +355,8 @@ function mapSummary(row: OrganizationSummaryRow): OrganizationSummary {
     id: row.id,
     name: row.name,
     isActive: row.is_active === 1,
+    isDeleted: row.deleted_at !== null,
+    deletedAt: row.deleted_at,
     primaryLeader:
       row.primary_user_id && row.primary_display_name
         ? {

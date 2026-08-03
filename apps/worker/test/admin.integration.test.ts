@@ -78,6 +78,64 @@ it("allows only operators to manage organizations", async () => {
   expect(forbidden.status).toBe(403);
 });
 
+it("hides deleted organizations by default and exposes them only to operators", async () => {
+  try {
+    const operator = await seedOperator();
+    await seedOrganization();
+    const manager = await seedManager();
+    await seedOrganization("deleted-org", "삭제된 팀", false);
+    await env.DB.prepare(
+      `UPDATE organizations
+       SET deleted_at = ?, deleted_by = ?
+       WHERE id = 'deleted-org'`,
+    )
+      .bind("2026-08-03T00:00:00.000Z", operator.userId)
+      .run();
+
+    const ordinary = await authedRequest(operator, "/api/v1/organizations");
+    expect(await ordinary.json()).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: "deleted-org" })]),
+    );
+
+    const included = await authedRequest(
+      operator,
+      "/api/v1/organizations?includeDeleted=true",
+    );
+    expect(await included.json()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "deleted-org",
+          isActive: false,
+          isDeleted: true,
+          deletedAt: "2026-08-03T00:00:00.000Z",
+        }),
+      ]),
+    );
+
+    expect(
+      await authedRequest(
+        manager,
+        "/api/v1/organizations?includeDeleted=true",
+      ),
+    ).toHaveProperty("status", 403);
+
+    const detail = await authedRequest(
+      operator,
+      "/api/v1/organizations/deleted-org",
+    );
+    expect(await detail.json()).toEqual(
+      expect.objectContaining({
+        id: "deleted-org",
+        isDeleted: true,
+        deletedAt: "2026-08-03T00:00:00.000Z",
+        deletionEligibility: expect.any(Object),
+      }),
+    );
+  } finally {
+    await env.DB.prepare("DELETE FROM organizations WHERE id = 'deleted-org'").run();
+  }
+});
+
 it("revokes sessions when an account is deactivated", async () => {
   const operator = await seedOperator();
   await seedOrganization();

@@ -36,6 +36,7 @@ export async function getOrganizationSummaries(
   actor: Actor,
   filters: OrganizationListFilters,
 ): Promise<OrganizationSummary[]> {
+  if (filters.includeDeleted) requireAdministrativeOperator(actor);
   const scopedFilters: OrganizationListFilters = {
     ...filters,
     query: filters.query.trim(),
