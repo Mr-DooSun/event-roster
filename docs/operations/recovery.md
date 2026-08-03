@@ -182,18 +182,42 @@
     검증 결과와 사용자 승인을 확보하기 전에는 production binding을 변경하지
     않는다. 승인 뒤에도 binding의 database ID가 검증한 격리 D1과 정확히
     같은지 다시 대조한 후에만 전환한다.
-11. 운영 D1의 행을 수동으로 되돌리거나 역방향 migration으로 복구하지 않는다.
+11. **`0001`~`0006`이 적용되고 `0007` 적용 전인 export**는 새로 생성한
+    격리 D1에만 import한다. 운영 D1이나 운영 Worker binding을 import
+    대상으로 사용하지 않는다. mode 0600 격리 recovery config와 지속성 있는
+    외부 저장소의 mode 0600 export/checksum을 준비하고 체크섬을 먼저
+    검증한다. `/tmp`, `/private/tmp`, `${TMPDIR}`의 파일은 승인된 복구 원본으로
+    간주하지 않는다.
+
+    import 직후 migration ledger에 `0001`~`0006`이 정확히 적용되어 있고
+    pending 파일이 `0007_organization_soft_deletion.sql` 하나뿐인지 확인한다.
+    사전 `organization_count`를 기록한 다음 격리 config만 대상으로
+    [0007 전용 적용 게이트](deployment.md#organization-soft-deletion-0007-gate)의
+    pending 재검사와 migration apply를 수행한다. 모든 D1 명령 대상은
+    `event-roster --remote`가 아니라
+    `DB --remote --config "$EVENT_ROSTER_RECOVERY_CONFIG"`여야 한다.
+
+    적용 후 `organization_count`가 사전 값과 같고 `deleted_count`와
+    `invalid_deletion_state_count`가 모두 0이며 `PRAGMA foreign_key_check`가
+    0행인지 확인한다. 격리 D1에만 연결한 local 또는 preview Worker에서 조직
+    삭제, 기본 목록 숨김, include-deleted 조회, 보존된 담당자·프로젝트·명단
+    이력과 `삭제됨` 배지, 비활성 상태 복구, 별도 재활성화와 담당자 권한 복귀를
+    smoke test한다. 검증 결과와 사용자 승인을 확보하기 전에는 production
+    binding을 변경하거나 배포하지 않는다.
+12. 운영 D1의 행을 수동으로 되돌리거나 역방향 migration으로 복구하지 않는다.
    특히 production의 `participant_role_snapshot`,
-   `student_grade_snapshot` 열을 수동 삭제하지 않는다. pre-0005 export는
-   오직 격리 D1에 복원하고 검증하며, 실패한 운영 schema를 reverse migration
-   또는 `ALTER TABLE`로 되돌리지 않는다.
+   `student_grade_snapshot`, `organizations.deleted_at`,
+   `organizations.deleted_by` 열을 수동 삭제하지 않는다. pre-migration
+   export는 오직 격리 D1에 복원하고 검증하며, 실패한 운영 schema를 reverse
+   migration 또는 `ALTER TABLE`로 되돌리지 않는다. 운영 D1 위에 과거 export를
+   import해 덮어쓰지도 않는다.
    격리 D1에서 `PRAGMA foreign_key_check`가 0행인지 확인하고,
    `user_organizations.assignment_role`별 수량 합계가 복원 전 배정 수와
    같은지 확인한다. 조직별 `PRIMARY_LEADER`가 둘 이상인 조회도 0행이어야
    한다.
-12. 조직, 계정, 전역 역할, 조직별 역할, 프로젝트 revision/status, 프로젝트 조직, 참가자, 명단, snapshot, 감사, session 폐기 상태를 표본 검증한다.
-13. 운영자·대표 조직장·추가 관리자·미배정 조직 담당자 표본으로 [월간 점검](monthly-check.md)의 권한 matrix를 검증한다.
-14. 사용자 승인과 점검 결과를 확보한 뒤에만 Worker의 D1 binding을 검증 D1 또는 승인된 복원 D1으로 전환하고 배포한다.
+13. 조직, 계정, 전역 역할, 조직별 역할, 프로젝트 revision/status, 프로젝트 조직, 참가자, 명단, snapshot, 감사, session 폐기 상태를 표본 검증한다.
+14. 운영자·대표 조직장·추가 관리자·미배정 조직 담당자 표본으로 [월간 점검](monthly-check.md)의 권한 matrix를 검증한다.
+15. 사용자 승인과 점검 결과를 확보한 뒤에만 Worker의 D1 binding을 검증 D1 또는 승인된 복원 D1으로 전환하고 배포한다.
 
 `0003` 전 export 복원 후 사용하는 검증 조회:
 

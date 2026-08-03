@@ -41,6 +41,17 @@ PRE_REGISTRATION → IN_PROGRESS → CLOSED 상태와 revision을 가진다.
 - 계정(`users`)과 참가자(`participants`)는 별도다. 담당자 발급·배정은 참가자나 `project_roster_entries`를 만들지 않는다.
 - 명단 행은 당시 이름·조직 snapshot을 보존하고 현재 참가자 마스터 변경이 과거 프로젝트를 다시 쓰지 않게 한다.
 
+## 조직 삭제 overlay
+
+- 조직 삭제는 `is_active`와 별개인 복구 가능한 수명주기 overlay다.
+- 일반 조직 조회와 모든 신규 선택 경로는 `deleted_at IS NULL`을 요구한다.
+- 삭제는 담당자 배정, 참가자, 프로젝트 연결, 명단과 감사 이력을 보존하고
+  자동으로 비활성화한다. 복구도 비활성 상태로 돌아오며 다시 사용은 별도
+  작업이다.
+- 프로젝트 명단 snapshot과 유의미한 집계는 삭제 조직의 당시 이름을 유지하고
+  `삭제됨` 배지를 표시한다. 이력이 없는 삭제 조직 연결은 일반 화면에서
+  숨긴다.
+
 ## 원자성, 동시성, 감사
 
 Worker mutation은 `operation_guards`를 사용하는 guarded D1 batch로 현재 세션·역할·revision·관찰 상태를 다시 확인한다.

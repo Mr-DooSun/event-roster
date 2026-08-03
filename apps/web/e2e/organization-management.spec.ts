@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, request, test } from "@playwright/test";
 import { fixture, login } from "./support";
 
 test("existing manager assignment stays usable at 360px", async ({ page }) => {
@@ -201,88 +201,209 @@ test("operator delegates pre-registration roster entry to an organization leader
   );
 });
 
-test("operator safely deletes only an inactive empty organization", async ({
+test("operator preserves organization history through deletion, restoration, and reactivation", async ({
   page,
 }) => {
   const data = fixture();
-  await login(page, data.operator.loginId, data.operator.password);
-  await page.getByRole("link", { name: "조직 관리" }).click();
-
-  await page.getByRole("button", { name: "새 조직" }).click();
-  await page
-    .getByRole("dialog", { name: "새 조직" })
-    .getByLabel("조직 이름")
-    .fill("E2E 삭제 조직");
-  await page.getByRole("button", { name: "조직 만들기" }).click();
-  await page.getByRole("link", { name: "E2E 삭제 조직 상세 관리" }).click();
-  const deletedDetailUrl = page.url();
-
-  await page.getByRole("button", { name: "조직 사용 중지" }).click();
-  await page.getByRole("button", { name: "상태 변경 확인" }).click();
-  const dangerZone = page.getByRole("region", { name: "위험 구역" });
-  await expect(dangerZone).toBeVisible();
-  await dangerZone.getByRole("button", { name: "조직 영구 삭제" }).click();
-  const deletionDialog = page.getByRole("dialog", {
-    name: "조직 영구 삭제",
+  const organizationName = "E2E 삭제 이력 조직";
+  const managerLoginId = "e2e-lifecycle-manager";
+  const managerDisplayName = "E2E 삭제 이력 조직장";
+  const projectName = "E2E 조직 삭제 이력 프로젝트";
+  const participantName = "E2E 보존 참가자";
+  const api = await request.newContext({
+    baseURL: data.baseUrl,
+    ignoreHTTPSErrors: true,
+    extraHTTPHeaders: { Origin: data.baseUrl },
   });
-  const confirmationName = deletionDialog.getByLabel(
-    "확인을 위해 조직 이름을 입력하세요.",
-  );
-  await confirmationName.fill(" E2E 삭제 조직 ");
-  await expect(
-    deletionDialog.getByRole("button", { name: "조직 영구 삭제" }),
-  ).toBeDisabled();
-  await confirmationName.fill("E2E 삭제 조직");
-  await deletionDialog.getByRole("button", { name: "조직 영구 삭제" }).click();
 
-  await expect(
-    page.getByText("조직 “E2E 삭제 조직”을 영구 삭제했습니다."),
-  ).toBeVisible();
-  await expect(page).toHaveURL(/\/organizations$/);
+  try {
+    const operatorLogin = await api.post("/api/v1/auth/login", {
+      data: {
+        loginId: data.operator.loginId,
+        password: data.operator.password,
+      },
+    });
+    expect(operatorLogin.ok()).toBe(true);
+    const operatorAuth = (await operatorLogin.json()) as {
+      accessToken: string;
+      csrfToken: string;
+    };
+    const operatorHeaders = {
+      Authorization: `Bearer ${operatorAuth.accessToken}`,
+      "X-ER-CSRF": operatorAuth.csrfToken,
+    };
 
-  await page.goto(deletedDetailUrl);
-  await expect(page).toHaveURL(/\/organizations$/);
-  await expect(
-    page.getByText("요청한 조직은 이미 삭제됐거나 찾을 수 없습니다."),
-  ).toBeVisible();
+    const organizationResponse = await api.post("/api/v1/organizations", {
+      headers: operatorHeaders,
+      data: { name: organizationName },
+    });
+    expect(organizationResponse.ok()).toBe(true);
+    const organization = (await organizationResponse.json()) as {
+      id: string;
+    };
 
-  await page.getByRole("button", { name: "새 조직" }).click();
-  await page
-    .getByRole("dialog", { name: "새 조직" })
-    .getByLabel("조직 이름")
-    .fill("E2E 삭제 조직");
-  await page.getByRole("button", { name: "조직 만들기" }).click();
-  await page.getByRole("link", { name: "E2E 삭제 조직 상세 관리" }).click();
-  expect(page.url()).not.toBe(deletedDetailUrl);
+    const managerResponse = await api.post(
+      `/api/v1/organizations/${organization.id}/managers`,
+      {
+        headers: operatorHeaders,
+        data: {
+          kind: "NEW",
+          loginId: managerLoginId,
+          displayName: managerDisplayName,
+          assignmentRole: "PRIMARY_LEADER",
+        },
+      },
+    );
+    expect(managerResponse.ok()).toBe(true);
+    const manager = (await managerResponse.json()) as {
+      temporaryPassword: string;
+    };
+    const managerLogin = await api.post("/api/v1/auth/login", {
+      data: {
+        loginId: managerLoginId,
+        password: manager.temporaryPassword,
+      },
+    });
+    expect(managerLogin.ok()).toBe(true);
+    const managerAuth = (await managerLogin.json()) as {
+      accessToken: string;
+      csrfToken: string;
+    };
+    const passwordChange = await api.post("/api/v1/auth/change-password", {
+      headers: {
+        Authorization: `Bearer ${managerAuth.accessToken}`,
+        "X-ER-CSRF": managerAuth.csrfToken,
+      },
+      data: {
+        currentPassword: manager.temporaryPassword,
+        newPassword: data.organizationManager.password,
+      },
+    });
+    expect(passwordChange.ok()).toBe(true);
 
-  await page.getByRole("link", { name: "조직 관리" }).click();
-  await page.getByRole("button", { name: "새 조직" }).click();
-  await page
-    .getByRole("dialog", { name: "새 조직" })
-    .getByLabel("조직 이름")
-    .fill("E2E 삭제 차단 조직");
-  await page.getByRole("button", { name: "조직 만들기" }).click();
-  await page
-    .getByRole("link", { name: "E2E 삭제 차단 조직 상세 관리" })
-    .click();
-  const blockedDetailUrl = page.url();
+    const projectResponse = await api.post("/api/v1/projects", {
+      headers: operatorHeaders,
+      data: { name: projectName },
+    });
+    expect(projectResponse.ok()).toBe(true);
+    const project = (await projectResponse.json()) as {
+      id: string;
+      revision: number;
+    };
+    const linkResponse = await api.post(
+      `/api/v1/projects/${project.id}/organizations`,
+      {
+        headers: operatorHeaders,
+        data: {
+          organizationId: organization.id,
+          expectedProjectRevision: project.revision,
+        },
+      },
+    );
+    expect(linkResponse.ok()).toBe(true);
+    const link = (await linkResponse.json()) as { projectRevision: number };
+    const rosterResponse = await api.post(
+      `/api/v1/projects/${project.id}/roster/bulk`,
+      {
+        headers: operatorHeaders,
+        data: {
+          organizationId: organization.id,
+          participants: [
+            { name: participantName, role: "STUDENT", grade: "M1" },
+          ],
+          confirmDuplicateNames: false,
+          expectedRevision: link.projectRevision,
+        },
+      },
+    );
+    expect(rosterResponse.ok()).toBe(true);
 
-  await page.goto(`/projects/${data.projectId}`);
-  await page.getByRole("tab", { name: "조직" }).click();
-  await page
-    .getByRole("combobox", { name: "조직 이름 검색 또는 입력" })
-    .fill("E2E 삭제 차단 조직");
-  await page.getByRole("option", { name: /E2E 삭제 차단 조직/ }).click();
-  await page.getByRole("button", { name: "프로젝트에 추가" }).click();
+    await login(page, data.operator.loginId, data.operator.password);
+    await page.goto(`/organizations/${organization.id}`);
+    await expect(
+      page.getByRole("heading", { name: organizationName }),
+    ).toBeVisible();
+    await page.getByRole("button", { name: "조직 삭제" }).click();
+    const deletionDialog = page.getByRole("dialog", { name: "조직 삭제" });
+    await deletionDialog
+      .getByLabel("확인을 위해 조직 이름을 입력하세요.")
+      .fill(organizationName);
+    await deletionDialog.getByRole("button", { name: "조직 삭제" }).click();
 
-  await page.goto(blockedDetailUrl);
-  await page.getByRole("button", { name: "조직 사용 중지" }).click();
-  await page.getByRole("button", { name: "상태 변경 확인" }).click();
-  const blockedDangerZone = page.getByRole("region", { name: "위험 구역" });
-  await expect(
-    blockedDangerZone.getByText("프로젝트 연결 이력 1건"),
-  ).toBeVisible();
-  await expect(
-    blockedDangerZone.getByRole("button", { name: "조직 영구 삭제" }),
-  ).toBeDisabled();
+    await expect(page).toHaveURL(/\/organizations$/);
+    await expect(page.getByText(organizationName, { exact: true })).toHaveCount(
+      0,
+    );
+
+    await page.getByRole("checkbox", { name: "삭제된 조직 보기" }).check();
+    const deletedOrganizationLink = page.getByRole("link", {
+      name: `${organizationName} 상세 관리`,
+    });
+    await expect(deletedOrganizationLink).toBeVisible();
+    const deletedOrganizationCard = page
+      .locator(".er-organization-summary-card")
+      .filter({ has: deletedOrganizationLink });
+    await expect(
+      deletedOrganizationCard.getByText("삭제됨", { exact: true }),
+    ).toBeVisible();
+    await deletedOrganizationLink.click();
+
+    await expect(
+      page.locator(".er-project-meta").getByText("삭제됨", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByText(managerDisplayName, { exact: true }),
+    ).toBeVisible();
+    await expect(page.getByRole("link", { name: projectName })).toBeVisible();
+
+    await page.goto(`/projects/${project.id}`);
+    await expect(
+      page.getByRole("heading", { name: projectName }),
+    ).toBeVisible();
+    const summaryRow = page
+      .getByRole("row")
+      .filter({ hasText: organizationName });
+    await expect(summaryRow.getByText("삭제됨", { exact: true })).toBeVisible();
+    await expect(summaryRow.getByRole("cell").nth(3)).toHaveText("1");
+
+    await page.getByRole("tab", { name: "참가 명단" }).click();
+    const rosterRow = page
+      .getByRole("row")
+      .filter({ hasText: participantName });
+    await expect(rosterRow).toBeVisible();
+    await expect(
+      rosterRow.getByText(organizationName, { exact: true }),
+    ).toBeVisible();
+    await expect(rosterRow.getByText("삭제됨", { exact: true })).toBeVisible();
+
+    await page.goto(`/organizations/${organization.id}`);
+    await page.getByRole("button", { name: "조직 복구" }).click();
+    await expect(
+      page.getByText("조직을 사용 중지 상태로 복구했습니다."),
+    ).toBeVisible();
+    await expect(
+      page.locator(".er-project-meta").getByText("사용 중지", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByText(managerDisplayName, { exact: true }),
+    ).toBeVisible();
+    await expect(page.getByRole("link", { name: projectName })).toBeVisible();
+
+    await page.getByRole("button", { name: "조직 다시 사용" }).click();
+    await page.getByRole("button", { name: "상태 변경 확인" }).click();
+    await expect(
+      page.locator(".er-project-meta").getByText("사용 중", { exact: true }),
+    ).toBeVisible();
+
+    await page.getByRole("button", { name: "로그아웃" }).click();
+    await login(page, managerLoginId, data.organizationManager.password);
+    await expect(page.getByRole("link", { name: projectName })).toBeVisible();
+    await page.getByRole("link", { name: projectName }).click();
+    await page.getByRole("tab", { name: "참가 명단" }).click();
+    await expect(
+      page.getByText(participantName, { exact: true }),
+    ).toBeVisible();
+  } finally {
+    await api.dispose();
+  }
 });
