@@ -1,12 +1,15 @@
 import { env } from "cloudflare:workers";
 import { afterEach, beforeEach, expect, it } from "vitest";
+import type { Env } from "../src/env";
+import { requireActor } from "../src/middleware/authentication";
+import { updateProjectParticipant } from "../src/services/participants";
 import {
   authedRequest,
   seedManager,
   seedOrganization,
   seedProject,
 } from "./support/admin";
-import { resetAuthState } from "./support/auth";
+import { authenticatedHeaders, resetAuthState } from "./support/auth";
 import { addRoster, setupPreRegistration } from "./support/roster";
 
 beforeEach(resetAuthState);
@@ -91,6 +94,44 @@ it("keeps global participants read-only", async () => {
   expect(update.status).toBe(404);
 });
 
+it("hides inactive and deleted organization participants from the operator selection list", async () => {
+  const fixture = await setupPreRegistration();
+  await seedOrganization("org-inactive", "비활성 참가자 조직", false);
+  await seedOrganization("org-deleted", "삭제 참가자 조직");
+  const changedAt = "2026-08-03T00:00:00.000Z";
+  await env.DB.batch([
+    env.DB.prepare(
+      `INSERT INTO participants
+       (id, participant_id, name, organization_id, revision, created_at, updated_at)
+       VALUES ('inactive-participant', 'P-INACTIVE', '비활성 참가자',
+               'org-inactive', 0, ?, ?)`,
+    ).bind(changedAt, changedAt),
+    env.DB.prepare(
+      `INSERT INTO participants
+       (id, participant_id, name, organization_id, revision, created_at, updated_at)
+       VALUES ('deleted-participant', 'P-DELETED', '삭제 참가자',
+               'org-deleted', 0, ?, ?)`,
+    ).bind(changedAt, changedAt),
+    env.DB.prepare(
+      `UPDATE organizations
+       SET is_active = 0, deleted_at = ?, deleted_by = ?, updated_at = ?
+       WHERE id = 'org-deleted'`,
+    ).bind(changedAt, fixture.operator.userId, changedAt),
+  ]);
+
+  const response = await authedRequest(
+    fixture.operator,
+    "/api/v1/participants",
+  );
+
+  expect(response.status).toBe(200);
+  expect(
+    (await response.json<Array<{ participantId: string }>>())
+      .map(({ participantId }) => participantId)
+      .sort(),
+  ).toEqual(["P-FIRST", "P-SECOND"]);
+});
+
 it("rejects moving a participant into a deleted organization", async () => {
   const fixture = await setupPreRegistration();
   const roster = await addRoster(fixture, fixture.firstParticipant.id);
@@ -140,6 +181,152 @@ it("rejects moving a participant into a deleted organization", async () => {
       .bind(fixture.firstParticipant.id)
       .first(),
   ).toEqual({ organization_id: "org-1", revision: 0 });
+});
+
+it.each(["INACTIVE", "DELETED"] as const)(
+  "rejects editing a participant whose current organization is %s",
+  async (organizationState) => {
+    const fixture = await setupPreRegistration();
+    const added = await addRoster(fixture, fixture.firstParticipant.id);
+    const entry = await added.json<{ projectRevision: number }>();
+    const changedAt = "2026-08-03T00:00:00.000Z";
+    if (organizationState === "DELETED") {
+      await env.DB.prepare(
+        `UPDATE organizations
+         SET is_active = 0, deleted_at = ?, deleted_by = ?, updated_at = ?
+         WHERE id = 'org-1'`,
+      )
+        .bind(changedAt, fixture.operator.userId, changedAt)
+        .run();
+    } else {
+      await env.DB.prepare(
+        `UPDATE organizations SET is_active = 0, updated_at = ?
+         WHERE id = 'org-1'`,
+      )
+        .bind(changedAt)
+        .run();
+    }
+
+    const response = await authedRequest(
+      fixture.operator,
+      `/api/v1/projects/${fixture.project.id}/participants/${fixture.firstParticipant.id}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({
+          name: "차단되어야 할 수정",
+          expectedRevision: fixture.firstParticipant.revision,
+          expectedProjectRevision: entry.projectRevision,
+        }),
+      },
+    );
+
+    expect(response.status).toBe(422);
+    expect(
+      await env.DB.prepare(
+        `SELECT name, revision FROM participants WHERE id = ?`,
+      )
+        .bind(fixture.firstParticipant.id)
+        .first(),
+    ).toEqual({ name: "첫 참가자", revision: 0 });
+  },
+);
+
+it("rejects moving a participant from a deleted organization into an active organization", async () => {
+  const fixture = await setupPreRegistration();
+  const added = await addRoster(fixture, fixture.firstParticipant.id);
+  const entry = await added.json<{ projectRevision: number }>();
+  const target = await seedOrganization("org-2", "활성 이동 대상");
+  const linked = await authedRequest(
+    fixture.operator,
+    `/api/v1/projects/${fixture.project.id}/organizations`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        organizationId: target.id,
+        expectedProjectRevision: entry.projectRevision,
+      }),
+    },
+  );
+  const linkedBody = await linked.json<{ projectRevision: number }>();
+  const changedAt = "2026-08-03T00:00:00.000Z";
+  await env.DB.prepare(
+    `UPDATE organizations
+     SET is_active = 0, deleted_at = ?, deleted_by = ?, updated_at = ?
+     WHERE id = 'org-1'`,
+  )
+    .bind(changedAt, fixture.operator.userId, changedAt)
+    .run();
+
+  const response = await authedRequest(
+    fixture.operator,
+    `/api/v1/projects/${fixture.project.id}/participants/${fixture.firstParticipant.id}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        organizationId: target.id,
+        expectedRevision: fixture.firstParticipant.revision,
+        expectedProjectRevision: linkedBody.projectRevision,
+      }),
+    },
+  );
+
+  expect(response.status).toBe(422);
+  expect(
+    await env.DB.prepare(
+      `SELECT organization_id, revision FROM participants WHERE id = ?`,
+    )
+      .bind(fixture.firstParticipant.id)
+      .first(),
+  ).toEqual({ organization_id: "org-1", revision: 0 });
+});
+
+it("rechecks source organization deletion atomically before participant update", async () => {
+  const fixture = await setupPreRegistration();
+  const added = await addRoster(fixture, fixture.firstParticipant.id);
+  const entry = await added.json<{ projectRevision: number }>();
+  const actor = await requireActor(
+    new Request("https://event-roster.test", {
+      headers: authenticatedHeaders(fixture.operator),
+    }),
+    env as Env,
+  );
+  let pending = true;
+  const raceDb = {
+    prepare: (query: string) => env.DB.prepare(query),
+    batch: async (statements: D1PreparedStatement[]) => {
+      if (pending) {
+        pending = false;
+        const changedAt = "2026-08-03T00:00:00.000Z";
+        await env.DB.prepare(
+          `UPDATE organizations
+           SET is_active = 0, deleted_at = ?, deleted_by = ?, updated_at = ?
+           WHERE id = 'org-1'`,
+        )
+          .bind(changedAt, fixture.operator.userId, changedAt)
+          .run();
+      }
+      return env.DB.batch(statements);
+    },
+  } as D1Database;
+
+  await expect(
+    updateProjectParticipant(
+      { ...(env as Env), DB: raceDb },
+      actor,
+      fixture.project.id,
+      fixture.firstParticipant.id,
+      {
+        name: "경합 수정 차단",
+        expectedRevision: fixture.firstParticipant.revision,
+        expectedProjectRevision: entry.projectRevision,
+      },
+    ),
+  ).rejects.toMatchObject({ code: "STALE_REVISION" });
+  expect(
+    await env.DB.prepare(`SELECT name, revision FROM participants WHERE id = ?`)
+      .bind(fixture.firstParticipant.id)
+      .first(),
+  ).toEqual({ name: "첫 참가자", revision: 0 });
 });
 
 it("returns the newest roster profile as a suggestion without writing the master", async () => {

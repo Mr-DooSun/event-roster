@@ -8,6 +8,7 @@ import {
 } from "@event-roster/contracts";
 import { DomainError, toKstDate } from "@event-roster/domain";
 import { runGuardedAtomic } from "../db/atomic";
+import { findOrganizationState } from "../db/organizations";
 import { findProjectOrganization } from "../db/project-organizations";
 import { findProject } from "../db/projects";
 import { findRosterByParticipant, type RosterRecord } from "../db/roster";
@@ -55,7 +56,10 @@ export async function getParticipants(env: Env, actor: Actor) {
        ORDER BY p.name, p.participant_id`
     : `SELECT p.id, p.participant_id, p.name, p.organization_id, p.revision,
               ${suggestionColumns}
-       FROM participants p ORDER BY p.name, p.participant_id`;
+       FROM participants p
+       JOIN organizations o ON o.id = p.organization_id
+       WHERE o.is_active = 1 AND o.deleted_at IS NULL
+       ORDER BY p.name, p.participant_id`;
   const rows = (
     await env.DB.prepare(sql)
       .bind(
@@ -254,6 +258,13 @@ export async function updateProjectParticipant(
     findRosterByParticipant(env.DB, projectId, participantId),
   ]);
   if (!current || !entry) throw new DomainError("NOT_FOUND");
+  const sourceOrganization = await findOrganizationState(
+    env.DB,
+    current.organizationId,
+  );
+  if (!sourceOrganization?.isActive || sourceOrganization.isDeleted) {
+    throw new DomainError("VALIDATION_FAILED");
+  }
   assertActorScope(actor, entry.organizationId, project.status);
   await assertActiveManagerMembership(
     env,
@@ -320,6 +331,11 @@ export async function updateProjectParticipant(
            SELECT 1 FROM project_roster_entries
            WHERE project_id = ? AND participant_id = ?
          ) AND EXISTS (
+           SELECT 1 FROM organizations source_organization
+           WHERE source_organization.id = ?
+             AND source_organization.is_active = 1
+             AND source_organization.deleted_at IS NULL
+         ) AND EXISTS (
            SELECT 1 FROM users scoped_user
            WHERE scoped_user.id = ? AND (
              scoped_user.role = 'OPERATOR' OR (
@@ -361,6 +377,7 @@ export async function updateProjectParticipant(
           input.expectedRevision,
           projectId,
           participantId,
+          current.organizationId,
           actor.session.user.id,
           projectId,
           participantId,

@@ -15,6 +15,7 @@ import {
   toKstDate,
 } from "@event-roster/domain";
 import { runGuardedAtomic } from "../db/atomic";
+import { findOrganizationState } from "../db/organizations";
 import {
   findProjectOrganization,
   listActorProjectOrganizationIds,
@@ -325,6 +326,15 @@ export async function updateRosterEntry(
     projectId,
     entry.organizationId,
   );
+  if (input.status === "ACTIVE") {
+    const organization = await findOrganizationState(
+      env.DB,
+      entry.organizationId,
+    );
+    if (!organization?.isActive || organization.isDeleted) {
+      throw new DomainError("VALIDATION_FAILED");
+    }
+  }
   if (entry.status === input.status) throw new DomainError("CONFLICT");
   const timestamp = now.toISOString();
   const nextSource: RosterSource =
@@ -334,6 +344,17 @@ export async function updateRosterEntry(
       ? "IN_PROGRESS"
       : entry.source;
   const guardId = crypto.randomUUID();
+  const activationPredicate =
+    input.status === "ACTIVE"
+      ? ` AND EXISTS (
+           SELECT 1 FROM organizations activation_organization
+           WHERE activation_organization.id = ?
+             AND activation_organization.is_active = 1
+             AND activation_organization.deleted_at IS NULL
+         )`
+      : "";
+  const activationBindings =
+    input.status === "ACTIVE" ? [entry.organizationId] : [];
   try {
     await runGuardedAtomic(env.DB, {
       guardId,
@@ -350,8 +371,14 @@ export async function updateRosterEntry(
         `EXISTS (
            SELECT 1 FROM project_roster_entries
            WHERE id = ? AND project_id = ? AND revision = ? AND status = ?
-         )`,
-        [entryId, projectId, input.expectedEntryRevision, entry.status],
+         )${activationPredicate}`,
+        [
+          entryId,
+          projectId,
+          input.expectedEntryRevision,
+          entry.status,
+          ...activationBindings,
+        ],
       ),
       statements: [
         env.DB.prepare(

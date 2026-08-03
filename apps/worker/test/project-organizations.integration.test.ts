@@ -723,7 +723,7 @@ it("does not treat LIKE-wildcard lookalike audit actions as membership history",
   ).toBe(0);
 });
 
-it("globally deactivates an organization with audit and blocks only new usage", async () => {
+it("globally deactivates an organization with audit and blocks subsequent usage", async () => {
   const fixture = await setupPreRegistration();
   const added = await addRoster(fixture, fixture.firstParticipant.id);
   const active = await added.json<{
@@ -777,13 +777,13 @@ it("globally deactivates an organization with audit and blocks only new usage", 
       }),
     },
   );
-  expect(updated.status).toBe(200);
+  expect(updated.status).toBe(422);
   const blockedRoster = await addRoster(
     {
       ...fixture,
       project: {
         ...fixture.project,
-        revision: cancelledBody.projectRevision + 1,
+        revision: cancelledBody.projectRevision,
       },
     },
     fixture.secondParticipant.id,
@@ -841,7 +841,7 @@ it("globally deactivates an organization with audit and blocks only new usage", 
             grade: "M1",
           },
         ],
-        expectedProjectRevision: cancelledBody.projectRevision + 1,
+        expectedProjectRevision: cancelledBody.projectRevision,
       }),
     },
   );
