@@ -39,7 +39,7 @@ interface AuditPaginationRequest {
   generation: number;
 }
 
-type OrganizationMutationKind = "RENAME" | "STATUS" | "DELETE";
+type OrganizationMutationKind = "RENAME" | "STATUS" | "DELETE" | "RESTORE";
 
 interface OrganizationMutationToken {
   kind: OrganizationMutationKind;
@@ -348,7 +348,7 @@ export function OrganizationDetailPage({
         { confirmationName: deleteConfirmationName },
       );
       if (!ownsMutation(mutationToken)) return;
-      navigateToOrganizationList(`조직 “${deletedName}”을 영구 삭제했습니다.`);
+      navigateToOrganizationList(`조직 “${deletedName}”을 삭제했습니다.`);
     } catch (error) {
       if (!ownsMutation(mutationToken)) return;
       if (error instanceof ApiError && error.status === 409) {
@@ -357,20 +357,44 @@ export function OrganizationDetailPage({
         setDeleteConfirmationName("");
         setDeleteError(
           reloaded
-            ? "다른 관리 변경이 반영되어 최신 삭제 가능 상태를 불러왔습니다."
-            : "삭제 조건이 변경됐지만 최신 조직 정보를 불러오지 못했습니다.",
+            ? "다른 관리 변경이 반영되어 최신 조직 정보를 불러왔습니다."
+            : "삭제 상태가 변경됐지만 최신 조직 정보를 불러오지 못했습니다.",
         );
       } else if (error instanceof ApiError && error.status === 404) {
         navigateToOrganizationList(
           "요청한 조직은 이미 삭제됐거나 찾을 수 없습니다.",
         );
       } else {
-        setDeleteError("조직을 영구 삭제하지 못했습니다.");
+        setDeleteError("조직을 삭제하지 못했습니다.");
       }
     } finally {
       if (ownsMutation(mutationToken)) {
         deleteRequestInFlight.current = false;
       }
+      releaseMutation(mutationToken);
+    }
+  }
+
+  async function restoreOrganization() {
+    if (!organization) return;
+    const requestedOrganizationId = organizationId;
+    const mutationToken = acquireMutation("RESTORE", requestedOrganizationId);
+    if (!mutationToken) return;
+    setMessage(null);
+    try {
+      const restored = await api.post<OrganizationDetail>(
+        `/organizations/${encodeURIComponent(requestedOrganizationId)}/restore`,
+      );
+      if (!ownsMutation(mutationToken)) return;
+      setOrganization(restored);
+      setName(restored.name);
+      setMessage("조직을 사용 중지 상태로 복구했습니다.");
+      await loadInitialAudit();
+    } catch {
+      if (ownsMutation(mutationToken)) {
+        setMessage("조직을 복구하지 못했습니다.");
+      }
+    } finally {
       releaseMutation(mutationToken);
     }
   }
@@ -504,13 +528,22 @@ export function OrganizationDetailPage({
               <div className="er-project-meta">
                 <span
                   className={`er-badge ${
-                    organization.isActive
-                      ? "er-badge--active"
-                      : "er-badge--inactive"
+                    organization.isDeleted
+                      ? "er-badge--deleted"
+                      : organization.isActive
+                        ? "er-badge--active"
+                        : "er-badge--inactive"
                   }`}
                 >
-                  {organization.isActive ? "사용 중" : "사용 중지"}
+                  {organization.isDeleted
+                    ? "삭제됨"
+                    : organization.isActive
+                      ? "사용 중"
+                      : "사용 중지"}
                 </span>
+                {organization.isDeleted && organization.deletedAt ? (
+                  <span>삭제 시각 {formatKstDate(organization.deletedAt)}</span>
+                ) : null}
                 <span>
                   대표 조직장{" "}
                   {organization.primaryLeader?.displayName ?? "미지정"}
@@ -522,52 +555,89 @@ export function OrganizationDetailPage({
               </div>
             </div>
           </header>
-          <Card className="er-panel">
-            <div className="er-section-heading">
-              <div>
-                <h2>조직 정보</h2>
-                <p className="er-muted">
-                  이름과 사용 상태는 모든 프로젝트에 공통으로 적용됩니다.
-                </p>
+          {organization.isDeleted ? (
+            <Card className="er-panel">
+              <div className="er-section-heading">
+                <div>
+                  <h2>조직 정보</h2>
+                  <p className="er-muted">
+                    삭제된 조직의 기록은 읽기 전용으로 보존됩니다.
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  variant="primary"
+                  disabled={mutating !== null}
+                  loading={mutating === "RESTORE"}
+                  loadingText="복구 중…"
+                  onClick={() => void restoreOrganization()}
+                >
+                  조직 복구
+                </Button>
               </div>
-              <Button
-                type="button"
-                variant={organization.isActive ? "danger" : "primary"}
-                disabled={mutating !== null}
-                onClick={() => setShowStatusConfirmation(true)}
-              >
-                {organization.isActive ? "조직 사용 중지" : "조직 다시 사용"}
-              </Button>
-            </div>
-            <form className="er-inline-form" onSubmit={rename}>
-              <TextInput
-                label="조직 이름"
-                required
-                maxLength={100}
-                value={name}
-                disabled={mutating !== null}
-                onChange={(event) => setName(event.currentTarget.value)}
-              />
-              <Button
-                type="submit"
-                variant="primary"
-                disabled={
-                  mutating !== null ||
-                  !name.trim() ||
-                  name.trim() === organization.name
-                }
-                loading={mutating === "RENAME"}
-                loadingText="저장 중…"
-              >
-                이름 저장
-              </Button>
-            </form>
-          </Card>
-          <OrganizationManagersPanel
-            organization={organization}
-            onChanged={reloadAfterManagerMutation}
-            onTemporaryPassword={showTemporaryPassword}
-          />
+              <dl className="er-readonly-facts">
+                <div>
+                  <dt>조직 이름</dt>
+                  <dd>{organization.name}</dd>
+                </div>
+                <div>
+                  <dt>상태</dt>
+                  <dd>삭제됨</dd>
+                </div>
+              </dl>
+            </Card>
+          ) : (
+            <Card className="er-panel">
+              <div className="er-section-heading">
+                <div>
+                  <h2>조직 정보</h2>
+                  <p className="er-muted">
+                    이름과 사용 상태는 모든 프로젝트에 공통으로 적용됩니다.
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  variant={organization.isActive ? "danger" : "primary"}
+                  disabled={mutating !== null}
+                  onClick={() => setShowStatusConfirmation(true)}
+                >
+                  {organization.isActive ? "조직 사용 중지" : "조직 다시 사용"}
+                </Button>
+              </div>
+              <form className="er-inline-form" onSubmit={rename}>
+                <TextInput
+                  label="조직 이름"
+                  required
+                  maxLength={100}
+                  value={name}
+                  disabled={mutating !== null}
+                  onChange={(event) => setName(event.currentTarget.value)}
+                />
+                <Button
+                  type="submit"
+                  variant="primary"
+                  disabled={
+                    mutating !== null ||
+                    !name.trim() ||
+                    name.trim() === organization.name
+                  }
+                  loading={mutating === "RENAME"}
+                  loadingText="저장 중…"
+                >
+                  이름 저장
+                </Button>
+              </form>
+            </Card>
+          )}
+          {organization.isDeleted ? (
+            <ReadOnlyOrganizationManagers organization={organization} />
+          ) : (
+            <OrganizationManagersPanel
+              organization={organization}
+              onChanged={reloadAfterManagerMutation}
+              onTemporaryPassword={showTemporaryPassword}
+            />
+          )}
           <Card className="er-panel">
             <h2>연결 프로젝트</h2>
             {organization.projects.length === 0 ? (
@@ -657,7 +727,7 @@ export function OrganizationDetailPage({
           onConfirm={() => void deleteOrganization()}
         />
       ) : null}
-      {showStatusConfirmation && organization ? (
+      {showStatusConfirmation && organization && !organization.isDeleted ? (
         <Dialog
           title="조직 상태 변경"
           onClose={() => setShowStatusConfirmation(false)}
@@ -692,6 +762,51 @@ export function OrganizationDetailPage({
       ) : null}
     </div>
   );
+}
+
+function ReadOnlyOrganizationManagers({
+  organization,
+}: {
+  organization: OrganizationDetail;
+}) {
+  return (
+    <Card className="er-panel">
+      <h2>조직 담당자</h2>
+      {organization.managers.length === 0 ? (
+        <p className="er-muted">지정된 담당자가 없습니다.</p>
+      ) : (
+        <ul className="er-manager-list">
+          {organization.managers.map((manager) => (
+            <li key={manager.userId}>
+              <div>
+                <strong>{manager.displayName}</strong>
+                <span className="er-muted">{manager.loginId}</span>
+                <span>
+                  {manager.assignmentRole === "PRIMARY_LEADER"
+                    ? "대표 조직장"
+                    : "추가 관리자"}
+                </span>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
+  );
+}
+
+function formatKstDate(value: string) {
+  const parts = new Intl.DateTimeFormat("ko-KR", {
+    timeZone: "Asia/Seoul",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).formatToParts(new Date(value));
+  const get = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((part) => part.type === type)?.value ?? "";
+  return `${get("year")}.${get("month")}.${get("day")} ${get("hour")}:${get("minute")}`;
 }
 
 function navigateToOrganizationList(organizationNotice: string) {

@@ -41,23 +41,9 @@ export interface OrganizationSummary extends Organization {
   projectCount: number;
 }
 
-export interface OrganizationDeletionBlockers {
-  managerAssignments: number;
-  participants: number;
-  projectLinks: number;
-  rosterEntries: number;
-  expectedSnapshots: number;
-}
-
-export interface OrganizationDeletionEligibility {
-  canDelete: boolean;
-  blockers: OrganizationDeletionBlockers;
-}
-
 export interface OrganizationDetail extends OrganizationSummary {
   managers: OrganizationManager[];
   projects: OrganizationProject[];
-  deletionEligibility: OrganizationDeletionEligibility;
 }
 
 export const OrganizationPatchRequestSchema = z

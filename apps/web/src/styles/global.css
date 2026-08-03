@@ -810,13 +810,15 @@ a {
 .er-organization-summary-heading h3 {
   margin-bottom: var(--er-space-2);
 }
-.er-organization-facts {
+.er-organization-facts,
+.er-readonly-facts {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: var(--er-space-3);
   margin: 0;
 }
-.er-organization-facts div {
+.er-organization-facts div,
+.er-readonly-facts div {
   display: grid;
   gap: var(--er-space-1);
   min-width: 0;
@@ -824,11 +826,13 @@ a {
   padding: var(--er-space-3);
   background: var(--er-color-canvas);
 }
-.er-organization-facts dt {
+.er-organization-facts dt,
+.er-readonly-facts dt {
   color: var(--er-color-muted);
   font-size: 0.8rem;
 }
-.er-organization-facts dd {
+.er-organization-facts dd,
+.er-readonly-facts dd {
   margin: 0;
   font-weight: var(--er-font-weight-medium);
   overflow-wrap: anywhere;

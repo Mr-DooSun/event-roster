@@ -1,6 +1,4 @@
 import type {
-  OrganizationDeletionBlockers,
-  OrganizationDeletionEligibility,
   OrganizationDetail,
   OrganizationManager,
   OrganizationSummary,
@@ -163,61 +161,6 @@ export async function findOrganizationByCanonicalName(
     : null;
 }
 
-export async function findOrganizationDeletionBlockers(
-  db: D1Database,
-  organizationId: string,
-): Promise<OrganizationDeletionBlockers> {
-  const row = await db
-    .prepare(
-      `SELECT
-         (SELECT COUNT(*) FROM user_organizations
-          WHERE organization_id = ?) AS manager_assignments,
-         (SELECT COUNT(*) FROM participants
-          WHERE organization_id = ?) AS participants,
-         (SELECT COUNT(*) FROM project_organizations
-          WHERE organization_id = ?) AS project_links,
-         (SELECT COUNT(*) FROM project_roster_entries
-          WHERE organization_id = ?) AS roster_entries,
-         (SELECT COUNT(*) FROM project_expected_snapshots
-          WHERE organization_id = ?) AS expected_snapshots`,
-    )
-    .bind(
-      organizationId,
-      organizationId,
-      organizationId,
-      organizationId,
-      organizationId,
-    )
-    .first<{
-      manager_assignments: number;
-      participants: number;
-      project_links: number;
-      roster_entries: number;
-      expected_snapshots: number;
-    }>();
-  if (!row) {
-    throw new Error("organization deletion blocker query returned no row");
-  }
-  return {
-    managerAssignments: row.manager_assignments,
-    participants: row.participants,
-    projectLinks: row.project_links,
-    rosterEntries: row.roster_entries,
-    expectedSnapshots: row.expected_snapshots,
-  };
-}
-
-export function toOrganizationDeletionEligibility(
-  isActive: boolean,
-  blockers: OrganizationDeletionBlockers,
-): OrganizationDeletionEligibility {
-  return {
-    canDelete:
-      !isActive && Object.values(blockers).every((count) => count === 0),
-    blockers,
-  };
-}
-
 export async function findOrganizationDetail(
   db: D1Database,
   organizationId: string,
@@ -228,7 +171,7 @@ export async function findOrganizationDetail(
     .first<OrganizationSummaryRow>();
   if (!summaryRow) return null;
 
-  const [managerResult, projectResult, blockers] = await Promise.all([
+  const [managerResult, projectResult] = await Promise.all([
     db
       .prepare(
         `SELECT u.id AS user_id, u.login_id, u.display_name, u.is_active,
@@ -267,7 +210,6 @@ export async function findOrganizationDetail(
         project_status: "PRE_REGISTRATION" | "IN_PROGRESS" | "CLOSED";
         membership_is_active: number;
       }>(),
-    findOrganizationDeletionBlockers(db, organizationId),
   ]);
 
   const summary = mapSummary(summaryRow);
@@ -287,10 +229,6 @@ export async function findOrganizationDetail(
       projectStatus: row.project_status,
       membershipIsActive: row.membership_is_active === 1,
     })),
-    deletionEligibility: toOrganizationDeletionEligibility(
-      summary.isActive,
-      blockers,
-    ),
   };
 }
 

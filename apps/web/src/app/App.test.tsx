@@ -1266,16 +1266,6 @@ function organizationDetail(): OrganizationDetail {
         membershipIsActive: true,
       },
     ],
-    deletionEligibility: {
-      canDelete: false,
-      blockers: {
-        managerAssignments: 2,
-        participants: 0,
-        projectLinks: 1,
-        rosterEntries: 0,
-        expectedSnapshots: 0,
-      },
-    },
   };
 }
 

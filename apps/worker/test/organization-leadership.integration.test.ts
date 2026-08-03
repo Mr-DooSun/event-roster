@@ -1,5 +1,4 @@
 import { env } from "cloudflare:workers";
-import type { OrganizationDetail } from "@event-roster/contracts";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import type { Env } from "../src/env";
 import { requireActor } from "../src/middleware/authentication";
@@ -45,18 +44,9 @@ it("returns searchable organization summaries and a complete operator detail", a
 
   const detail = await authedRequest(operator, "/api/v1/organizations/org-1");
   expect(detail.status).toBe(200);
-  expect(await detail.json()).toMatchObject({
+  const detailBody = await detail.json<Record<string, unknown>>();
+  expect(detailBody).toMatchObject({
     id: "org-1",
-    deletionEligibility: {
-      canDelete: false,
-      blockers: {
-        managerAssignments: 3,
-        participants: 0,
-        projectLinks: 2,
-        rosterEntries: 0,
-        expectedSnapshots: 0,
-      },
-    },
     managers: [
       expect.objectContaining({
         userId: "leader-1",
@@ -76,9 +66,10 @@ it("returns searchable organization summaries and a complete operator detail", a
       expect.objectContaining({ projectId: "project-closed" }),
     ],
   });
+  expect(detailBody).not.toHaveProperty("deletionEligibility");
 });
 
-it("reports exact full-history organization deletion blockers", async () => {
+it("omits deletion blockers regardless of organization history", async () => {
   const operator = await seedOperator();
   await seedOrganization("empty-inactive", "빈 조직", false);
   await seedOrganization("history-inactive", "이력 조직", false);
@@ -101,23 +92,13 @@ it("reports exact full-history organization deletion blockers", async () => {
 
   const empty = await (
     await authedRequest(operator, "/api/v1/organizations/empty-inactive")
-  ).json<OrganizationDetail>();
-  expect(empty.deletionEligibility).toEqual({
-    canDelete: true,
-    blockers: {
-      managerAssignments: 0,
-      participants: 0,
-      projectLinks: 0,
-      rosterEntries: 0,
-      expectedSnapshots: 0,
-    },
-  });
+  ).json<Record<string, unknown>>();
+  expect(empty).not.toHaveProperty("deletionEligibility");
 
   const history = await (
     await authedRequest(operator, "/api/v1/organizations/history-inactive")
-  ).json<OrganizationDetail>();
-  expect(history.deletionEligibility.canDelete).toBe(false);
-  expect(history.deletionEligibility.blockers.projectLinks).toBe(1);
+  ).json<Record<string, unknown>>();
+  expect(history).not.toHaveProperty("deletionEligibility");
 });
 
 it("filters by leader and active status while treating search metacharacters literally", async () => {

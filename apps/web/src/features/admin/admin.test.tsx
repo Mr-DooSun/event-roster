@@ -1,8 +1,5 @@
 import "@testing-library/jest-dom/vitest";
-import type {
-  OrganizationDeletionBlockers,
-  OrganizationDetail,
-} from "@event-roster/contracts";
+import type { OrganizationDetail } from "@event-roster/contracts";
 import {
   act,
   cleanup,
@@ -2255,7 +2252,7 @@ it("retries failed organization audit pagination with the same cursor", async ()
   );
 });
 
-it("hides the organization danger zone while the organization is active", async () => {
+it("offers recoverable deletion while the organization is active", async () => {
   vi.stubGlobal(
     "fetch",
     vi.fn((input: RequestInfo | URL) => {
@@ -2277,12 +2274,13 @@ it("hides the organization danger zone while the organization is active", async 
   await login();
 
   await screen.findByRole("heading", { name: "1팀" });
+  const dangerZone = screen.getByRole("region", { name: "위험 구역" });
   expect(
-    screen.queryByRole("region", { name: "위험 구역" }),
-  ).not.toBeInTheDocument();
+    within(dangerZone).getByRole("button", { name: "조직 삭제" }),
+  ).toBeEnabled();
 });
 
-it("shows deletion blockers for an inactive organization", async () => {
+it("offers recoverable deletion while preserving inactive organization records", async () => {
   vi.stubGlobal(
     "fetch",
     vi.fn((input: RequestInfo | URL) => {
@@ -2297,10 +2295,6 @@ it("shows deletion blockers for an inactive organization", async () => {
               id: "org-blocked",
               name: "차단 조직",
               isActive: false,
-              deletionEligibility: {
-                canDelete: false,
-                blockers: deletionBlockers({ projectLinks: 2 }),
-              },
             }),
           ),
         );
@@ -2316,13 +2310,15 @@ it("shows deletion blockers for an inactive organization", async () => {
   await login();
 
   const dangerZone = await screen.findByRole("region", { name: "위험 구역" });
-  expect(dangerZone).toHaveTextContent("프로젝트 연결 이력 2건");
+  expect(dangerZone).toHaveTextContent(
+    "담당자, 참가자, 프로젝트 기록은 보존됩니다.",
+  );
   expect(
-    within(dangerZone).getByRole("button", { name: "조직 영구 삭제" }),
-  ).toBeDisabled();
+    within(dangerZone).getByRole("button", { name: "조직 삭제" }),
+  ).toBeEnabled();
 });
 
-it("deletes an eligible organization once and navigates with a success notice", async () => {
+it("soft-deletes an active organization once and navigates with a recoverable-deletion notice", async () => {
   window.history.replaceState(null, "", "/organizations/org-empty");
   const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
@@ -2338,7 +2334,7 @@ it("deletes an eligible organization once and navigates with a success notice", 
           organizationDetail({
             id: "org-empty",
             name: "빈 조직",
-            isActive: false,
+            isActive: true,
           }),
         ),
       );
@@ -2355,7 +2351,7 @@ it("deletes an eligible organization once and navigates with a success notice", 
   fireEvent.click(
     within(await screen.findByRole("region", { name: "위험 구역" })).getByRole(
       "button",
-      { name: "조직 영구 삭제" },
+      { name: "조직 삭제" },
     ),
   );
   fireEvent.change(
@@ -2363,14 +2359,14 @@ it("deletes an eligible organization once and navigates with a success notice", 
     { target: { value: "빈 조직" } },
   );
   const confirm = within(
-    screen.getByRole("dialog", { name: "조직 영구 삭제" }),
-  ).getByRole("button", { name: "조직 영구 삭제" });
+    screen.getByRole("dialog", { name: "조직 삭제" }),
+  ).getByRole("button", { name: "조직 삭제" });
   fireEvent.click(confirm);
   fireEvent.click(confirm);
 
   await waitFor(() => expect(window.location.pathname).toBe("/organizations"));
   expect(window.history.state).toEqual({
-    organizationNotice: "조직 “빈 조직”을 영구 삭제했습니다.",
+    organizationNotice: "조직 “빈 조직”을 삭제했습니다.",
   });
   const deleteCalls = fetchMock.mock.calls.filter(
     ([input, init]) =>
@@ -2385,6 +2381,138 @@ it("deletes an eligible organization once and navigates with a success notice", 
       body: JSON.stringify({ confirmationName: "빈 조직" }),
     }),
   ]);
+});
+
+it("renders deleted organization history read-only and restores it to inactive", async () => {
+  let restored = false;
+  const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.endsWith("/auth/login")) {
+      return Promise.resolve(Response.json(auth()));
+    }
+    if (
+      url.endsWith("/organizations/org-deleted/restore") &&
+      init?.method === "POST"
+    ) {
+      restored = true;
+      return Promise.resolve(
+        Response.json(
+          organizationDetail({
+            id: "org-deleted",
+            name: "삭제 조직",
+            isActive: false,
+            isDeleted: false,
+            deletedAt: null,
+            managerCount: 1,
+            projectCount: 1,
+            managers: [
+              {
+                userId: "manager-1",
+                loginId: "manager-01",
+                displayName: "보존 담당자",
+                isActive: true,
+                assignmentRole: "MANAGER",
+                assignedAt: "2026-08-01T00:00:00.000Z",
+              },
+            ],
+            projects: [
+              {
+                projectId: "project-1",
+                projectName: "보존 프로젝트",
+                projectStatus: "CLOSED",
+                membershipIsActive: false,
+              },
+            ],
+          }),
+        ),
+      );
+    }
+    if (url.endsWith("/organizations/org-deleted")) {
+      return Promise.resolve(
+        Response.json(
+          organizationDetail({
+            id: "org-deleted",
+            name: "삭제 조직",
+            isActive: false,
+            isDeleted: !restored,
+            deletedAt: restored ? null : "2026-08-03T00:15:00.000Z",
+            managerCount: 1,
+            projectCount: 1,
+            managers: [
+              {
+                userId: "manager-1",
+                loginId: "manager-01",
+                displayName: "보존 담당자",
+                isActive: true,
+                assignmentRole: "MANAGER",
+                assignedAt: "2026-08-01T00:00:00.000Z",
+              },
+            ],
+            projects: [
+              {
+                projectId: "project-1",
+                projectName: "보존 프로젝트",
+                projectStatus: "CLOSED",
+                membershipIsActive: false,
+              },
+            ],
+          }),
+        ),
+      );
+    }
+    if (url.endsWith("/organizations/org-deleted/audit?limit=50")) {
+      return Promise.resolve(
+        Response.json({
+          items: [auditItem("ORGANIZATION_DELETED")],
+          nextCursor: null,
+        }),
+      );
+    }
+    throw new Error(`unexpected request: ${url}`);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderOrganizationDetail("org-deleted");
+  await login();
+
+  expect(
+    await screen.findByRole("heading", { name: "삭제 조직" }),
+  ).toBeVisible();
+  expect(screen.getAllByText("삭제됨").length).toBeGreaterThan(0);
+  expect(screen.getByText("삭제 시각 2026.08.03 09:15")).toBeVisible();
+  expect(screen.getByText("보존 담당자")).toBeVisible();
+  expect(screen.getByText("보존 프로젝트")).toBeVisible();
+  expect(screen.getByText("ORGANIZATION_DELETED")).toBeVisible();
+  expect(
+    screen.queryByRole("button", { name: "이름 저장" }),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("button", { name: "조직 다시 사용" }),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("button", { name: "기존 계정 지정" }),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("button", { name: "새 담당자 발급" }),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("button", { name: "조직 삭제" }),
+  ).not.toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "조직 복구" }));
+
+  expect(
+    fetchMock.mock.calls.some(
+      ([input, init]) =>
+        String(input).endsWith("/organizations/org-deleted/restore") &&
+        init?.method === "POST",
+    ),
+  ).toBe(true);
+  expect(await screen.findByText("사용 중지")).toBeVisible();
+  expect(screen.getByRole("button", { name: "조직 다시 사용" })).toBeEnabled();
+  expect(
+    screen.getByText("조직을 사용 중지 상태로 복구했습니다."),
+  ).toBeVisible();
 });
 
 it("keeps the deletion dialog locked while deletion is pending", async () => {
@@ -2425,7 +2553,7 @@ it("keeps the deletion dialog locked while deletion is pending", async () => {
   fireEvent.click(
     within(await screen.findByRole("region", { name: "위험 구역" })).getByRole(
       "button",
-      { name: "조직 영구 삭제" },
+      { name: "조직 삭제" },
     ),
   );
   fireEvent.change(
@@ -2433,13 +2561,13 @@ it("keeps the deletion dialog locked while deletion is pending", async () => {
     { target: { value: "빈 조직" } },
   );
   fireEvent.click(
-    within(screen.getByRole("dialog", { name: "조직 영구 삭제" })).getByRole(
+    within(screen.getByRole("dialog", { name: "조직 삭제" })).getByRole(
       "button",
-      { name: "조직 영구 삭제" },
+      { name: "조직 삭제" },
     ),
   );
 
-  const dialog = screen.getByRole("dialog", { name: "조직 영구 삭제" });
+  const dialog = screen.getByRole("dialog", { name: "조직 삭제" });
   expect(
     within(dialog).getByRole("button", { name: "삭제 중…" }),
   ).toBeDisabled();
@@ -2451,7 +2579,7 @@ it("keeps the deletion dialog locked while deletion is pending", async () => {
   expect(screen.getByLabelText("조직 이름")).toBeDisabled();
   expect(screen.getByRole("button", { name: "이름 저장" })).toBeDisabled();
   fireEvent.keyDown(dialog, { key: "Escape" });
-  expect(screen.getByRole("dialog", { name: "조직 영구 삭제" })).toBeVisible();
+  expect(screen.getByRole("dialog", { name: "조직 삭제" })).toBeVisible();
 });
 
 it("blocks a captured deletion confirm while rename owns the page mutation", async () => {
@@ -2490,16 +2618,16 @@ it("blocks a captured deletion confirm while rename owns the page mutation", asy
   await login();
   const dangerZone = await screen.findByRole("region", { name: "위험 구역" });
   fireEvent.click(
-    within(dangerZone).getByRole("button", { name: "조직 영구 삭제" }),
+    within(dangerZone).getByRole("button", { name: "조직 삭제" }),
   );
   fireEvent.change(
     screen.getByLabelText("확인을 위해 조직 이름을 입력하세요."),
     { target: { value: "빈 조직" } },
   );
   const capturedConfirm = captureReactClickHandler(
-    within(screen.getByRole("dialog", { name: "조직 영구 삭제" })).getByRole(
+    within(screen.getByRole("dialog", { name: "조직 삭제" })).getByRole(
       "button",
-      { name: "조직 영구 삭제" },
+      { name: "조직 삭제" },
     ),
   );
   fireEvent.click(screen.getByRole("button", { name: "닫기" }));
@@ -2525,13 +2653,12 @@ it("blocks a captured deletion confirm while rename owns the page mutation", asy
   expect(
     within(screen.getByRole("region", { name: "위험 구역" })).getByRole(
       "button",
-      { name: "조직 영구 삭제" },
+      { name: "조직 삭제" },
     ),
   ).toBeDisabled();
 });
 
-it("reloads deletion blockers and clears the name after a conflict", async () => {
-  let detailReads = 0;
+it("reloads organization detail and clears the name after a deletion conflict", async () => {
   vi.stubGlobal(
     "fetch",
     vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
@@ -2551,21 +2678,12 @@ it("reloads deletion blockers and clears the name after a conflict", async () =>
         );
       }
       if (url.endsWith("/organizations/org-empty")) {
-        detailReads += 1;
         return Promise.resolve(
           Response.json(
             organizationDetail({
               id: "org-empty",
               name: "빈 조직",
               isActive: false,
-              ...(detailReads === 1
-                ? {}
-                : {
-                    deletionEligibility: {
-                      canDelete: false,
-                      blockers: deletionBlockers({ projectLinks: 1 }),
-                    },
-                  }),
             }),
           ),
         );
@@ -2582,7 +2700,7 @@ it("reloads deletion blockers and clears the name after a conflict", async () =>
   fireEvent.click(
     within(await screen.findByRole("region", { name: "위험 구역" })).getByRole(
       "button",
-      { name: "조직 영구 삭제" },
+      { name: "조직 삭제" },
     ),
   );
   fireEvent.change(
@@ -2590,25 +2708,24 @@ it("reloads deletion blockers and clears the name after a conflict", async () =>
     { target: { value: "빈 조직" } },
   );
   fireEvent.click(
-    within(screen.getByRole("dialog", { name: "조직 영구 삭제" })).getByRole(
+    within(screen.getByRole("dialog", { name: "조직 삭제" })).getByRole(
       "button",
-      { name: "조직 영구 삭제" },
+      { name: "조직 삭제" },
     ),
   );
 
   expect(
     await screen.findByText(
-      "다른 관리 변경이 반영되어 최신 삭제 가능 상태를 불러왔습니다.",
+      "다른 관리 변경이 반영되어 최신 조직 정보를 불러왔습니다.",
     ),
   ).toBeVisible();
-  const dialog = screen.getByRole("dialog", { name: "조직 영구 삭제" });
-  expect(within(dialog).getByText("프로젝트 연결 이력 1건")).toBeVisible();
+  const dialog = screen.getByRole("dialog", { name: "조직 삭제" });
   expect(
     within(dialog).getByLabelText("확인을 위해 조직 이름을 입력하세요."),
   ).toHaveValue("");
 });
 
-it("keeps the deletion dialog when a conflict refresh reactivates the organization", async () => {
+it("keeps the deletion dialog when a conflict refresh changes organization status", async () => {
   let detailReads = 0;
   vi.stubGlobal(
     "fetch",
@@ -2631,16 +2748,6 @@ it("keeps the deletion dialog when a conflict refresh reactivates the organizati
               id: "org-empty",
               name: "빈 조직",
               isActive: detailReads > 1,
-              deletionEligibility:
-                detailReads === 1
-                  ? {
-                      canDelete: true,
-                      blockers: deletionBlockers(),
-                    }
-                  : {
-                      canDelete: false,
-                      blockers: deletionBlockers(),
-                    },
             }),
           ),
         );
@@ -2657,7 +2764,7 @@ it("keeps the deletion dialog when a conflict refresh reactivates the organizati
   fireEvent.click(
     within(await screen.findByRole("region", { name: "위험 구역" })).getByRole(
       "button",
-      { name: "조직 영구 삭제" },
+      { name: "조직 삭제" },
     ),
   );
   fireEvent.change(
@@ -2665,24 +2772,22 @@ it("keeps the deletion dialog when a conflict refresh reactivates the organizati
     { target: { value: "빈 조직" } },
   );
   fireEvent.click(
-    within(screen.getByRole("dialog", { name: "조직 영구 삭제" })).getByRole(
+    within(screen.getByRole("dialog", { name: "조직 삭제" })).getByRole(
       "button",
-      { name: "조직 영구 삭제" },
+      { name: "조직 삭제" },
     ),
   );
 
   expect(
     await screen.findByText(
-      "다른 관리 변경이 반영되어 최신 삭제 가능 상태를 불러왔습니다.",
+      "다른 관리 변경이 반영되어 최신 조직 정보를 불러왔습니다.",
     ),
   ).toBeVisible();
-  const dialog = screen.getByRole("dialog", { name: "조직 영구 삭제" });
+  const dialog = screen.getByRole("dialog", { name: "조직 삭제" });
   expect(
-    within(dialog).getByRole("button", { name: "조직 영구 삭제" }),
+    within(dialog).getByRole("button", { name: "조직 삭제" }),
   ).toBeDisabled();
-  expect(
-    screen.queryByRole("region", { name: "위험 구역" }),
-  ).not.toBeInTheDocument();
+  expect(screen.getByRole("region", { name: "위험 구역" })).toBeVisible();
 });
 
 it("preserves the typed name after a generic deletion failure", async () => {
@@ -2722,7 +2827,7 @@ it("preserves the typed name after a generic deletion failure", async () => {
   fireEvent.click(
     within(await screen.findByRole("region", { name: "위험 구역" })).getByRole(
       "button",
-      { name: "조직 영구 삭제" },
+      { name: "조직 삭제" },
     ),
   );
   const confirmationName = screen.getByLabelText(
@@ -2730,18 +2835,16 @@ it("preserves the typed name after a generic deletion failure", async () => {
   );
   fireEvent.change(confirmationName, { target: { value: "빈 조직" } });
   fireEvent.click(
-    within(screen.getByRole("dialog", { name: "조직 영구 삭제" })).getByRole(
+    within(screen.getByRole("dialog", { name: "조직 삭제" })).getByRole(
       "button",
-      { name: "조직 영구 삭제" },
+      { name: "조직 삭제" },
     ),
   );
 
   const dialog = await screen.findByRole("dialog", {
-    name: "조직 영구 삭제",
+    name: "조직 삭제",
   });
-  expect(
-    within(dialog).getByText("조직을 영구 삭제하지 못했습니다."),
-  ).toBeVisible();
+  expect(within(dialog).getByText("조직을 삭제하지 못했습니다.")).toBeVisible();
   expect(
     within(dialog).getByLabelText("확인을 위해 조직 이름을 입력하세요."),
   ).toHaveValue("빈 조직");
@@ -2785,7 +2888,7 @@ it("navigates to the list when deletion reports an already deleted organization"
   fireEvent.click(
     within(await screen.findByRole("region", { name: "위험 구역" })).getByRole(
       "button",
-      { name: "조직 영구 삭제" },
+      { name: "조직 삭제" },
     ),
   );
   fireEvent.change(
@@ -2793,9 +2896,9 @@ it("navigates to the list when deletion reports an already deleted organization"
     { target: { value: "빈 조직" } },
   );
   fireEvent.click(
-    within(screen.getByRole("dialog", { name: "조직 영구 삭제" })).getByRole(
+    within(screen.getByRole("dialog", { name: "조직 삭제" })).getByRole(
       "button",
-      { name: "조직 영구 삭제" },
+      { name: "조직 삭제" },
     ),
   );
 
@@ -2885,7 +2988,7 @@ it("ignores a deletion response owned by a previous organization", async () => {
   fireEvent.click(
     within(await screen.findByRole("region", { name: "위험 구역" })).getByRole(
       "button",
-      { name: "조직 영구 삭제" },
+      { name: "조직 삭제" },
     ),
   );
   fireEvent.change(
@@ -2893,9 +2996,9 @@ it("ignores a deletion response owned by a previous organization", async () => {
     { target: { value: "이전 조직" } },
   );
   fireEvent.click(
-    within(screen.getByRole("dialog", { name: "조직 영구 삭제" })).getByRole(
+    within(screen.getByRole("dialog", { name: "조직 삭제" })).getByRole(
       "button",
-      { name: "조직 영구 삭제" },
+      { name: "조직 삭제" },
     ),
   );
 
@@ -2919,7 +3022,7 @@ it("ignores a deletion response owned by a previous organization", async () => {
 });
 
 it("consumes an organization list notice only once", async () => {
-  const notice = "조직 “빈 조직”을 영구 삭제했습니다.";
+  const notice = "조직 “빈 조직”을 삭제했습니다.";
   window.history.replaceState(
     { preserved: "state", organizationNotice: notice },
     "",
@@ -3072,20 +3175,6 @@ function auditItem(action: string) {
   };
 }
 
-const emptyDeletionBlockers: OrganizationDeletionBlockers = {
-  managerAssignments: 0,
-  participants: 0,
-  projectLinks: 0,
-  rosterEntries: 0,
-  expectedSnapshots: 0,
-};
-
-function deletionBlockers(
-  overrides: Partial<OrganizationDeletionBlockers> = {},
-): OrganizationDeletionBlockers {
-  return { ...emptyDeletionBlockers, ...overrides };
-}
-
 function organizationDetail(
   overrides: Partial<OrganizationDetail> = {},
 ): OrganizationDetail {
@@ -3098,10 +3187,6 @@ function organizationDetail(
     projectCount: 0,
     managers: [],
     projects: [],
-    deletionEligibility: {
-      canDelete: true,
-      blockers: deletionBlockers(),
-    },
     ...overrides,
     isDeleted: overrides.isDeleted ?? false,
     deletedAt: overrides.deletedAt ?? null,

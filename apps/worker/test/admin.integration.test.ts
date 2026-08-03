@@ -113,26 +113,26 @@ it("hides deleted organizations by default and exposes them only to operators", 
     );
 
     expect(
-      await authedRequest(
-        manager,
-        "/api/v1/organizations?includeDeleted=true",
-      ),
+      await authedRequest(manager, "/api/v1/organizations?includeDeleted=true"),
     ).toHaveProperty("status", 403);
 
     const detail = await authedRequest(
       operator,
       "/api/v1/organizations/deleted-org",
     );
-    expect(await detail.json()).toEqual(
+    const detailBody = await detail.json<Record<string, unknown>>();
+    expect(detailBody).toEqual(
       expect.objectContaining({
         id: "deleted-org",
         isDeleted: true,
         deletedAt: "2026-08-03T00:00:00.000Z",
-        deletionEligibility: expect.any(Object),
       }),
     );
+    expect(detailBody).not.toHaveProperty("deletionEligibility");
   } finally {
-    await env.DB.prepare("DELETE FROM organizations WHERE id = 'deleted-org'").run();
+    await env.DB.prepare(
+      "DELETE FROM organizations WHERE id = 'deleted-org'",
+    ).run();
   }
 });
 

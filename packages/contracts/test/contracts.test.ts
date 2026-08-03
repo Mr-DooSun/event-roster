@@ -1,7 +1,5 @@
 import { describe, expect, expectTypeOf, it } from "vitest";
 import type {
-  OrganizationDeletionBlockers,
-  OrganizationDeletionEligibility,
   OrganizationDetail,
   OrganizationSummary,
   Participant,
@@ -10,8 +8,8 @@ import type {
   StudentGrade,
 } from "../src";
 import {
-  API_PROBLEM_CODES,
   AddProjectOrganizationSchema,
+  API_PROBLEM_CODES,
   BulkRosterCreateRequestSchema,
   CreateProjectRequestSchema,
   DeleteProjectRequestSchema,
@@ -81,17 +79,6 @@ describe("organization contracts", () => {
       }).success,
     ).toBe(false);
 
-    expectTypeOf<OrganizationDeletionBlockers>().toEqualTypeOf<{
-      managerAssignments: number;
-      participants: number;
-      projectLinks: number;
-      rosterEntries: number;
-      expectedSnapshots: number;
-    }>();
-    expectTypeOf<OrganizationDeletionEligibility>().toEqualTypeOf<{
-      canDelete: boolean;
-      blockers: OrganizationDeletionBlockers;
-    }>();
     expectTypeOf<OrganizationSummary>().toMatchTypeOf<{
       isDeleted: boolean;
       deletedAt: string | null;

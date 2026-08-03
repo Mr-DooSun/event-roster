@@ -173,7 +173,7 @@ function synchronizeFirstBatches(
   });
 }
 
-it("retains deleted project links in the temporary blocker projection", async () => {
+it("omits deleted project links from organization detail without a blocker projection", async () => {
   const operator = await seedOperator();
   await seedOrganization("deleted-link-org", "삭제 프로젝트 조직", false);
   const project = await seedProject(operator, { name: "삭제된 연결" });
@@ -188,31 +188,25 @@ it("retains deleted project links in the temporary blocker projection", async ()
     .run();
   await markProjectDeleted(project.id, operator.userId, project.revision);
 
-  const detail = await (
-    await authedRequest(operator, "/api/v1/organizations/deleted-link-org")
-  ).json<OrganizationDetail>();
+  const detailResponse = await authedRequest(
+    operator,
+    "/api/v1/organizations/deleted-link-org",
+  );
+  const detail = await detailResponse.clone().json<OrganizationDetail>();
   expect(detail.projects).toEqual([]);
-  expect(detail.deletionEligibility.blockers.projectLinks).toBe(1);
-  expect(detail.deletionEligibility.canDelete).toBe(false);
+  expect(
+    await detailResponse.json<Record<string, unknown>>(),
+  ).not.toHaveProperty("deletionEligibility");
 });
 
-it("retains the temporary blocker projection for the organization detail UI", async () => {
+it("does not expose a temporary blocker projection in organization detail", async () => {
   const { operator } = await seedOrganizationWithEveryDeletionReference(false);
 
   const detail = await (
     await authedRequest(operator, "/api/v1/organizations/blocked-delete")
-  ).json<OrganizationDetail>();
+  ).json<Record<string, unknown>>();
 
-  expect(detail.deletionEligibility).toEqual({
-    canDelete: false,
-    blockers: {
-      managerAssignments: 1,
-      participants: 1,
-      projectLinks: 1,
-      rosterEntries: 1,
-      expectedSnapshots: 1,
-    },
-  });
+  expect(detail).not.toHaveProperty("deletionEligibility");
 });
 
 it("soft-deletes an active organization while preserving every reference", async () => {
