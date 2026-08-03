@@ -34,6 +34,8 @@ export interface OrganizationProject {
 }
 
 export interface OrganizationSummary extends Organization {
+  isDeleted: boolean;
+  deletedAt: string | null;
   primaryLeader: Pick<OrganizationManager, "userId" | "displayName"> | null;
   managerCount: number;
   projectCount: number;

@@ -99,6 +99,27 @@ describe("initial D1 schema", () => {
 
     await expect(
       env.DB.prepare(
+        `UPDATE organizations
+         SET deleted_at = '2026-08-03T00:00:00.000Z'
+         WHERE id = ?`,
+      )
+        .bind(IDS.organization)
+        .run(),
+    ).rejects.toThrow(/INVALID_ORGANIZATION_DELETION_STATE/);
+
+    await expect(
+      env.DB.prepare(
+        `UPDATE organizations
+         SET deleted_at = '2026-08-03T00:00:00.000Z',
+             deleted_by = ?, is_active = 1
+         WHERE id = ?`,
+      )
+        .bind(IDS.user, IDS.organization)
+        .run(),
+    ).rejects.toThrow(/INVALID_ORGANIZATION_DELETION_STATE/);
+
+    await expect(
+      env.DB.prepare(
         "INSERT INTO users (id, login_id, login_id_canonical, display_name, role, is_active, is_bootstrap, session_version, created_at, updated_at) VALUES (?, ?, ?, ?, 'OPERATOR', 1, 0, 1, ?, ?)",
       )
         .bind(

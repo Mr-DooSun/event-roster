@@ -29,6 +29,8 @@ function organization(
     id: "org-1",
     name: "황룡사",
     isActive: false,
+    isDeleted: false,
+    deletedAt: null,
     primaryLeader: null,
     managerCount: 0,
     projectCount: 0,

@@ -2,12 +2,15 @@ import { describe, expect, expectTypeOf, it } from "vitest";
 import type {
   OrganizationDeletionBlockers,
   OrganizationDeletionEligibility,
+  OrganizationDetail,
+  OrganizationSummary,
   Participant,
   ParticipantRole,
   Project,
   StudentGrade,
 } from "../src";
 import {
+  API_PROBLEM_CODES,
   AddProjectOrganizationSchema,
   BulkRosterCreateRequestSchema,
   CreateProjectRequestSchema,
@@ -89,6 +92,15 @@ describe("organization contracts", () => {
       canDelete: boolean;
       blockers: OrganizationDeletionBlockers;
     }>();
+    expectTypeOf<OrganizationSummary>().toMatchTypeOf<{
+      isDeleted: boolean;
+      deletedAt: string | null;
+    }>();
+    expectTypeOf<OrganizationDetail>().toMatchTypeOf<{
+      isDeleted: boolean;
+      deletedAt: string | null;
+    }>();
+    expect(API_PROBLEM_CODES).toContain("ORGANIZATION_NAME_RESERVED");
   });
 
   it("accepts the minimal global deactivation payload", () => {

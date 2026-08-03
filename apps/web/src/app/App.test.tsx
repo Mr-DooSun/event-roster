@@ -1235,6 +1235,8 @@ function organizationDetail(): OrganizationDetail {
     id: "org-1",
     name: "1팀",
     isActive: true,
+    isDeleted: false,
+    deletedAt: null,
     primaryLeader: { userId: "leader-1", displayName: "대표 조직장" },
     managerCount: 1,
     projectCount: 1,

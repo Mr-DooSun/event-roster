@@ -329,6 +329,8 @@ it("keeps organization results visible while applying filters", async () => {
     id: "org-1",
     name: "1팀",
     isActive: true,
+    isDeleted: false,
+    deletedAt: null,
     primaryLeader: null,
     managerCount: 2,
     projectCount: 3,
@@ -2944,6 +2946,8 @@ function organizationDetail(
       blockers: deletionBlockers(),
     },
     ...overrides,
+    isDeleted: overrides.isDeleted ?? false,
+    deletedAt: overrides.deletedAt ?? null,
   };
 }
 
