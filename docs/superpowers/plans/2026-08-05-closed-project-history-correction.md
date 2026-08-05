@@ -15,7 +15,7 @@
 - Do not weaken the ordinary organization, roster, participant, bulk, or import APIs. They must still return `PROJECT_CLOSED` for closed projects.
 - Only a non-bootstrap `OPERATOR` may call correction reads and writes. Organization managers stay read-only, and a correction link never grants them current scope.
 - All correction writes must use `runGuardedAtomic` with `createOperatorGuard`, require `projects.deleted_at IS NULL`, `projects.status = 'CLOSED'`, and the expected project revision, and update data + project revision + audit in the same batch.
-- Closed-project additions use `source = 'IN_PROGRESS'`, `status = 'ACTIVE'`, and `was_expected_at_start = 0`. Never insert, update, or delete `project_expected_snapshots`.
+- Brand-new closed-project roster rows use `source = 'IN_PROGRESS'`, `status = 'ACTIVE'`, and `was_expected_at_start = 0`. Existing rows keep their stored `source` and `was_expected_at_start`. Never insert, update, or delete `project_expected_snapshots`.
 - Existing-participant correction never updates `participants`; it writes the confirmed values to `project_roster_entries` snapshots only. New participants still receive a master row and stable `P-...` identifier for FK integrity.
 - A correction may reference active, inactive, or deleted organization masters. It must never rename, reactivate, restore, or otherwise mutate the organization master.
 - Excluding an organization in correction mode always keeps its `project_organizations` row with `is_active = 0`; re-adding reactivates the same row.
@@ -527,7 +527,7 @@ For a closed project, validate rows against linked active, inactive, and deleted
 
 - [ ] **Step 2: Write failing atomic commit tests**
 
-Assert all imported entries use `IN_PROGRESS`, `ACTIVE`, false and update actual but not expected. Assert existing participants are not rewritten. Assert exactly one `project_import_runs` row is inserted, and each changed roster row has `CLOSED_PROJECT_ROSTER_IMPORTED` with `batchId`, `projectId`, `organizationId`, role/grade, and before/after. Force a bad final row, stale revision, project reopen race, project deletion race, and audit statement failure; every case must leave the whole batch unchanged.
+Assert brand-new imported roster rows use `IN_PROGRESS`, `ACTIVE`, false and update actual but not expected. Existing active and cancelled roster rows preserve their stored `source` and `was_expected_at_start` while snapshot fields are updated and cancelled rows are restored to `ACTIVE`. Assert existing participants are not rewritten. Assert exactly one `project_import_runs` row is inserted for a mutating import, and each changed roster row has `CLOSED_PROJECT_ROSTER_IMPORTED` with `batchId`, `projectId`, `organizationId`, role/grade, and before/after. A completely no-op correction import must return `CONFLICT` without a revision increment, import run, audit, or partial roster write. Force same-count/same-sum candidate addition and replacement races, a bad final row, stale revision, project reopen race, project deletion race, and audit statement failure; every case must leave the whole batch unchanged.
 
 - [ ] **Step 3: Run RED**
 
@@ -550,7 +550,7 @@ interface ImportMutationPolicy {
 }
 ```
 
-Keep exported ordinary `validateImport`/`commitImport` signatures and default behavior unchanged. Export dedicated `validateClosedCorrectionImport` and `commitClosedCorrectionImport` wrappers. The correction resolver accepts active project memberships regardless of organization-master active/deleted state; both validation and commit require the project membership itself to be active, matching manual correction. Do not let the policy bypass candidate-revision, duplicate, row-count, or chunk binding checks.
+Keep exported ordinary `validateImport`/`commitImport` signatures and default behavior unchanged. Export dedicated `validateClosedCorrectionImport` and `commitClosedCorrectionImport` wrappers. The correction resolver accepts active project memberships regardless of organization-master active/deleted state; both validation and commit require the project membership itself to be active, matching manual correction. Correction commit must revalidate the exact deterministic participant-set `(id,name,revision)` fingerprint while keeping every D1 statement at or below 100 bindings. Do not let the policy bypass candidate-revision, duplicate, row-count, or chunk binding checks.
 
 - [ ] **Step 5: Wire correction routes and audit metadata**
 

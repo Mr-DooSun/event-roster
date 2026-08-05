@@ -1,5 +1,8 @@
 import type { ProjectOrganization } from "@event-roster/contracts";
 
+export const MANAGER_PROJECT_MEMBERSHIP_SCOPE = `(projects.status <> 'CLOSED'
+  OR (projects.closed_at IS NOT NULL AND po.added_at <= projects.closed_at))`;
+
 interface ProjectOrganizationRow {
   organization_id: string;
   name: string;
@@ -114,12 +117,14 @@ export async function listActorProjectOrganizationIds(
       .prepare(
         `SELECT po.organization_id
          FROM project_organizations po
+         JOIN projects ON projects.id = po.project_id
          JOIN user_organizations actor_org
            ON actor_org.organization_id = po.organization_id
          JOIN organizations o ON o.id = po.organization_id
          WHERE actor_org.user_id = ? AND po.project_id = ?
            AND o.is_active = 1
            AND o.deleted_at IS NULL
+           AND ${MANAGER_PROJECT_MEMBERSHIP_SCOPE}
            AND (? = 0 OR po.is_active = 1)
          ORDER BY po.organization_id`,
       )

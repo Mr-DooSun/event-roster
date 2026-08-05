@@ -67,6 +67,7 @@ interface ResolvedImportRow {
   createParticipant: boolean;
   organizationParticipantCountAfterInsert: number;
   organizationParticipantRevisionSum: number;
+  organizationParticipantFingerprintAfterInsert: string;
   mutateRoster: boolean;
   before: ImportRosterSnapshot | null;
   after: ImportRosterSnapshot;
@@ -217,7 +218,7 @@ async function commitImportWithPolicy(
       );
     }
   }
-  const resolved: ResolvedImportRow[] = resolution.map((row) => {
+  const prepared = resolution.map((row) => {
     const selected = selectCandidate(row.input, row.candidates);
     const organizationId = row.organizationId as string;
     const expectedParticipantName = selected?.name ?? row.input.name;
@@ -239,9 +240,13 @@ async function commitImportWithPolicy(
       organizationName: row.organizationName as string,
       role: row.input.role,
       grade: row.input.grade,
-      source: policy.source,
+      source: selected?.entry_id
+        ? (selected.entry_source as RosterSource)
+        : policy.source,
       status: "ACTIVE",
-      wasExpectedAtStart: false,
+      wasExpectedAtStart: selected?.entry_id
+        ? selected.entry_was_expected === 1
+        : false,
     };
     return {
       rowNumber: row.input.rowNumber,
@@ -266,6 +271,34 @@ async function commitImportWithPolicy(
       grade: row.input.grade,
     };
   });
+  const participantFingerprints = new Map<string, string>();
+  for (const row of resolution) {
+    const organizationId = row.organizationId as string;
+    if (participantFingerprints.has(organizationId)) continue;
+    participantFingerprints.set(
+      organizationId,
+      participantSetFingerprint([
+        ...row.organizationParticipantSnapshot,
+        ...prepared
+          .filter(
+            (participant) =>
+              participant.organizationId === organizationId &&
+              participant.createParticipant,
+          )
+          .map((participant) => ({
+            id: participant.participantId,
+            name: participant.name,
+            revision: 0,
+          })),
+      ]),
+    );
+  }
+  const resolved: ResolvedImportRow[] = prepared.map((row) => ({
+    ...row,
+    organizationParticipantFingerprintAfterInsert: participantFingerprints.get(
+      row.organizationId,
+    ) as string,
+  }));
   const now = currentTime.toISOString();
   const batchId = crypto.randomUUID();
   const statements: D1PreparedStatement[] = [];
@@ -286,6 +319,9 @@ async function commitImportWithPolicy(
     );
   }
   const rosterMutations = resolved.filter((row) => row.mutateRoster);
+  if (policy.mode === "CLOSED_CORRECTION" && rosterMutations.length === 0) {
+    throw new DomainError("CONFLICT");
+  }
   for (const chunk of chunks(rosterMutations, AUDIT_CHUNK_SIZE)) {
     statements.push(
       importAuditInsert(
@@ -495,13 +531,14 @@ async function resolveRows(
     const organization = organizations.find(
       (item) => item.canonical_name === canonical(input.organizationName),
     );
-    const candidates = organization
+    const organizationParticipants = organization
       ? participantRows.filter(
-          (item) =>
-            item.organization_id === organization.id &&
-            canonical(item.name) === canonical(input.name),
+          (item) => item.organization_id === organization.id,
         )
       : [];
+    const candidates = organizationParticipants.filter(
+      (item) => canonical(item.name) === canonical(input.name),
+    );
     const issues: string[] = [];
     if (organization?.is_active !== 1) issues.push("UNKNOWN_ORGANIZATION");
     if (candidates.length > 1 && !selectCandidate(input, candidates)) {
@@ -517,17 +554,21 @@ async function resolveRows(
       organizationName: organization?.name,
       organizationCanonicalName: organization?.canonical_name,
       organizationParticipantCount: organization
-        ? participantRows.filter(
-            (participant) => participant.organization_id === organization.id,
-          ).length
+        ? organizationParticipants.length
         : 0,
       organizationParticipantRevisionSum: organization
-        ? participantRows
-            .filter(
-              (participant) => participant.organization_id === organization.id,
-            )
-            .reduce((sum, participant) => sum + participant.revision, 0)
+        ? organizationParticipants.reduce(
+            (sum, participant) => sum + participant.revision,
+            0,
+          )
         : 0,
+      organizationParticipantSnapshot: organizationParticipants.map(
+        (participant) => ({
+          id: participant.id,
+          name: participant.name,
+          revision: participant.revision,
+        }),
+      ),
       candidates,
       issues,
       existingEntryId: selected?.entry_id ?? undefined,
@@ -611,18 +652,43 @@ function rosterUpsert(
   now: string,
   policy: ImportMutationPolicy,
 ) {
-  const values = rows.map(() => "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").join(",");
-  const organizationIdentityPredicate =
-    policy.mode === "CLOSED_CORRECTION"
-      ? "o.name = i.expected_organization_identity"
-      : "o.canonical_name = i.expected_organization_identity";
+  const correction = policy.mode === "CLOSED_CORRECTION";
+  const values = rows
+    .map(() =>
+      correction
+        ? "(?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        : "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .join(",");
+  const organizationIdentityPredicate = correction
+    ? "o.name = i.expected_organization_identity"
+    : "o.canonical_name = i.expected_organization_identity";
+  const participantSetColumns = correction
+    ? "expected_organization_participant_fingerprint"
+    : `expected_organization_participant_count,
+         expected_organization_revision_sum`;
+  const participantSetPredicate = correction
+    ? `AND (
+             SELECT json_group_array(json_array(id, name, revision))
+             FROM (
+               SELECT id, name, revision FROM participants
+               WHERE organization_id = i.expected_organization_id
+               ORDER BY id
+             )
+           ) = i.expected_organization_participant_fingerprint`
+    : `AND (SELECT COUNT(*) FROM participants candidate
+            WHERE candidate.organization_id = i.expected_organization_id)
+           = i.expected_organization_participant_count
+       AND (SELECT COALESCE(SUM(candidate.revision), 0)
+            FROM participants candidate
+            WHERE candidate.organization_id = i.expected_organization_id)
+           = i.expected_organization_revision_sum`;
   return db
     .prepare(
       `WITH incoming(
          entry_id, participant_id, expected_name, expected_organization_id,
          expected_revision, expected_organization_identity,
-         expected_organization_participant_count,
-         expected_organization_revision_sum, participant_role, student_grade
+         ${participantSetColumns}, participant_role, student_grade
        ) AS (VALUES ${values})
        INSERT INTO project_roster_entries
          (id, project_id, participant_id, organization_id, participant_name_snapshot,
@@ -644,13 +710,7 @@ function rosterUpsert(
                              AND po.is_active = 1
                          )
                          AND ${organizationIdentityPredicate}
-                         AND (SELECT COUNT(*) FROM participants candidate
-                              WHERE candidate.organization_id = i.expected_organization_id)
-                             = i.expected_organization_participant_count
-                         AND (SELECT COALESCE(SUM(candidate.revision), 0)
-                              FROM participants candidate
-                              WHERE candidate.organization_id = i.expected_organization_id)
-                             = i.expected_organization_revision_sum
+                         ${participantSetPredicate}
                    THEN p.organization_id ELSE NULL END,
               p.name, o.name, i.participant_role, i.student_grade,
               '${policy.source}', 'ACTIVE', 0, 0, ?, ?, ?, ?
@@ -669,8 +729,12 @@ function rosterUpsert(
         policy.mode === "CLOSED_CORRECTION"
           ? row.organizationName
           : row.organizationCanonicalName,
-        row.organizationParticipantCountAfterInsert,
-        row.organizationParticipantRevisionSum,
+        ...(correction
+          ? [row.organizationParticipantFingerprintAfterInsert]
+          : [
+              row.organizationParticipantCountAfterInsert,
+              row.organizationParticipantRevisionSum,
+            ]),
         row.role,
         row.grade,
       ]),
@@ -681,6 +745,22 @@ function rosterUpsert(
       now,
       now,
     );
+}
+
+function participantSetFingerprint(
+  participants: Array<{ id: string; name: string; revision: number }>,
+) {
+  return JSON.stringify(
+    [...participants]
+      .sort((left, right) =>
+        left.id < right.id ? -1 : left.id > right.id ? 1 : 0,
+      )
+      .map((participant) => [
+        participant.id,
+        participant.name,
+        participant.revision,
+      ]),
+  );
 }
 
 function rosterConflictClause(policy: ImportMutationPolicy) {
@@ -709,9 +789,7 @@ function rosterConflictClause(policy: ImportMutationPolicy) {
     organization_name_snapshot = excluded.organization_name_snapshot,
     participant_role_snapshot = excluded.participant_role_snapshot,
     student_grade_snapshot = excluded.student_grade_snapshot,
-    source = excluded.source,
     status = 'ACTIVE',
-    was_expected_at_start = 0,
     revision = project_roster_entries.revision + 1,
     updated_by = excluded.updated_by,
     updated_at = excluded.updated_at
@@ -724,9 +802,7 @@ function rosterConflictClause(policy: ImportMutationPolicy) {
           IS NOT excluded.participant_role_snapshot
      OR project_roster_entries.student_grade_snapshot
           IS NOT excluded.student_grade_snapshot
-     OR project_roster_entries.source IS NOT excluded.source
-     OR project_roster_entries.status IS NOT 'ACTIVE'
-     OR project_roster_entries.was_expected_at_start IS NOT 0`;
+     OR project_roster_entries.status IS NOT 'ACTIVE'`;
 }
 
 function importAuditInsert(

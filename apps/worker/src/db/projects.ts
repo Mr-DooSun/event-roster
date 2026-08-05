@@ -1,4 +1,5 @@
 import type { Project, ProjectStatus } from "@event-roster/contracts";
+import { MANAGER_PROJECT_MEMBERSHIP_SCOPE } from "./project-organizations";
 
 interface ProjectRow {
   id: string;
@@ -78,6 +79,7 @@ export async function listProjects(
             AND uo.user_id = ?
             AND o.is_active = 1
             AND o.deleted_at IS NULL
+            AND ${MANAGER_PROJECT_MEMBERSHIP_SCOPE}
         )`);
     bindings.push(options.actorUserId);
   }

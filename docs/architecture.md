@@ -58,11 +58,19 @@ revision까지 추가로 요구한다. 브라우저의 `이력 보정 시작` �
 - `project_expected_snapshots`는 진행 시작 시점의 예상 인원을 소유하며 종료
   보정 중에는 insert, update, delete하지 않는다. 보정으로 바뀌는 것은 실제
   참석 인원과 예상 대비 증감뿐이다.
-- 보정 중 연결한 비활성·삭제 조직은 과거 표시와 집계를 위한 참조다. 그 연결은
-  조직 담당자에게 새 프로젝트 조회 범위나 mutation 권한을 부여하지 않는다.
+- 종료 프로젝트의 조직 담당자 read scope에는 연결의 `added_at`이 프로젝트의
+  `closed_at`과 같거나 이전인 조직만 들어간다. 따라서 종료 후 보정으로 연결한
+  조직은 연결 당시 활성 상태여도 목록·상세·조직·명단·집계·감사·내보내기 범위를
+  만들지 않으며, 비활성·삭제 master를 나중에 재활성화·복구해도 마찬가지다.
+- 종료 보정 Excel은 새 명단 행에만 `IN_PROGRESS`와 예상 인원 아님을 기록한다.
+  기존 active/cancelled 행은 snapshot과 상태를 보정하되 원래 `source`와
+  `was_expected_at_start`를 유지한다.
 - 조직 연결, 단일·bulk 명단 보정, Excel 보정은 각각 project revision 증가와
   correction 전용 감사를 같은 guarded D1 batch에 넣는다. stale revision이면
   데이터, revision, 감사 모두 반영되지 않는다.
+- Excel 확정은 조직별 참가자 집합의 정렬된 `(id,name,revision)` fingerprint를
+  batch 안에서 다시 확인한다. 실제 변경 행이 하나도 없으면 `CONFLICT`로 거부해
+  project revision, import run과 감사 기록을 남기지 않는다.
 
 ## 조직 삭제 overlay
 

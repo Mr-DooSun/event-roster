@@ -244,9 +244,9 @@ it("commits a closed import as actual history without rewriting participant mast
       organizationId: "org-active",
       role: "TEACHER",
       grade: null,
-      source: "IN_PROGRESS",
+      source: "PRE_REGISTRATION",
       status: "ACTIVE",
-      wasExpected: 0,
+      wasExpected: 1,
     },
     {
       name: "나중 참가자",
@@ -313,9 +313,9 @@ it("commits a closed import as actual history without rewriting participant mast
           organizationName: "가동 조직",
           role: "TEACHER",
           grade: null,
-          source: "IN_PROGRESS",
+          source: "PRE_REGISTRATION",
           status: "ACTIVE",
-          wasExpectedAtStart: false,
+          wasExpectedAtStart: true,
         },
       }),
       expect.objectContaining({
@@ -350,6 +350,131 @@ it("commits a closed import as actual history without rewriting participant mast
     finalTotal: 3,
     deltaTotal: -4,
   });
+});
+
+it("preserves existing active expected-row provenance during a closed correction import", async () => {
+  const fixture = await seedCorrectionCandidates();
+  await env.DB.prepare(
+    `UPDATE project_roster_entries
+     SET source = 'PRE_REGISTRATION', status = 'ACTIVE',
+         was_expected_at_start = 1
+     WHERE id = 'roster-active-old'`,
+  ).run();
+
+  const response = await authedRequest(
+    fixture.operator,
+    `/api/v1/projects/${fixture.closedProjectId}/history-corrections/imports/commit`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        expectedProjectRevision: 3,
+        rows: [
+          {
+            rowNumber: 2,
+            name: "가동 참가자",
+            organizationName: "가동 조직",
+            role: "TEACHER",
+            grade: null,
+          },
+        ],
+      }),
+    },
+  );
+
+  expect(response.status).toBe(201);
+  expect(await rosterState("roster-active-old")).toMatchObject({
+    participant_name_snapshot: "가동 참가자",
+    organization_name_snapshot: "가동 조직",
+    participant_role_snapshot: "TEACHER",
+    student_grade_snapshot: null,
+    source: "PRE_REGISTRATION",
+    status: "ACTIVE",
+    was_expected_at_start: 1,
+    revision: 1,
+  });
+});
+
+it("preserves existing cancelled expected-row provenance when a closed correction import restores it", async () => {
+  const fixture = await seedCorrectionCandidates();
+  await env.DB.prepare(
+    `UPDATE project_roster_entries
+     SET source = 'PRE_REGISTRATION', status = 'CANCELLED',
+         was_expected_at_start = 1
+     WHERE id = 'roster-active-old'`,
+  ).run();
+
+  const response = await authedRequest(
+    fixture.operator,
+    `/api/v1/projects/${fixture.closedProjectId}/history-corrections/imports/commit`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        expectedProjectRevision: 3,
+        rows: [
+          {
+            rowNumber: 2,
+            name: "가동 참가자",
+            organizationName: "가동 조직",
+            role: "TEACHER",
+            grade: null,
+          },
+        ],
+      }),
+    },
+  );
+
+  expect(response.status).toBe(201);
+  expect(await rosterState("roster-active-old")).toMatchObject({
+    participant_name_snapshot: "가동 참가자",
+    organization_name_snapshot: "가동 조직",
+    participant_role_snapshot: "TEACHER",
+    student_grade_snapshot: null,
+    source: "PRE_REGISTRATION",
+    status: "ACTIVE",
+    was_expected_at_start: 1,
+    revision: 1,
+  });
+});
+
+it("rejects a completely no-op closed correction import without revision, run, audit, or roster writes", async () => {
+  const fixture = await seedCorrectionCandidates();
+  await env.DB.prepare(
+    `UPDATE project_roster_entries
+     SET participant_name_snapshot = '가동 참가자',
+         organization_name_snapshot = '가동 조직',
+         participant_role_snapshot = 'STUDENT', student_grade_snapshot = 'M1',
+         source = 'PRE_REGISTRATION', status = 'ACTIVE',
+         was_expected_at_start = 1
+     WHERE id = 'roster-active-old'`,
+  ).run();
+  const before = await closedImportMutationState(fixture.closedProjectId);
+  const rosterBefore = await rosterState("roster-active-old");
+
+  const response = await authedRequest(
+    fixture.operator,
+    `/api/v1/projects/${fixture.closedProjectId}/history-corrections/imports/commit`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        expectedProjectRevision: 3,
+        rows: [
+          {
+            rowNumber: 2,
+            name: "가동 참가자",
+            organizationName: "가동 조직",
+            ...importStudentProfile,
+          },
+        ],
+      }),
+    },
+  );
+
+  expect(response.status).toBe(409);
+  expect(await response.json()).toMatchObject({ code: "CONFLICT" });
+  expect(await closedImportMutationState(fixture.closedProjectId)).toEqual(
+    before,
+  );
+  expect(await rosterState("roster-active-old")).toEqual(rosterBefore);
 });
 
 it("rolls back a closed import with a bad final row or stale revision", async () => {
@@ -532,13 +657,131 @@ it("rolls back when a selected closed-import participant is replaced after resol
   ).toEqual({ count: 0 });
 });
 
+it("rejects a same-count same-sum closed-import candidate addition race", async () => {
+  const fixture = await seedCorrectionCandidates();
+  const actor = await correctionActor(fixture.operator);
+  const timestamp = "2026-08-05T03:40:00.000Z";
+  await env.DB.prepare(
+    `INSERT INTO participants
+     (id, participant_id, name, organization_id, revision, created_at, updated_at)
+     VALUES ('import-fingerprint-old', 'P-FINGERPRINT-OLD', '교체될 무관 참가자',
+             'org-active', 0, ?, ?)`,
+  )
+    .bind(timestamp, timestamp)
+    .run();
+  const raceDb = beforeClosedImportBatch(async () => {
+    await env.DB.batch([
+      env.DB.prepare(
+        "DELETE FROM participants WHERE id = 'import-fingerprint-old'",
+      ),
+      env.DB.prepare(
+        `INSERT INTO participants
+         (id, participant_id, name, organization_id, revision,
+          created_at, updated_at)
+         VALUES ('import-concurrent-candidate', 'P-CONCURRENT-CANDIDATE',
+                 '동시 후보 추가', 'org-active', 0, ?, ?)`,
+      ).bind(timestamp, timestamp),
+    ]);
+  });
+
+  await expect(
+    commitClosedProjectImport(
+      { ...(env as Env), DB: raceDb },
+      actor,
+      fixture.closedProjectId,
+      [
+        {
+          rowNumber: 2,
+          name: "동시 후보 추가",
+          organizationName: "가동 조직",
+          ...importStudentProfile,
+        },
+      ],
+      3,
+    ),
+  ).rejects.toMatchObject({ code: "STALE_REVISION" });
+  expect(
+    await env.DB.prepare(
+      `SELECT COUNT(*) AS count FROM project_roster_entries roster
+       JOIN participants participant ON participant.id = roster.participant_id
+       WHERE roster.project_id = ? AND participant.name = '동시 후보 추가'`,
+    )
+      .bind(fixture.closedProjectId)
+      .first(),
+  ).toEqual({ count: 0 });
+  expect(await closedImportAudits(fixture.closedProjectId)).toEqual([]);
+  expect(
+    await env.DB.prepare("SELECT revision FROM projects WHERE id = ?")
+      .bind(fixture.closedProjectId)
+      .first(),
+  ).toEqual({ revision: 3 });
+});
+
+it("rejects a same-count same-sum closed-import candidate replacement race", async () => {
+  const fixture = await seedCorrectionCandidates();
+  const actor = await correctionActor(fixture.operator);
+  const timestamp = "2026-08-05T03:50:00.000Z";
+  await env.DB.prepare(
+    `INSERT INTO participants
+     (id, participant_id, name, organization_id, revision, created_at, updated_at)
+     VALUES ('import-candidate-old', 'P-CANDIDATE-OLD', '가동 참가자',
+             'org-active', 0, ?, ?)`,
+  )
+    .bind(timestamp, timestamp)
+    .run();
+  const rosterBefore = await rosterState("roster-active-old");
+  const raceDb = beforeClosedImportBatch(async () => {
+    await env.DB.batch([
+      env.DB.prepare(
+        "DELETE FROM participants WHERE id = 'import-candidate-old'",
+      ),
+      env.DB.prepare(
+        `INSERT INTO participants
+         (id, participant_id, name, organization_id, revision,
+          created_at, updated_at)
+         VALUES ('import-candidate-replacement', 'P-CANDIDATE-REPLACEMENT',
+                 '가동 참가자', 'org-active', 0, ?, ?)`,
+      ).bind(timestamp, timestamp),
+    ]);
+  });
+
+  await expect(
+    commitClosedProjectImport(
+      { ...(env as Env), DB: raceDb },
+      actor,
+      fixture.closedProjectId,
+      [
+        {
+          rowNumber: 2,
+          name: "가동 참가자",
+          organizationName: "가동 조직",
+          resolvedParticipantId: "active-participant",
+          role: "TEACHER",
+          grade: null,
+        },
+      ],
+      3,
+    ),
+  ).rejects.toMatchObject({ code: "STALE_REVISION" });
+  expect(await rosterState("roster-active-old")).toEqual(rosterBefore);
+  expect(await closedImportAudits(fixture.closedProjectId)).toEqual([]);
+  expect(
+    await env.DB.prepare(
+      `SELECT COUNT(*) AS count FROM project_import_runs
+       WHERE project_id = ?`,
+    )
+      .bind(fixture.closedProjectId)
+      .first(),
+  ).toEqual({ count: 0 });
+});
+
 it("rolls back when a closed-import organization exact name changes after resolution", async () => {
   const fixture = await seedCorrectionCandidates();
   await env.DB.prepare(
     `UPDATE project_roster_entries
      SET participant_name_snapshot = '가동 참가자',
          organization_name_snapshot = '가동 조직',
-         participant_role_snapshot = 'STUDENT', student_grade_snapshot = 'M1',
+         participant_role_snapshot = 'TEACHER', student_grade_snapshot = NULL,
          source = 'IN_PROGRESS', status = 'ACTIVE', was_expected_at_start = 0
      WHERE id = 'roster-active-old'`,
   ).run();
@@ -1038,6 +1281,74 @@ it("does not grant inactive or deleted organization managers visibility or corre
         operation: "ADDED",
       }),
     ]),
+  );
+});
+
+it("keeps every manager read scope closed to memberships added after project close", async () => {
+  const fixture = await seedCorrectionCandidates();
+  await seedOrganization("org-later-active", "종료 후 가동 조직");
+  await env.DB.batch([
+    env.DB.prepare(
+      `DELETE FROM user_organizations
+       WHERE user_id = ? AND organization_id = 'org-active'`,
+    ).bind(fixture.manager.userId),
+    env.DB.prepare(
+      `INSERT INTO user_organizations
+       (user_id, organization_id, assignment_role, assigned_by, assigned_at)
+       VALUES (?, 'org-later-active', 'MANAGER', ?, ?),
+              (?, 'org-inactive', 'MANAGER', ?, ?),
+              (?, 'org-deleted', 'MANAGER', ?, ?)`,
+    ).bind(
+      fixture.manager.userId,
+      fixture.operator.userId,
+      "2026-08-05T01:00:00.000Z",
+      fixture.manager.userId,
+      fixture.operator.userId,
+      "2026-08-05T01:00:00.000Z",
+      fixture.manager.userId,
+      fixture.operator.userId,
+      "2026-08-05T01:00:00.000Z",
+    ),
+  ]);
+
+  let expectedProjectRevision = 3;
+  for (const organizationId of [
+    "org-later-active",
+    "org-inactive",
+    "org-deleted",
+  ]) {
+    const linked = await authedRequest(
+      fixture.operator,
+      `/api/v1/projects/${fixture.closedProjectId}/history-corrections/organizations`,
+      {
+        method: "POST",
+        body: JSON.stringify({ organizationId, expectedProjectRevision }),
+      },
+    );
+    expect(linked.status).toBe(201);
+    expectedProjectRevision += 1;
+  }
+
+  await expectManagerProjectReadsDenied(
+    fixture.manager,
+    fixture.closedProjectId,
+  );
+
+  await env.DB.batch([
+    env.DB.prepare(
+      `UPDATE organizations SET is_active = 1, updated_at = ?
+       WHERE id = 'org-inactive'`,
+    ).bind("2026-08-05T02:00:00.000Z"),
+    env.DB.prepare(
+      `UPDATE organizations
+       SET is_active = 1, deleted_at = NULL, deleted_by = NULL, updated_at = ?
+       WHERE id = 'org-deleted'`,
+    ).bind("2026-08-05T02:00:00.000Z"),
+  ]);
+
+  await expectManagerProjectReadsDenied(
+    fixture.manager,
+    fixture.closedProjectId,
   );
 });
 
@@ -2681,6 +2992,24 @@ async function managerProjectIds(
   )
     .map(({ id }) => id)
     .sort();
+}
+
+async function expectManagerProjectReadsDenied(
+  manager: Awaited<ReturnType<typeof seedManager>>,
+  projectId: string,
+) {
+  expect(await managerProjectIds(manager)).not.toContain(projectId);
+  for (const path of [
+    `/api/v1/projects/${projectId}`,
+    `/api/v1/projects/${projectId}/organizations`,
+    `/api/v1/projects/${projectId}/roster`,
+    `/api/v1/projects/${projectId}/summary`,
+    `/api/v1/projects/${projectId}/audit`,
+    `/api/v1/projects/${projectId}/exports/roster`,
+  ]) {
+    const response = await authedRequest(manager, path);
+    expect(response.status, path).toBe(403);
+  }
 }
 
 async function managerParticipantIds(
