@@ -6,6 +6,7 @@ import { HttpProblem, problemResponse } from "./http/problem";
 import { authRoutes } from "./routes/auth";
 import { bootstrapRoutes } from "./routes/bootstrap";
 import { healthRoutes } from "./routes/health";
+import { historyCorrectionRoutes } from "./routes/history-corrections";
 import { importRoutes } from "./routes/imports";
 import { organizationRoutes } from "./routes/organizations";
 import { participantRoutes } from "./routes/participants";
@@ -24,6 +25,7 @@ export function createApp() {
   app.route("/api/v1", userRoutes);
   app.route("/api/v1", projectRoutes);
   app.route("/api/v1", projectOrganizationRoutes);
+  app.route("/api/v1", historyCorrectionRoutes);
   app.route("/api/v1", participantRoutes);
   app.route("/api/v1", rosterRoutes);
   app.route("/api/v1", importRoutes);
