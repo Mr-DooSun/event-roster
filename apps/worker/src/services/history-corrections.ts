@@ -90,6 +90,10 @@ type ClosedRosterPatchInput = {
   expectedEntryRevision: number;
 };
 
+interface ClosedRosterCorrectionHooks {
+  afterCommit?: () => Promise<void>;
+}
+
 const CLOSED_BULK_PARTICIPANT_CHUNK_SIZE = 15;
 const CLOSED_BULK_ROSTER_CHUNK_SIZE = 15;
 const CLOSED_BULK_AUDIT_CHUNK_SIZE = 18;
@@ -193,6 +197,7 @@ export async function correctClosedProjectRoster(
   projectId: string,
   input: ClosedRosterCreateInput,
   now = new Date(),
+  hooks?: ClosedRosterCorrectionHooks,
 ) {
   return "newParticipant" in input
     ? createClosedProjectParticipantAndRoster(
@@ -202,8 +207,16 @@ export async function correctClosedProjectRoster(
         input.newParticipant,
         input.expectedRevision,
         now,
+        hooks,
       )
-    : addExistingParticipantToClosedProject(env, actor, projectId, input, now);
+    : addExistingParticipantToClosedProject(
+        env,
+        actor,
+        projectId,
+        input,
+        now,
+        hooks,
+      );
 }
 
 async function addExistingParticipantToClosedProject(
@@ -212,6 +225,7 @@ async function addExistingParticipantToClosedProject(
   projectId: string,
   input: Extract<ClosedRosterCreateInput, { participantId: string }>,
   now: Date,
+  hooks?: ClosedRosterCorrectionHooks,
 ): Promise<{
   created: boolean;
   result: RosterRecord & { projectRevision: number };
@@ -376,12 +390,24 @@ async function addExistingParticipantToClosedProject(
       error,
     );
   }
-  const rosterEntry = await findRosterById(env.DB, projectId, entryId);
-  if (!rosterEntry) throw new DomainError("INTERNAL_ERROR");
+  await hooks?.afterCommit?.();
   return {
     created: !existing,
     result: {
-      ...rosterEntry,
+      id: entryId,
+      projectId,
+      participantId: input.participantId,
+      participantNumber: participant.participant_id,
+      organizationId: after.organizationId,
+      participantName: after.name,
+      organizationName: organization.name,
+      source: existing?.source ?? "IN_PROGRESS",
+      status: "ACTIVE",
+      role: after.role,
+      grade: after.grade,
+      wasExpectedAtStart: existing?.wasExpectedAtStart ?? false,
+      revision: existing ? existing.revision + 1 : 0,
+      updatedAt: timestamp,
       projectRevision: input.expectedRevision + 1,
     },
   };
@@ -399,6 +425,7 @@ async function createClosedProjectParticipantAndRoster(
   },
   expectedRevision: number,
   now: Date,
+  hooks?: ClosedRosterCorrectionHooks,
 ) {
   const project = await requireClosedCorrectionProject(env, actor, projectId);
   if (project.revision !== expectedRevision) {
@@ -511,8 +538,7 @@ async function createClosedProjectParticipantAndRoster(
       error,
     );
   }
-  const rosterEntry = await findRosterById(env.DB, projectId, entryId);
-  if (!rosterEntry) throw new DomainError("INTERNAL_ERROR");
+  await hooks?.afterCommit?.();
   return {
     created: true,
     result: {
@@ -523,7 +549,22 @@ async function createClosedProjectParticipantAndRoster(
         organizationId: participantInput.organizationId,
         revision: 0,
       },
-      rosterEntry,
+      rosterEntry: {
+        id: entryId,
+        projectId,
+        participantId,
+        participantNumber,
+        organizationId: participantInput.organizationId,
+        participantName: participantInput.name,
+        organizationName: organization.name,
+        source: "IN_PROGRESS" as const,
+        status: "ACTIVE" as const,
+        role: participantInput.role,
+        grade: participantInput.grade,
+        wasExpectedAtStart: false,
+        revision: 0,
+        updatedAt: timestamp,
+      },
       projectRevision: expectedRevision + 1,
     },
   };
@@ -536,6 +577,7 @@ export async function patchClosedProjectRoster(
   entryId: string,
   input: ClosedRosterPatchInput,
   now = new Date(),
+  hooks?: ClosedRosterCorrectionHooks,
 ): Promise<RosterRecord & { projectRevision: number }> {
   const project = await requireClosedCorrectionProject(env, actor, projectId);
   if (project.revision !== input.expectedProjectRevision) {
@@ -553,11 +595,15 @@ export async function patchClosedProjectRoster(
     grade: input.grade !== undefined ? input.grade : current.grade,
     status: input.status ?? current.status,
   };
-  const profile = RosterParticipantProfileSchema.safeParse({
-    role: after.role,
-    grade: after.grade,
-  });
-  if (!profile.success) throw new DomainError("VALIDATION_FAILED");
+  if (input.role !== undefined || input.grade !== undefined) {
+    const profile = RosterParticipantProfileSchema.safeParse({
+      role: after.role,
+      grade: after.grade,
+    });
+    if (!profile.success) throw new DomainError("VALIDATION_FAILED");
+    after.role = profile.data.role;
+    after.grade = profile.data.grade;
+  }
   const before = closedRosterSnapshot(current);
   if (sameClosedRosterSnapshot(before, after)) {
     throw new DomainError("CONFLICT");
@@ -622,8 +668,8 @@ export async function patchClosedProjectRoster(
           after.name,
           after.organizationId,
           organization.name,
-          profile.data.role,
-          profile.data.grade,
+          after.role,
+          after.grade,
           after.status,
           actor.session.user.id,
           timestamp,
@@ -659,10 +705,17 @@ export async function patchClosedProjectRoster(
       error,
     );
   }
-  const updated = await findRosterById(env.DB, projectId, entryId);
-  if (!updated) throw new DomainError("INTERNAL_ERROR");
+  await hooks?.afterCommit?.();
   return {
-    ...updated,
+    ...current,
+    organizationId: after.organizationId,
+    participantName: after.name,
+    organizationName: organization.name,
+    status: after.status,
+    role: after.role,
+    grade: after.grade,
+    revision: input.expectedEntryRevision + 1,
+    updatedAt: timestamp,
     projectRevision: input.expectedProjectRevision + 1,
   };
 }
@@ -690,10 +743,11 @@ export async function correctClosedProjectRosterBulk(
   );
   const existingParticipants = (
     await env.DB.prepare(
-      `SELECT name, revision FROM participants WHERE organization_id = ?`,
+      `SELECT id, name, revision FROM participants
+       WHERE organization_id = ? ORDER BY id`,
     )
       .bind(input.organizationId)
-      .all<{ name: string; revision: number }>()
+      .all<{ id: string; name: string; revision: number }>()
   ).results;
   const duplicates = collectClosedBulkDuplicates(
     input.participants.map((participant) => participant.name),
@@ -714,25 +768,25 @@ export async function correctClosedProjectRosterBulk(
     rosterEntryId: crypto.randomUUID(),
     ...participant,
   }));
-  const participantRevisionSum = existingParticipants.reduce(
-    (sum, participant) => sum + participant.revision,
-    0,
+  const participantSnapshotFingerprint = JSON.stringify(
+    existingParticipants.map((participant) => [
+      participant.id,
+      participant.name,
+      participant.revision,
+    ]),
   );
   const snapshotPredicate = input.confirmDuplicateNames
     ? ""
     : ` AND (
-           SELECT COUNT(*) FROM participants WHERE organization_id = ?
-         ) = ? AND COALESCE((
-           SELECT SUM(revision) FROM participants WHERE organization_id = ?
-         ), 0) = ?`;
+           SELECT json_group_array(json_array(id, name, revision))
+           FROM (
+             SELECT id, name, revision FROM participants
+             WHERE organization_id = ? ORDER BY id
+           )
+         ) = ?`;
   const snapshotBindings = input.confirmDuplicateNames
     ? []
-    : [
-        input.organizationId,
-        existingParticipants.length,
-        input.organizationId,
-        participantRevisionSum,
-      ];
+    : [input.organizationId, participantSnapshotFingerprint];
   const auditRows = prepared.map((participant) => ({
     id: crypto.randomUUID(),
     entityId: participant.rosterEntryId,

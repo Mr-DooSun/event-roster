@@ -2,7 +2,11 @@ import { env } from "cloudflare:workers";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import type { Env } from "../src/env";
 import { requireActor } from "../src/middleware/authentication";
-import { correctClosedProjectRoster } from "../src/services/history-corrections";
+import {
+  correctClosedProjectRoster,
+  correctClosedProjectRosterBulk,
+  patchClosedProjectRoster,
+} from "../src/services/history-corrections";
 import {
   authedRequest,
   seedManager,
@@ -773,6 +777,245 @@ it("creates a new participant and closed roster row atomically with one stable p
   }
 });
 
+it("returns the existing-participant add commit state when a later correction commits before response mapping", async () => {
+  const fixture = await seedCorrectionCandidates();
+  const actor = await correctionActor(fixture.operator);
+  const committedAt = new Date("2026-08-05T01:00:00.000Z");
+  let hookRan = false;
+
+  const mutation = await correctClosedProjectRoster(
+    env as Env,
+    actor,
+    fixture.closedProjectId,
+    {
+      participantId: "deleted-participant",
+      confirmedParticipant: {
+        name: "단건 커밋 이름",
+        organizationId: "org-active",
+        role: "STUDENT",
+        grade: "H2",
+      },
+      expectedParticipantRevision: 1,
+      expectedRevision: 3,
+    },
+    committedAt,
+    {
+      afterCommit: async () => {
+        hookRan = true;
+        await env.DB.batch([
+          env.DB.prepare(
+            `UPDATE project_roster_entries
+             SET participant_name_snapshot = '후속 단건 이름',
+                 status = 'CANCELLED', revision = revision + 1
+             WHERE project_id = ? AND participant_id = 'deleted-participant'`,
+          ).bind(fixture.closedProjectId),
+          env.DB.prepare(
+            `UPDATE projects SET revision = revision + 1
+             WHERE id = ?`,
+          ).bind(fixture.closedProjectId),
+        ]);
+      },
+    },
+  );
+
+  expect(hookRan).toBe(true);
+  expect(mutation).toMatchObject({
+    created: true,
+    result: {
+      participantName: "단건 커밋 이름",
+      source: "IN_PROGRESS",
+      status: "ACTIVE",
+      role: "STUDENT",
+      grade: "H2",
+      wasExpectedAtStart: false,
+      revision: 0,
+      updatedAt: committedAt.toISOString(),
+      projectRevision: 4,
+    },
+  });
+  expect(
+    await env.DB.prepare(
+      `SELECT participant_name_snapshot, status, revision
+       FROM project_roster_entries
+       WHERE project_id = ? AND participant_id = 'deleted-participant'`,
+    )
+      .bind(fixture.closedProjectId)
+      .first(),
+  ).toEqual({
+    participant_name_snapshot: "후속 단건 이름",
+    status: "CANCELLED",
+    revision: 1,
+  });
+  expect(await closedProjectState(fixture.closedProjectId)).toMatchObject({
+    revision: 5,
+  });
+  expect(await rosterCorrectionAudits(fixture.closedProjectId)).toEqual([
+    expect.objectContaining({
+      operation: "ADDED",
+      after: expect.objectContaining({
+        name: "단건 커밋 이름",
+        status: "ACTIVE",
+      }),
+    }),
+  ]);
+});
+
+it("returns the new-participant add commit state when a later correction commits before response mapping", async () => {
+  const fixture = await seedCorrectionCandidates();
+  const actor = await correctionActor(fixture.operator);
+  const committedAt = new Date("2026-08-05T01:10:00.000Z");
+  let hookRan = false;
+
+  const mutation = await correctClosedProjectRoster(
+    env as Env,
+    actor,
+    fixture.closedProjectId,
+    {
+      newParticipant: {
+        name: "신규 커밋 이름",
+        organizationId: "org-active",
+        role: "TEACHER",
+        grade: null,
+      },
+      expectedRevision: 3,
+    },
+    committedAt,
+    {
+      afterCommit: async () => {
+        hookRan = true;
+        await env.DB.batch([
+          env.DB.prepare(
+            `UPDATE project_roster_entries
+             SET participant_name_snapshot = '후속 신규 이름',
+                 status = 'CANCELLED', revision = revision + 1
+             WHERE project_id = ? AND participant_name_snapshot = '신규 커밋 이름'`,
+          ).bind(fixture.closedProjectId),
+          env.DB.prepare(
+            `UPDATE projects SET revision = revision + 1
+             WHERE id = ?`,
+          ).bind(fixture.closedProjectId),
+        ]);
+      },
+    },
+  );
+
+  expect(hookRan).toBe(true);
+  expect(mutation).toMatchObject({
+    created: true,
+    result: {
+      participant: {
+        name: "신규 커밋 이름",
+        organizationId: "org-active",
+        revision: 0,
+      },
+      rosterEntry: {
+        participantName: "신규 커밋 이름",
+        source: "IN_PROGRESS",
+        status: "ACTIVE",
+        role: "TEACHER",
+        grade: null,
+        wasExpectedAtStart: false,
+        revision: 0,
+        updatedAt: committedAt.toISOString(),
+      },
+      projectRevision: 4,
+    },
+  });
+  expect(
+    await env.DB.prepare(
+      `SELECT participant_name_snapshot, status, revision
+       FROM project_roster_entries
+       WHERE project_id = ? AND participant_name_snapshot = '후속 신규 이름'`,
+    )
+      .bind(fixture.closedProjectId)
+      .first(),
+  ).toEqual({
+    participant_name_snapshot: "후속 신규 이름",
+    status: "CANCELLED",
+    revision: 1,
+  });
+  expect(await closedProjectState(fixture.closedProjectId)).toMatchObject({
+    revision: 5,
+  });
+  expect(await rosterCorrectionAudits(fixture.closedProjectId)).toEqual([
+    expect.objectContaining({
+      operation: "CREATED_AND_ADDED",
+      after: expect.objectContaining({
+        name: "신규 커밋 이름",
+        status: "ACTIVE",
+      }),
+    }),
+  ]);
+});
+
+it("returns the patch commit state when a later correction commits before response mapping", async () => {
+  const fixture = await seedCorrectionCandidates();
+  const actor = await correctionActor(fixture.operator);
+  const committedAt = new Date("2026-08-05T01:20:00.000Z");
+  let hookRan = false;
+
+  const result = await patchClosedProjectRoster(
+    env as Env,
+    actor,
+    fixture.closedProjectId,
+    "roster-active-old",
+    {
+      name: "패치 커밋 이름",
+      expectedProjectRevision: 3,
+      expectedEntryRevision: 0,
+    },
+    committedAt,
+    {
+      afterCommit: async () => {
+        hookRan = true;
+        await env.DB.batch([
+          env.DB.prepare(
+            `UPDATE project_roster_entries
+             SET participant_name_snapshot = '후속 패치 이름',
+                 status = 'CANCELLED', revision = revision + 1
+             WHERE id = 'roster-active-old'`,
+          ),
+          env.DB.prepare(
+            `UPDATE projects SET revision = revision + 1
+             WHERE id = ?`,
+          ).bind(fixture.closedProjectId),
+        ]);
+      },
+    },
+  );
+
+  expect(hookRan).toBe(true);
+  expect(result).toMatchObject({
+    id: "roster-active-old",
+    participantName: "패치 커밋 이름",
+    source: "IN_PROGRESS",
+    status: "ACTIVE",
+    role: "STUDENT",
+    grade: "M1",
+    wasExpectedAtStart: false,
+    revision: 1,
+    updatedAt: committedAt.toISOString(),
+    projectRevision: 4,
+  });
+  expect(await rosterState("roster-active-old")).toMatchObject({
+    participant_name_snapshot: "후속 패치 이름",
+    status: "CANCELLED",
+    revision: 2,
+  });
+  expect(await closedProjectState(fixture.closedProjectId)).toMatchObject({
+    revision: 5,
+  });
+  expect(await rosterCorrectionAudits(fixture.closedProjectId)).toEqual([
+    expect.objectContaining({
+      operation: "UPDATED",
+      after: expect.objectContaining({
+        name: "패치 커밋 이름",
+        status: "ACTIVE",
+      }),
+    }),
+  ]);
+});
+
 it("requires an active project membership but not an active organization master for a closed addition", async () => {
   const fixture = await seedCorrectionCandidates();
   const before = await mutationCounts(fixture.closedProjectId);
@@ -999,6 +1242,111 @@ it("patches only a closed roster snapshot and preserves source, expectation, mas
   ]);
 });
 
+it("preserves a legacy null profile across name-only correction, cancellation, and restoration", async () => {
+  const fixture = await seedCorrectionCandidates();
+  await env.DB.prepare(
+    `UPDATE project_roster_entries
+     SET participant_role_snapshot = NULL, student_grade_snapshot = NULL
+     WHERE id = 'roster-active-old'`,
+  ).run();
+
+  const renamed = await authedRequest(
+    fixture.operator,
+    `/api/v1/projects/${fixture.closedProjectId}/history-corrections/roster/roster-active-old`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        name: "legacy 이름 보정",
+        expectedProjectRevision: 3,
+        expectedEntryRevision: 0,
+      }),
+    },
+  );
+  expect(renamed.status).toBe(200);
+  expect(await renamed.json()).toMatchObject({
+    participantName: "legacy 이름 보정",
+    source: "IN_PROGRESS",
+    status: "ACTIVE",
+    role: null,
+    grade: null,
+    wasExpectedAtStart: false,
+    revision: 1,
+    projectRevision: 4,
+  });
+
+  const cancelled = await authedRequest(
+    fixture.operator,
+    `/api/v1/projects/${fixture.closedProjectId}/history-corrections/roster/roster-active-old`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        status: "CANCELLED",
+        expectedProjectRevision: 4,
+        expectedEntryRevision: 1,
+      }),
+    },
+  );
+  expect(cancelled.status).toBe(200);
+  expect(await cancelled.json()).toMatchObject({
+    participantName: "legacy 이름 보정",
+    status: "CANCELLED",
+    role: null,
+    grade: null,
+    revision: 2,
+    projectRevision: 5,
+  });
+
+  const restored = await authedRequest(
+    fixture.operator,
+    `/api/v1/projects/${fixture.closedProjectId}/history-corrections/roster/roster-active-old`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        status: "ACTIVE",
+        expectedProjectRevision: 5,
+        expectedEntryRevision: 2,
+      }),
+    },
+  );
+  expect(restored.status).toBe(200);
+  expect(await restored.json()).toMatchObject({
+    participantName: "legacy 이름 보정",
+    source: "IN_PROGRESS",
+    status: "ACTIVE",
+    role: null,
+    grade: null,
+    wasExpectedAtStart: false,
+    revision: 3,
+    projectRevision: 6,
+  });
+  expect(await rosterState("roster-active-old")).toMatchObject({
+    participant_name_snapshot: "legacy 이름 보정",
+    participant_role_snapshot: null,
+    student_grade_snapshot: null,
+    source: "IN_PROGRESS",
+    status: "ACTIVE",
+    was_expected_at_start: 0,
+    revision: 3,
+  });
+  expect(await rosterCorrectionAudits(fixture.closedProjectId)).toEqual([
+    expect.objectContaining({
+      operation: "UPDATED",
+      before: expect.objectContaining({ role: null, grade: null }),
+      after: expect.objectContaining({ role: null, grade: null }),
+    }),
+    expect.objectContaining({
+      operation: "CANCELLED",
+      before: expect.objectContaining({ role: null, grade: null }),
+      after: expect.objectContaining({ role: null, grade: null }),
+    }),
+    expect.objectContaining({
+      operation: "RESTORED",
+      before: expect.objectContaining({ role: null, grade: null }),
+      after: expect.objectContaining({ role: null, grade: null }),
+    }),
+  ]);
+});
+
 it("bulk-adds 30 closed-project participants with correction semantics and one shared batch audit", async () => {
   const fixture = await seedCorrectionCandidates();
   await env.DB.prepare(
@@ -1137,6 +1485,77 @@ it("bulk-adds 30 closed-project participants with correction semantics and one s
   });
 });
 
+it("rejects an unconfirmed bulk correction when a same-count same-revision participant is replaced after the snapshot", async () => {
+  const fixture = await seedCorrectionCandidates();
+  const actor = await requireActor(
+    new Request("https://event-roster.test", {
+      headers: authenticatedHeaders(fixture.operator),
+    }),
+    env as Env,
+  );
+  const timestamp = "2026-08-05T00:00:00.000Z";
+  await env.DB.prepare(
+    `INSERT INTO participants
+     (id, participant_id, name, organization_id, revision, created_at, updated_at)
+     VALUES ('bulk-snapshot-a', 'P-BULK-A', '교체 전 참가자',
+             'org-active', 0, ?, ?)`,
+  )
+    .bind(timestamp, timestamp)
+    .run();
+  const before = await mutationCounts(fixture.closedProjectId);
+  let pending = true;
+  const raceDb = {
+    prepare: (query: string) => env.DB.prepare(query),
+    batch: async (statements: D1PreparedStatement[]) => {
+      if (pending) {
+        pending = false;
+        await env.DB.batch([
+          env.DB.prepare(
+            "DELETE FROM participants WHERE id = 'bulk-snapshot-a'",
+          ),
+          env.DB.prepare(
+            `INSERT INTO participants
+             (id, participant_id, name, organization_id, revision,
+              created_at, updated_at)
+             VALUES ('bulk-snapshot-b', 'P-BULK-B', '교체 전 참가자',
+                     'org-active', 0, ?, ?)`,
+          ).bind(timestamp, timestamp),
+        ]);
+      }
+      return env.DB.batch(statements);
+    },
+  } as D1Database;
+
+  await expect(
+    correctClosedProjectRosterBulk(
+      { ...(env as Env), DB: raceDb },
+      actor,
+      fixture.closedProjectId,
+      {
+        organizationId: "org-active",
+        participants: [
+          { name: "snapshot 뒤 신규", role: "STUDENT", grade: "M2" },
+        ],
+        confirmDuplicateNames: false,
+        expectedRevision: 3,
+      },
+    ),
+  ).rejects.toMatchObject({ code: "STALE_REVISION" });
+  expect(await mutationCounts(fixture.closedProjectId)).toEqual(before);
+  expect(
+    await env.DB.prepare(
+      `SELECT id, revision FROM participants
+       WHERE name = '교체 전 참가자'`,
+    ).first(),
+  ).toEqual({ id: "bulk-snapshot-b", revision: 0 });
+  expect(
+    await env.DB.prepare(
+      `SELECT COUNT(*) AS count FROM participants
+       WHERE name = 'snapshot 뒤 신규'`,
+    ).first(),
+  ).toEqual({ count: 0 });
+});
+
 it("rolls back every closed bulk row, revision increment, and correction audit on stale or audit failure", async () => {
   const fixture = await seedCorrectionCandidates();
   const before = await mutationCounts(fixture.closedProjectId);
@@ -1196,6 +1615,17 @@ async function participantState(participantId: string) {
   )
     .bind(participantId)
     .first();
+}
+
+async function correctionActor(
+  operator: Awaited<ReturnType<typeof seedOperator>>,
+) {
+  return requireActor(
+    new Request("https://event-roster.test", {
+      headers: authenticatedHeaders(operator),
+    }),
+    env as Env,
+  );
 }
 
 async function rosterState(entryId: string) {
