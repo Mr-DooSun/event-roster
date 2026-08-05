@@ -1024,7 +1024,9 @@ it("routes closed history corrections through their endpoints and exposes every 
   expect(
     screen.getByText("예상 인원은 변경되지 않고 실제 참석 인원에 반영됩니다."),
   ).toBeVisible();
-  const organizations = screen.getByRole("list", { name: "연결된 조직 상태" });
+  const organizations = await screen.findByRole("list", {
+    name: "연결된 조직 상태",
+  });
   expect(organizations).toHaveTextContent("활성 연결");
   expect(organizations).toHaveTextContent("비활성 연결");
   expect(organizations).toHaveTextContent("삭제된 연결");
