@@ -298,18 +298,24 @@ it("commits a closed import as actual history without rewriting participant mast
         role: "TEACHER",
         grade: null,
         before: {
-          name: "스냅샷 참가자",
+          participantName: "스냅샷 참가자",
           organizationId: "org-active",
+          organizationName: "스냅샷 조직",
           role: "STUDENT",
           grade: "M1",
+          source: "PRE_REGISTRATION",
           status: "CANCELLED",
+          wasExpectedAtStart: true,
         },
         after: {
-          name: "가동 참가자",
+          participantName: "가동 참가자",
           organizationId: "org-active",
+          organizationName: "가동 조직",
           role: "TEACHER",
           grade: null,
+          source: "IN_PROGRESS",
           status: "ACTIVE",
+          wasExpectedAtStart: false,
         },
       }),
       expect.objectContaining({
@@ -318,7 +324,7 @@ it("commits a closed import as actual history without rewriting participant mast
         grade: "H2",
         before: null,
         after: expect.objectContaining({
-          name: "나중 참가자",
+          participantName: "나중 참가자",
           status: "ACTIVE",
         }),
       }),
@@ -328,7 +334,7 @@ it("commits a closed import as actual history without rewriting participant mast
         grade: null,
         before: null,
         after: expect.objectContaining({
-          name: "종료 신규 참가자",
+          participantName: "종료 신규 참가자",
           status: "ACTIVE",
         }),
       }),
@@ -516,6 +522,60 @@ it("rolls back when a selected closed-import participant is replaced after resol
       .first(),
   ).toEqual({ count: 0 });
   expect(await closedImportAudits(fixture.closedProjectId)).toEqual([]);
+  expect(
+    await env.DB.prepare(
+      `SELECT COUNT(*) AS count FROM project_import_runs
+       WHERE project_id = ?`,
+    )
+      .bind(fixture.closedProjectId)
+      .first(),
+  ).toEqual({ count: 0 });
+});
+
+it("rolls back when a closed-import organization exact name changes after resolution", async () => {
+  const fixture = await seedCorrectionCandidates();
+  await env.DB.prepare(
+    `UPDATE project_roster_entries
+     SET participant_name_snapshot = '가동 참가자',
+         organization_name_snapshot = '가동 조직',
+         participant_role_snapshot = 'STUDENT', student_grade_snapshot = 'M1',
+         source = 'IN_PROGRESS', status = 'ACTIVE', was_expected_at_start = 0
+     WHERE id = 'roster-active-old'`,
+  ).run();
+  const actor = await correctionActor(fixture.operator);
+  const raceDb = beforeClosedImportBatch(async () => {
+    await env.DB.prepare(
+      `UPDATE organizations SET name = '가동 조직 '
+       WHERE id = 'org-active'`,
+    ).run();
+  });
+
+  await expect(
+    commitClosedProjectImport(
+      { ...(env as Env), DB: raceDb },
+      actor,
+      fixture.closedProjectId,
+      [
+        {
+          rowNumber: 2,
+          name: "가동 참가자",
+          organizationName: "가동 조직",
+          ...importStudentProfile,
+        },
+      ],
+      3,
+    ),
+  ).rejects.toMatchObject({ code: "STALE_REVISION" });
+  expect(await rosterState("roster-active-old")).toMatchObject({
+    organization_name_snapshot: "가동 조직",
+    revision: 0,
+  });
+  expect(await closedImportAudits(fixture.closedProjectId)).toEqual([]);
+  expect(
+    await env.DB.prepare(`SELECT revision FROM projects WHERE id = ?`)
+      .bind(fixture.closedProjectId)
+      .first(),
+  ).toEqual({ revision: 3 });
   expect(
     await env.DB.prepare(
       `SELECT COUNT(*) AS count FROM project_import_runs
@@ -2293,18 +2353,24 @@ async function closedImportAudits(projectId: string) {
         role: string;
         grade: string | null;
         before: null | {
-          name: string;
+          participantName: string;
           organizationId: string;
+          organizationName: string;
           role: string | null;
           grade: string | null;
+          source: string;
           status: string;
+          wasExpectedAtStart: boolean;
         };
         after: {
-          name: string;
+          participantName: string;
           organizationId: string;
+          organizationName: string;
           role: string;
           grade: string | null;
+          source: string;
           status: string;
+          wasExpectedAtStart: boolean;
         };
       },
   );

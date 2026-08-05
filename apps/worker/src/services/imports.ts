@@ -44,11 +44,14 @@ const CLOSED_CORRECTION_IMPORT_POLICY: ImportMutationPolicy = {
 };
 
 interface ImportRosterSnapshot {
-  name: string;
+  participantName: string;
   organizationId: string;
+  organizationName: string;
   role: ParticipantRole | null;
   grade: StudentGrade | null;
+  source: RosterSource;
   status: RosterStatus;
+  wasExpectedAtStart: boolean;
 }
 
 interface ResolvedImportRow {
@@ -220,19 +223,25 @@ async function commitImportWithPolicy(
     const expectedParticipantName = selected?.name ?? row.input.name;
     const before = selected?.entry_id
       ? {
-          name: selected.entry_participant_name as string,
+          participantName: selected.entry_participant_name as string,
           organizationId: selected.entry_organization_id as string,
+          organizationName: selected.entry_organization_name as string,
           role: selected.entry_role,
           grade: selected.entry_grade,
+          source: selected.entry_source as RosterSource,
           status: selected.entry_status as RosterStatus,
+          wasExpectedAtStart: selected.entry_was_expected === 1,
         }
       : null;
     const after: ImportRosterSnapshot = {
-      name: expectedParticipantName,
+      participantName: expectedParticipantName,
       organizationId,
+      organizationName: row.organizationName as string,
       role: row.input.role,
       grade: row.input.grade,
+      source: policy.source,
       status: "ACTIVE",
+      wasExpectedAtStart: false,
     };
     return {
       rowNumber: row.input.rowNumber,
@@ -250,12 +259,7 @@ async function commitImportWithPolicy(
         (createdByOrganization.get(organizationId) ?? 0),
       organizationParticipantRevisionSum:
         row.organizationParticipantRevisionSum,
-      mutateRoster: shouldMutateRoster(
-        policy,
-        selected,
-        after,
-        row.organizationName as string,
-      ),
+      mutateRoster: shouldMutateRoster(policy, selected, after),
       before,
       after,
       role: row.input.role,
@@ -559,21 +563,20 @@ function shouldMutateRoster(
       }
     | undefined,
   after: ImportRosterSnapshot,
-  organizationName: string,
 ) {
   if (policy.mode === "ORDINARY") {
     return selected?.entry_status !== "ACTIVE";
   }
   if (!selected?.entry_id) return true;
   return (
-    selected.entry_participant_name !== after.name ||
+    selected.entry_participant_name !== after.participantName ||
     selected.entry_organization_id !== after.organizationId ||
-    selected.entry_organization_name !== organizationName ||
+    selected.entry_organization_name !== after.organizationName ||
     selected.entry_role !== after.role ||
     selected.entry_grade !== after.grade ||
-    selected.entry_source !== policy.source ||
-    selected.entry_status !== "ACTIVE" ||
-    selected.entry_was_expected !== 0
+    selected.entry_source !== after.source ||
+    selected.entry_status !== after.status ||
+    (selected.entry_was_expected === 1) !== after.wasExpectedAtStart
   );
 }
 
@@ -609,11 +612,15 @@ function rosterUpsert(
   policy: ImportMutationPolicy,
 ) {
   const values = rows.map(() => "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").join(",");
+  const organizationIdentityPredicate =
+    policy.mode === "CLOSED_CORRECTION"
+      ? "o.name = i.expected_organization_identity"
+      : "o.canonical_name = i.expected_organization_identity";
   return db
     .prepare(
       `WITH incoming(
          entry_id, participant_id, expected_name, expected_organization_id,
-         expected_revision, expected_organization_canonical,
+         expected_revision, expected_organization_identity,
          expected_organization_participant_count,
          expected_organization_revision_sum, participant_role, student_grade
        ) AS (VALUES ${values})
@@ -636,7 +643,7 @@ function rosterUpsert(
                            WHERE po.project_id = ? AND po.organization_id = o.id
                              AND po.is_active = 1
                          )
-                         AND o.canonical_name = i.expected_organization_canonical
+                         AND ${organizationIdentityPredicate}
                          AND (SELECT COUNT(*) FROM participants candidate
                               WHERE candidate.organization_id = i.expected_organization_id)
                              = i.expected_organization_participant_count
@@ -659,7 +666,9 @@ function rosterUpsert(
         row.expectedParticipantName,
         row.organizationId,
         row.participantRevision,
-        row.organizationCanonicalName,
+        policy.mode === "CLOSED_CORRECTION"
+          ? row.organizationName
+          : row.organizationCanonicalName,
         row.organizationParticipantCountAfterInsert,
         row.organizationParticipantRevisionSum,
         row.role,
