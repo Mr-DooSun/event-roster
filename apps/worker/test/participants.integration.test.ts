@@ -72,6 +72,57 @@ it("rejects participant changes after the project is deleted", async () => {
   expect(response.status).toBe(404);
 });
 
+it("keeps ordinary participant edits blocked after a project is closed", async () => {
+  const fixture = await setupPreRegistration();
+  const added = await addRoster(fixture, fixture.firstParticipant.id);
+  const entry = await added.json<{ projectRevision: number }>();
+  const inProgress = await authedRequest(
+    fixture.operator,
+    `/api/v1/projects/${fixture.project.id}/transition`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        targetStatus: "IN_PROGRESS",
+        expectedRevision: entry.projectRevision,
+      }),
+    },
+  );
+  const inProgressProject = await inProgress.json<{ revision: number }>();
+  const closed = await authedRequest(
+    fixture.operator,
+    `/api/v1/projects/${fixture.project.id}/transition`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        targetStatus: "CLOSED",
+        expectedRevision: inProgressProject.revision,
+      }),
+    },
+  );
+  const closedProject = await closed.json<{ revision: number }>();
+
+  const response = await authedRequest(
+    fixture.operator,
+    `/api/v1/projects/${fixture.project.id}/participants/${fixture.firstParticipant.id}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        name: "종료 뒤 일반 수정 금지",
+        expectedRevision: fixture.firstParticipant.revision,
+        expectedProjectRevision: closedProject.revision,
+      }),
+    },
+  );
+
+  expect(response.status).toBe(409);
+  expect(await response.json()).toMatchObject({ code: "PROJECT_CLOSED" });
+  expect(
+    await env.DB.prepare("SELECT name, revision FROM participants WHERE id = ?")
+      .bind(fixture.firstParticipant.id)
+      .first(),
+  ).toEqual({ name: "첫 참가자", revision: 0 });
+});
+
 it("keeps global participants read-only", async () => {
   const fixture = await setupPreRegistration();
   const list = await authedRequest(fixture.operator, "/api/v1/participants");

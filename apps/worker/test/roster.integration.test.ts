@@ -215,7 +215,11 @@ it.each(["PRIMARY_LEADER", "MANAGER"] as const)(
 it("rejects CLOSED mutations and allows audited IN_PROGRESS additions after reopen", async () => {
   const fixture = await setupPreRegistration();
   const added = await addRoster(fixture, fixture.firstParticipant.id);
-  const first = await added.json<{ projectRevision: number }>();
+  const first = await added.json<{
+    id: string;
+    revision: number;
+    projectRevision: number;
+  }>();
   const transition = async (targetStatus: string, expectedRevision: number) => {
     const response = await authedRequest(
       fixture.operator,
@@ -240,6 +244,37 @@ it("rejects CLOSED mutations and allows audited IN_PROGRESS additions after reop
   expect(await rejected.json<{ code: string }>()).toMatchObject({
     code: "PROJECT_CLOSED",
   });
+  const rejectedPatch = await authedRequest(
+    fixture.operator,
+    `/api/v1/projects/${fixture.project.id}/roster/${first.id}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        status: "CANCELLED",
+        expectedRevision: closed.revision,
+        expectedEntryRevision: first.revision,
+      }),
+    },
+  );
+  expect(rejectedPatch.status).toBe(409);
+  expect(await rejectedPatch.json()).toMatchObject({ code: "PROJECT_CLOSED" });
+  const rejectedBulk = await authedRequest(
+    fixture.operator,
+    `/api/v1/projects/${fixture.project.id}/roster/bulk`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        organizationId: "org-1",
+        participants: [
+          { name: "종료 뒤 일괄 금지", role: "TEACHER", grade: null },
+        ],
+        confirmDuplicateNames: false,
+        expectedRevision: closed.revision,
+      }),
+    },
+  );
+  expect(rejectedBulk.status).toBe(409);
+  expect(await rejectedBulk.json()).toMatchObject({ code: "PROJECT_CLOSED" });
 
   const reopened = await transition("IN_PROGRESS", closed.revision);
   const afterReopen = await addRoster(

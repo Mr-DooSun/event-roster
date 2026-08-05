@@ -1,6 +1,9 @@
 import {
   AddProjectOrganizationSchema,
+  BulkRosterCreateRequestSchema,
+  ClosedProjectRosterPatchRequestSchema,
   ProjectOrganizationPatchSchema,
+  RosterCreateRequestSchema,
 } from "@event-roster/contracts";
 import { Hono } from "hono";
 import type { Env } from "../env";
@@ -11,7 +14,10 @@ import { requireCsrf } from "../middleware/csrf";
 import { requireAdministrativeOperator } from "../services/admin";
 import {
   correctClosedProjectOrganization,
+  correctClosedProjectRoster,
+  correctClosedProjectRosterBulk,
   getClosedCorrectionCandidates,
+  patchClosedProjectRoster,
   setClosedProjectOrganizationActive,
 } from "../services/history-corrections";
 
@@ -65,6 +71,66 @@ historyCorrectionRoutes.patch(
         actor,
         c.req.param("projectId"),
         c.req.param("organizationId"),
+        input,
+      ),
+    );
+  },
+);
+
+historyCorrectionRoutes.post(
+  "/projects/:projectId/history-corrections/roster",
+  async (c) => {
+    assertExactOrigin(c.req.raw, c.env.APP_ORIGIN);
+    const actor = await requireActor(c.req.raw, c.env);
+    await requireCsrf(c.req.raw, actor);
+    requireAdministrativeOperator(actor);
+    const input = RosterCreateRequestSchema.parse(await c.req.json());
+    const mutation = await correctClosedProjectRoster(
+      c.env,
+      actor,
+      c.req.param("projectId"),
+      input,
+    );
+    return c.json(mutation.result, mutation.created ? 201 : 200);
+  },
+);
+
+historyCorrectionRoutes.post(
+  "/projects/:projectId/history-corrections/roster/bulk",
+  async (c) => {
+    assertExactOrigin(c.req.raw, c.env.APP_ORIGIN);
+    const actor = await requireActor(c.req.raw, c.env);
+    await requireCsrf(c.req.raw, actor);
+    requireAdministrativeOperator(actor);
+    const input = BulkRosterCreateRequestSchema.parse(await c.req.json());
+    return c.json(
+      await correctClosedProjectRosterBulk(
+        c.env,
+        actor,
+        c.req.param("projectId"),
+        input,
+      ),
+      201,
+    );
+  },
+);
+
+historyCorrectionRoutes.patch(
+  "/projects/:projectId/history-corrections/roster/:entryId",
+  async (c) => {
+    assertExactOrigin(c.req.raw, c.env.APP_ORIGIN);
+    const actor = await requireActor(c.req.raw, c.env);
+    await requireCsrf(c.req.raw, actor);
+    requireAdministrativeOperator(actor);
+    const input = ClosedProjectRosterPatchRequestSchema.parse(
+      await c.req.json(),
+    );
+    return c.json(
+      await patchClosedProjectRoster(
+        c.env,
+        actor,
+        c.req.param("projectId"),
+        c.req.param("entryId"),
         input,
       ),
     );
