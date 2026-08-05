@@ -970,6 +970,257 @@ it("keeps a current project request locked when an obsolete project request sett
   expect(await screen.findByText("검증 완료")).toBeVisible();
 });
 
+it("routes closed history corrections through their endpoints and exposes every linked organization state", async () => {
+  const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.endsWith("/auth/login"))
+      return Promise.resolve(Response.json(auth()));
+    if (url.endsWith("/projects/project-1/organizations")) {
+      return Promise.resolve(
+        Response.json([
+          projectOrganization("org-active", "활성 연결"),
+          projectOrganization("org-inactive", "비활성 연결", {
+            isActive: false,
+          }),
+          projectOrganization("org-deleted", "삭제된 연결", {
+            masterIsActive: false,
+            masterIsDeleted: true,
+          }),
+        ]),
+      );
+    }
+    if (
+      url.endsWith(
+        "/projects/project-1/history-corrections/imports/validate",
+      ) &&
+      init?.method === "POST"
+    ) {
+      return Promise.resolve(Response.json(validationResponse()));
+    }
+    if (
+      url.endsWith("/projects/project-1/history-corrections/imports/commit") &&
+      init?.method === "POST"
+    ) {
+      return Promise.resolve(
+        Response.json(
+          { importedCount: 1, projectRevision: 5 },
+          { status: 201 },
+        ),
+      );
+    }
+    throw new Error(`unexpected request: ${url}`);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  render(
+    <AuthProvider restoreOnMount={false}>
+      <Gate>
+        <ImportWizard projectId="project-1" mode="CLOSED_CORRECTION" />
+      </Gate>
+    </AuthProvider>,
+  );
+  await login();
+
+  expect(await screen.findByText("종료 후 이력 보정 중")).toBeVisible();
+  expect(
+    screen.getByText("예상 인원은 변경되지 않고 실제 참석 인원에 반영됩니다."),
+  ).toBeVisible();
+  const organizations = screen.getByRole("list", { name: "연결된 조직 상태" });
+  expect(organizations).toHaveTextContent("활성 연결");
+  expect(organizations).toHaveTextContent("비활성 연결");
+  expect(organizations).toHaveTextContent("삭제된 연결");
+  expect(organizations).toHaveTextContent("비활성");
+  expect(organizations).toHaveTextContent("삭제됨");
+
+  fireEvent.change(screen.getByLabelText("엑셀 파일"), {
+    target: { files: [workbookFixture([{ 이름: "박민수", 조직: "1팀" }])] },
+  });
+  fireEvent.click(await screen.findByRole("button", { name: "서버 검증" }));
+  fireEvent.click(await screen.findByRole("button", { name: "명단 확정" }));
+
+  expect(await screen.findByText("1개 행을 확정했습니다.")).toBeVisible();
+  expect(
+    fetchMock.mock.calls.some(([url]) =>
+      String(url).endsWith("/projects/project-1/imports/validate"),
+    ),
+  ).toBe(false);
+  expect(
+    fetchMock.mock.calls.some(([url]) =>
+      String(url).endsWith("/projects/project-1/imports/commit"),
+    ),
+  ).toBe(false);
+});
+
+it("keeps correction workbook state and candidate resolution after a stale revision until revalidation", async () => {
+  let validations = 0;
+  const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.endsWith("/auth/login"))
+      return Promise.resolve(Response.json(auth()));
+    if (url.endsWith("/projects/project-1/organizations")) {
+      return Promise.resolve(Response.json([]));
+    }
+    if (
+      url.endsWith(
+        "/projects/project-1/history-corrections/imports/validate",
+      ) &&
+      init?.method === "POST"
+    ) {
+      validations += 1;
+      return Promise.resolve(
+        Response.json(
+          validations === 1
+            ? validationResponse({
+                name: "동명이인",
+                candidates: [
+                  {
+                    participantId: "person-1",
+                    participantNumber: "P-001",
+                    name: "동명이인",
+                  },
+                  {
+                    participantId: "person-2",
+                    participantNumber: "P-002",
+                    name: "동명이인",
+                  },
+                ],
+              })
+            : validationResponse(),
+        ),
+      );
+    }
+    if (
+      url.endsWith("/projects/project-1/history-corrections/imports/commit") &&
+      init?.method === "POST"
+    ) {
+      return Promise.resolve(
+        Response.json(
+          {
+            code: "STALE_REVISION",
+            message: "stale",
+            requestId: "request-stale",
+          },
+          { status: 409 },
+        ),
+      );
+    }
+    throw new Error(`unexpected request: ${url}`);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  render(
+    <AuthProvider restoreOnMount={false}>
+      <Gate>
+        <ImportWizard projectId="project-1" mode="CLOSED_CORRECTION" />
+      </Gate>
+    </AuthProvider>,
+  );
+  await login();
+  fireEvent.change(await screen.findByLabelText("엑셀 파일"), {
+    target: { files: [workbookFixture([{ 이름: "동명이인", 조직: "1팀" }])] },
+  });
+  fireEvent.click(await screen.findByRole("button", { name: "서버 검증" }));
+  fireEvent.change(await screen.findByLabelText("2행 동명이인 선택"), {
+    target: { value: "person-2" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "다시 검증" }));
+  fireEvent.click(await screen.findByRole("button", { name: "명단 확정" }));
+
+  expect(
+    await screen.findByText(
+      "다른 변경이 먼저 반영되었습니다. 다시 검증해 주세요.",
+    ),
+  ).toBeVisible();
+  expect(
+    screen.queryByRole("heading", { name: "검증 결과" }),
+  ).not.toBeInTheDocument();
+  expect(screen.getByLabelText("시트")).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "서버 검증" }));
+
+  await vi.waitFor(() => expect(validations).toBe(3));
+  const lastValidation = fetchMock.mock.calls
+    .filter(([url]) => String(url).endsWith("imports/validate"))
+    .at(-1);
+  expect(JSON.parse(String(lastValidation?.[1]?.body))).toEqual([
+    {
+      rowNumber: 2,
+      name: "동명이인",
+      organizationName: "1팀",
+      role: "STUDENT",
+      grade: "M1",
+      resolvedParticipantId: "person-2",
+    },
+  ]);
+});
+
+it.each([
+  { code: "INVALID_TRANSITION", status: 409 },
+  { code: "NOT_FOUND", status: 404 },
+])(
+  "exits the correction workflow when the project is no longer closed ($code)",
+  async ({ code, status }) => {
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/auth/login"))
+        return Promise.resolve(Response.json(auth()));
+      if (url.endsWith("/projects/project-1/organizations")) {
+        return Promise.resolve(Response.json([]));
+      }
+      if (
+        url.endsWith(
+          "/projects/project-1/history-corrections/imports/validate",
+        ) &&
+        init?.method === "POST"
+      ) {
+        return Promise.resolve(Response.json(validationResponse()));
+      }
+      if (
+        url.endsWith(
+          "/projects/project-1/history-corrections/imports/commit",
+        ) &&
+        init?.method === "POST"
+      ) {
+        return Promise.resolve(
+          Response.json(
+            {
+              code,
+              message: "reopened",
+              requestId: "request-transition",
+            },
+            { status },
+          ),
+        );
+      }
+      throw new Error(`unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(
+      <AuthProvider restoreOnMount={false}>
+        <Gate>
+          <ImportWizard projectId="project-1" mode="CLOSED_CORRECTION" />
+        </Gate>
+      </AuthProvider>,
+    );
+    await login();
+    fireEvent.change(await screen.findByLabelText("엑셀 파일"), {
+      target: { files: [workbookFixture([{ 이름: "박민수", 조직: "1팀" }])] },
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "서버 검증" }));
+    fireEvent.click(await screen.findByRole("button", { name: "명단 확정" }));
+
+    expect(
+      await screen.findByText(
+        "프로젝트 상태가 변경되었습니다. 최신 프로젝트 정보를 확인해 주세요.",
+      ),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole("heading", { name: "검증 결과" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("시트")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: "최신 프로젝트 보기" }),
+    ).toHaveAttribute("href", "/projects/project-1");
+  },
+);
+
 function Gate({ children }: { children: React.ReactNode }) {
   return useAuth().auth ? children : <LoginPage />;
 }
@@ -1046,4 +1297,50 @@ function projectClosedResponse() {
     { code: "PROJECT_CLOSED", message: "closed", requestId: "request-closed" },
     { status: 409 },
   );
+}
+
+function projectOrganization(
+  organizationId: string,
+  name: string,
+  overrides: Partial<{
+    isActive: boolean;
+    masterIsActive: boolean;
+    masterIsDeleted: boolean;
+  }> = {},
+) {
+  return {
+    organizationId,
+    name,
+    isActive: true,
+    masterIsActive: true,
+    masterIsDeleted: false,
+    activeProjectCount: 1,
+    hasBusinessHistory: true,
+    ...overrides,
+  };
+}
+
+function validationResponse(
+  overrides: Partial<{
+    name: string;
+    candidates: Array<{
+      participantId: string;
+      participantNumber: string;
+      name: string;
+    }>;
+  }> = {},
+) {
+  return {
+    projectRevision: 4,
+    rows: [
+      {
+        rowNumber: 2,
+        name: overrides.name ?? "박민수",
+        organizationName: "1팀",
+        issues: [],
+        candidates: [],
+        ...overrides,
+      },
+    ],
+  };
 }

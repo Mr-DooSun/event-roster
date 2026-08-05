@@ -82,6 +82,10 @@ function route(location: string, operator: boolean) {
   }
   const importMatch = path.match(/^\/projects\/([^/]+)\/import$/);
   if (importMatch?.[1] && operator) {
+    const importMode =
+      url.searchParams.get("mode") === "history-correction"
+        ? "CLOSED_CORRECTION"
+        : "ORDINARY";
     return (
       <Suspense
         fallback={
@@ -92,7 +96,10 @@ function route(location: string, operator: boolean) {
           </div>
         }
       >
-        <ImportWizard projectId={decodeURIComponent(importMatch[1])} />
+        <ImportWizard
+          projectId={decodeURIComponent(importMatch[1])}
+          mode={importMode}
+        />
       </Suspense>
     );
   }

@@ -28,10 +28,12 @@ interface ValidationResult {
 
 interface ImportRequestOwner {
   projectId: string;
+  mode: ImportMode;
   generation: number;
 }
 
 type ImportBusyAction = "READ_FILE" | "VALIDATE" | "COMMIT" | null;
+export type ImportMode = "ORDINARY" | "CLOSED_CORRECTION";
 
 const EMPTY_COLUMNS: ImportColumns = {
   name: "",
@@ -40,8 +42,18 @@ const EMPTY_COLUMNS: ImportColumns = {
   grade: "",
 };
 
-export function ImportWizard({ projectId }: { projectId: string }) {
+export function ImportWizard({
+  projectId,
+  mode = "ORDINARY",
+}: {
+  projectId: string;
+  mode?: ImportMode;
+}) {
   const { api } = useAuth();
+  const correctionMode = mode === "CLOSED_CORRECTION";
+  const importPath = correctionMode
+    ? `/projects/${projectId}/history-corrections/imports`
+    : `/projects/${projectId}/imports`;
   const [parsed, setParsed] = useState<ParsedWorkbook | null>(null);
   const [sheetName, setSheetName] = useState("");
   const [columns, setColumns] = useState<ImportColumns>(EMPTY_COLUMNS);
@@ -51,8 +63,8 @@ export function ImportWizard({ projectId }: { projectId: string }) {
   const [validation, setValidation] = useState<ValidationResult | null>(null);
   const [resolutionDirty, setResolutionDirty] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-  const [projectClosed, setProjectClosed] = useState(false);
-  const [activeOrganizations, setActiveOrganizations] = useState<
+  const [workflowUnavailable, setWorkflowUnavailable] = useState(false);
+  const [linkedOrganizations, setLinkedOrganizations] = useState<
     ProjectOrganization[]
   >([]);
   const [organizationError, setOrganizationError] = useState<string | null>(
@@ -63,6 +75,7 @@ export function ImportWizard({ projectId }: { projectId: string }) {
   const fileInput = useRef<HTMLInputElement>(null);
   const workflowGeneration = useRef(0);
   const currentProjectId = useRef(projectId);
+  const currentMode = useRef<ImportMode>(mode);
   currentProjectId.current = projectId;
   const requestInFlight = useRef(false);
   const requestOwner = useRef<ImportRequestOwner | null>(null);
@@ -82,6 +95,7 @@ export function ImportWizard({ projectId }: { projectId: string }) {
   );
   useEffect(() => {
     currentProjectId.current = projectId;
+    currentMode.current = mode;
     workflowGeneration.current += 1;
     requestOwner.current = null;
     requestInFlight.current = false;
@@ -93,9 +107,9 @@ export function ImportWizard({ projectId }: { projectId: string }) {
     setValidation(null);
     setResolutionDirty(false);
     setMessage(null);
-    setProjectClosed(false);
+    setWorkflowUnavailable(false);
     if (fileInput.current) fileInput.current.value = "";
-  }, [projectId]);
+  }, [projectId, mode]);
   const loadOrganizations = useCallback(async () => {
     const generation = organizationGeneration.current + 1;
     organizationGeneration.current = generation;
@@ -111,11 +125,7 @@ export function ImportWizard({ projectId }: { projectId: string }) {
         requestedProjectId !== currentProjectId.current
       )
         return;
-      setActiveOrganizations(
-        memberships.filter(
-          (membership) => membership.isActive && membership.masterIsActive,
-        ),
-      );
+      setLinkedOrganizations(memberships);
     } catch {
       if (
         generation === organizationGeneration.current &&
@@ -133,7 +143,7 @@ export function ImportWizard({ projectId }: { projectId: string }) {
     }
   }, [api, projectId]);
   useEffect(() => {
-    setActiveOrganizations([]);
+    setLinkedOrganizations([]);
     setOrganizationError(null);
     void loadOrganizations();
     return () => {
@@ -160,7 +170,8 @@ export function ImportWizard({ projectId }: { projectId: string }) {
       const next = await readWorkbook(file);
       if (
         generation !== workflowGeneration.current ||
-        requestedProjectId !== currentProjectId.current
+        requestedProjectId !== currentProjectId.current ||
+        mode !== currentMode.current
       )
         return;
       const firstSheet = next.sheetNames[0] ?? "";
@@ -220,27 +231,38 @@ export function ImportWizard({ projectId }: { projectId: string }) {
       return;
     }
     const generation = workflowGeneration.current;
-    const owner = { projectId, generation };
+    const owner = { projectId, mode, generation };
     requestOwner.current = owner;
     requestInFlight.current = true;
     setBusyAction("VALIDATE");
     try {
       const result = await api.post<ValidationResult>(
-        `/projects/${projectId}/imports/validate`,
+        `${importPath}/validate`,
         rows,
       );
-      if (generation !== workflowGeneration.current) return;
+      if (
+        generation !== workflowGeneration.current ||
+        mode !== currentMode.current
+      )
+        return;
       setNormalizedRows(rows);
       setValidation(result);
       setResolutionDirty(false);
       setMessage("검증 완료");
     } catch (error) {
-      if (generation === workflowGeneration.current) {
+      if (
+        generation === workflowGeneration.current &&
+        mode === currentMode.current
+      ) {
         if (
           error instanceof ApiError &&
           error.problem?.code === "PROJECT_CLOSED"
         ) {
           discardClosedProject();
+          return;
+        }
+        if (correctionMode && isCorrectionUnavailable(error)) {
+          discardCorrectionWorkflow();
           return;
         }
         setMessage("명단을 검증하지 못했습니다.");
@@ -268,19 +290,23 @@ export function ImportWizard({ projectId }: { projectId: string }) {
   async function commit() {
     if (!validation || resolutionDirty || requestInFlight.current) return;
     const generation = workflowGeneration.current;
-    const owner = { projectId, generation };
+    const owner = { projectId, mode, generation };
     requestOwner.current = owner;
     requestInFlight.current = true;
     setBusyAction("COMMIT");
     try {
       const result = await api.post<{ importedCount: number }>(
-        `/projects/${projectId}/imports/commit`,
+        `${importPath}/commit`,
         {
           rows: normalizedRows,
           expectedProjectRevision: validation.projectRevision,
         },
       );
-      if (generation !== workflowGeneration.current) return;
+      if (
+        generation !== workflowGeneration.current ||
+        mode !== currentMode.current
+      )
+        return;
       clearWorkbook();
       setMessage(`${result.importedCount}개 행을 확정했습니다.`);
     } catch (error) {
@@ -296,6 +322,8 @@ export function ImportWizard({ projectId }: { projectId: string }) {
         error.problem?.code === "PROJECT_CLOSED"
       ) {
         discardClosedProject();
+      } else if (correctionMode && isCorrectionUnavailable(error)) {
+        discardCorrectionWorkflow();
       } else {
         setMessage("명단을 확정하지 못했습니다.");
       }
@@ -323,7 +351,7 @@ export function ImportWizard({ projectId }: { projectId: string }) {
     setValidation(null);
     setResolutionDirty(false);
     setMessage(null);
-    setProjectClosed(false);
+    setWorkflowUnavailable(false);
     if (fileInput.current) fileInput.current.value = "";
   }
 
@@ -338,13 +366,36 @@ export function ImportWizard({ projectId }: { projectId: string }) {
     setNormalizedRows([]);
     setValidation(null);
     setResolutionDirty(false);
-    setProjectClosed(true);
+    setWorkflowUnavailable(true);
     setMessage(
       "프로젝트가 종료되어 가져오기를 진행할 수 없습니다. 최신 프로젝트 정보를 확인해 주세요.",
     );
     if (fileInput.current) fileInput.current.value = "";
   }
 
+  function discardCorrectionWorkflow() {
+    workflowGeneration.current += 1;
+    requestOwner.current = null;
+    requestInFlight.current = false;
+    setBusyAction(null);
+    setParsed(null);
+    setSheetName("");
+    setColumns(EMPTY_COLUMNS);
+    setNormalizedRows([]);
+    setValidation(null);
+    setResolutionDirty(false);
+    setWorkflowUnavailable(true);
+    setMessage(
+      "프로젝트 상태가 변경되었습니다. 최신 프로젝트 정보를 확인해 주세요.",
+    );
+    if (fileInput.current) fileInput.current.value = "";
+  }
+
+  const visibleOrganizations = correctionMode
+    ? linkedOrganizations
+    : linkedOrganizations.filter(
+        (organization) => organization.isActive && organization.masterIsActive,
+      );
   const canCommit =
     validation !== null &&
     !resolutionDirty &&
@@ -366,12 +417,21 @@ export function ImportWizard({ projectId }: { projectId: string }) {
           명단으로 돌아가기
         </a>
       </header>
+      {correctionMode ? (
+        <Card
+          className="er-history-correction-banner"
+          aria-label="종료 후 이력 보정"
+        >
+          <h2>종료 후 이력 보정 중</h2>
+          <p>예상 인원은 변경되지 않고 실제 참석 인원에 반영됩니다.</p>
+        </Card>
+      ) : null}
       {message ? (
-        <StatusMessage tone={projectClosed ? "error" : "info"}>
+        <StatusMessage tone={workflowUnavailable ? "error" : "info"}>
           {message}
         </StatusMessage>
       ) : null}
-      {projectClosed ? (
+      {workflowUnavailable ? (
         <a
           className="er-button er-button--primary"
           href={`/projects/${projectId}`}
@@ -380,7 +440,7 @@ export function ImportWizard({ projectId }: { projectId: string }) {
         </a>
       ) : null}
       <Card className="er-panel" aria-busy={organizationLoading || undefined}>
-        <h2>가져오기 대상 조직</h2>
+        <h2>{correctionMode ? "연결된 조직 상태" : "가져오기 대상 조직"}</h2>
         {organizationLoading ? (
           <div aria-busy="true">
             <LoadingStatus>프로젝트 조직 불러오는 중…</LoadingStatus>
@@ -393,10 +453,32 @@ export function ImportWizard({ projectId }: { projectId: string }) {
           />
         ) : (
           <>
-            <p className="er-muted">활성 조직 {activeOrganizations.length}개</p>
-            <ul className="er-compact-list">
-              {activeOrganizations.map((organization) => (
-                <li key={organization.organizationId}>{organization.name}</li>
+            <p className="er-muted">
+              {correctionMode ? "연결된 조직" : "활성 조직"}{" "}
+              {visibleOrganizations.length}개
+            </p>
+            <ul
+              className="er-compact-list"
+              aria-label={correctionMode ? "연결된 조직 상태" : undefined}
+            >
+              {visibleOrganizations.map((organization) => (
+                <li key={organization.organizationId}>
+                  {organization.name}
+                  {correctionMode ? (
+                    organization.masterIsDeleted ? (
+                      <span className="er-badge er-badge--inactive">
+                        삭제됨
+                      </span>
+                    ) : !organization.isActive ||
+                      !organization.masterIsActive ? (
+                      <span className="er-badge er-badge--inactive">
+                        비활성
+                      </span>
+                    ) : (
+                      <span className="er-badge">활성</span>
+                    )
+                  ) : null}
+                </li>
               ))}
             </ul>
           </>
@@ -496,6 +578,13 @@ export function ImportWizard({ projectId }: { projectId: string }) {
         </Card>
       ) : null}
     </div>
+  );
+}
+
+function isCorrectionUnavailable(error: unknown) {
+  return (
+    error instanceof ApiError &&
+    (error.status === 404 || error.problem?.code === "INVALID_TRANSITION")
   );
 }
 
