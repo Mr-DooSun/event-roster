@@ -1211,6 +1211,57 @@ it("rejects organization membership mutations for closed and expired projects", 
   }
 });
 
+it("keeps ordinary organization mutations closed after an inactive master is linked by correction", async () => {
+  const operator = await seedOperator();
+  await seedOrganization("org-correction-inactive", "보정 비활성 조직", false);
+  const project = await seedProject(operator);
+  await env.DB.prepare(
+    `UPDATE projects
+     SET status = 'CLOSED', closed_at = ?, closed_by = ?, close_reason = 'MANUAL'
+     WHERE id = ?`,
+  )
+    .bind("2026-08-05T00:00:00.000Z", operator.userId, project.id)
+    .run();
+
+  const correction = await authedRequest(
+    operator,
+    `/api/v1/projects/${project.id}/history-corrections/organizations`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        organizationId: "org-correction-inactive",
+        expectedProjectRevision: project.revision,
+      }),
+    },
+  );
+  expect(correction.status).toBe(201);
+  const corrected = await correction.json<{ projectRevision: number }>();
+
+  for (const response of await Promise.all([
+    authedRequest(operator, `/api/v1/projects/${project.id}/organizations`, {
+      method: "POST",
+      body: JSON.stringify({
+        organizationId: "org-correction-inactive",
+        expectedProjectRevision: corrected.projectRevision,
+      }),
+    }),
+    authedRequest(
+      operator,
+      `/api/v1/projects/${project.id}/organizations/org-correction-inactive`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({
+          isActive: false,
+          expectedProjectRevision: corrected.projectRevision,
+        }),
+      },
+    ),
+  ])) {
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ code: "PROJECT_CLOSED" });
+  }
+});
+
 async function linkProjectOrganization(
   operator: Awaited<ReturnType<typeof seedOperator>>,
   projectId: string,

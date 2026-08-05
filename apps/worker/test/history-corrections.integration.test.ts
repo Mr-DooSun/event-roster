@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { beforeEach, expect, it } from "vitest";
+import { afterEach, beforeEach, expect, it } from "vitest";
 import {
   authedRequest,
   seedManager,
@@ -9,6 +9,13 @@ import {
 import { apiRequest, login, resetAuthState, seedUser } from "./support/auth";
 
 beforeEach(resetAuthState);
+afterEach(async () => {
+  await env.DB.prepare(
+    `UPDATE organizations
+     SET deleted_at = NULL, deleted_by = NULL
+     WHERE deleted_at IS NOT NULL`,
+  ).run();
+});
 
 it("returns every master candidate only to an administrative operator for a closed project", async () => {
   const fixture = await seedCorrectionCandidates();
@@ -120,6 +127,315 @@ it("returns every master candidate only to an administrative operator for a clos
     managerParticipantsBefore,
   );
 });
+
+it("links active, inactive, deleted, and newly created organizations to a closed project without mutating existing masters", async () => {
+  const fixture = await seedCorrectionCandidates();
+  await seedOrganization("org-later-active", "나중 가동 조직");
+  const masterStates = await organizationStates([
+    "org-later-active",
+    "org-inactive",
+    "org-deleted",
+  ]);
+  const projectBefore = await closedProjectState(fixture.closedProjectId);
+
+  let revision = projectBefore.revision;
+  for (const organizationId of [
+    "org-later-active",
+    "org-inactive",
+    "org-deleted",
+  ]) {
+    const response = await authedRequest(
+      fixture.operator,
+      `/api/v1/projects/${fixture.closedProjectId}/history-corrections/organizations`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          organizationId,
+          expectedProjectRevision: revision,
+        }),
+      },
+    );
+    expect(response.status).toBe(201);
+    revision = (await response.json<{ projectRevision: number }>())
+      .projectRevision;
+  }
+
+  const create = await authedRequest(
+    fixture.operator,
+    `/api/v1/projects/${fixture.closedProjectId}/history-corrections/organizations`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        newOrganizationName: "종료 후 신규 조직",
+        expectedProjectRevision: revision,
+      }),
+    },
+  );
+  expect(create.status).toBe(201);
+  const created = await create.json<{
+    organization: { organizationId: string; isActive: boolean };
+    projectRevision: number;
+  }>();
+  expect(created.organization).toMatchObject({ isActive: true });
+  expect(created.projectRevision).toBe(revision + 1);
+
+  expect(
+    await organizationStates([
+      "org-later-active",
+      "org-inactive",
+      "org-deleted",
+    ]),
+  ).toEqual(masterStates);
+  expect(await closedProjectState(fixture.closedProjectId)).toEqual({
+    ...projectBefore,
+    revision: projectBefore.revision + 4,
+  });
+  expect(
+    await env.DB.prepare(
+      `SELECT is_active, deleted_at FROM organizations WHERE id = ?`,
+    )
+      .bind(created.organization.organizationId)
+      .first(),
+  ).toEqual({ is_active: 1, deleted_at: null });
+  expect(await correctionAudits(fixture.closedProjectId)).toEqual([
+    expect.objectContaining({
+      organizationId: "org-later-active",
+      operation: "ADDED",
+      before: null,
+      after: { isActive: true },
+    }),
+    expect.objectContaining({
+      organizationId: "org-inactive",
+      operation: "ADDED",
+      before: null,
+      after: { isActive: true },
+    }),
+    expect.objectContaining({
+      organizationId: "org-deleted",
+      operation: "ADDED",
+      before: null,
+      after: { isActive: true },
+    }),
+    expect.objectContaining({
+      organizationId: created.organization.organizationId,
+      operation: "CREATED_AND_ADDED",
+      before: null,
+      after: { isActive: true },
+    }),
+  ]);
+});
+
+it("soft-excludes an empty closed-project membership and reactivates its composite-key row", async () => {
+  const fixture = await seedCorrectionCandidates();
+  await seedOrganization("org-empty", "빈 조직");
+
+  const added = await authedRequest(
+    fixture.operator,
+    `/api/v1/projects/${fixture.closedProjectId}/history-corrections/organizations`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        organizationId: "org-empty",
+        expectedProjectRevision: 3,
+      }),
+    },
+  );
+  expect(added.status).toBe(201);
+  const addedBody = await added.json<{ projectRevision: number }>();
+  const excluded = await authedRequest(
+    fixture.operator,
+    `/api/v1/projects/${fixture.closedProjectId}/history-corrections/organizations/org-empty`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        isActive: false,
+        expectedProjectRevision: addedBody.projectRevision,
+      }),
+    },
+  );
+  expect(excluded.status).toBe(200);
+  const excludedBody = await excluded.json<{ projectRevision: number }>();
+  expect(
+    await env.DB.prepare(
+      `SELECT is_active, deactivated_at FROM project_organizations
+       WHERE project_id = ? AND organization_id = 'org-empty'`,
+    )
+      .bind(fixture.closedProjectId)
+      .first(),
+  ).toMatchObject({ is_active: 0 });
+
+  const reactivated = await authedRequest(
+    fixture.operator,
+    `/api/v1/projects/${fixture.closedProjectId}/history-corrections/organizations/org-empty`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        isActive: true,
+        expectedProjectRevision: excludedBody.projectRevision,
+      }),
+    },
+  );
+  expect(reactivated.status).toBe(200);
+  expect(await reactivated.json()).toMatchObject({
+    organization: { organizationId: "org-empty", isActive: true },
+    projectRevision: excludedBody.projectRevision + 1,
+  });
+  expect(
+    await env.DB.prepare(
+      `SELECT is_active, deactivated_at FROM project_organizations
+       WHERE project_id = ? AND organization_id = 'org-empty'`,
+    )
+      .bind(fixture.closedProjectId)
+      .first(),
+  ).toEqual({ is_active: 1, deactivated_at: null });
+  expect(
+    await env.DB.prepare(
+      `SELECT COUNT(*) AS count FROM project_organizations
+       WHERE project_id = ? AND organization_id = 'org-empty'`,
+    )
+      .bind(fixture.closedProjectId)
+      .first<{ count: number }>(),
+  ).toEqual({ count: 1 });
+  expect(await correctionAudits(fixture.closedProjectId)).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        organizationId: "org-empty",
+        operation: "EXCLUDED",
+        before: { isActive: true },
+        after: { isActive: false },
+      }),
+      expect.objectContaining({
+        organizationId: "org-empty",
+        operation: "REACTIVATED",
+        before: { isActive: false },
+        after: { isActive: true },
+      }),
+    ]),
+  );
+});
+
+it("does not grant inactive or deleted organization managers visibility or correction access, and serializes same-revision corrections", async () => {
+  const fixture = await seedCorrectionCandidates();
+  await env.DB.batch([
+    env.DB.prepare(
+      `DELETE FROM user_organizations
+       WHERE user_id = ? AND organization_id = 'org-active'`,
+    ).bind(fixture.manager.userId),
+    env.DB.prepare(
+      `INSERT INTO user_organizations
+       (user_id, organization_id, assignment_role, assigned_by, assigned_at)
+       VALUES (?, 'org-inactive', 'MANAGER', ?, ?)`,
+    ).bind(
+      fixture.manager.userId,
+      fixture.operator.userId,
+      "2026-08-05T00:00:00.000Z",
+    ),
+  ]);
+  const inactiveLink = await authedRequest(
+    fixture.operator,
+    `/api/v1/projects/${fixture.closedProjectId}/history-corrections/organizations`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        organizationId: "org-inactive",
+        expectedProjectRevision: 3,
+      }),
+    },
+  );
+  expect(inactiveLink.status).toBe(201);
+  expect(await managerProjectIds(fixture.manager)).not.toContain(
+    fixture.closedProjectId,
+  );
+  expect(
+    (
+      await authedRequest(
+        fixture.manager,
+        `/api/v1/projects/${fixture.closedProjectId}/history-corrections/organizations`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            organizationId: "org-deleted",
+            expectedProjectRevision: 4,
+          }),
+        },
+      )
+    ).status,
+  ).toBe(403);
+
+  await seedOrganization("org-race", "경합 조직");
+  const request = () =>
+    authedRequest(
+      fixture.operator,
+      `/api/v1/projects/${fixture.closedProjectId}/history-corrections/organizations`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          organizationId: "org-race",
+          expectedProjectRevision: 4,
+        }),
+      },
+    );
+  const responses = await Promise.all([request(), request()]);
+  expect(responses.map((response) => response.status).sort()).toEqual([
+    201, 409,
+  ]);
+  const conflict = responses.find((response) => response.status === 409);
+  expect(await conflict?.json()).toMatchObject({ code: "STALE_REVISION" });
+  expect(await correctionAudits(fixture.closedProjectId)).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        organizationId: "org-race",
+        operation: "ADDED",
+      }),
+    ]),
+  );
+});
+
+async function organizationStates(organizationIds: string[]) {
+  const rows = (
+    await env.DB.prepare(
+      `SELECT id, name, is_active, deleted_at, updated_at
+       FROM organizations
+       WHERE id IN (${organizationIds.map(() => "?").join(", ")})
+       ORDER BY id`,
+    )
+      .bind(...organizationIds)
+      .all()
+  ).results;
+  return rows;
+}
+
+async function closedProjectState(projectId: string) {
+  const project = await env.DB.prepare(
+    `SELECT status, closed_at, closed_by, close_reason, revision
+     FROM projects WHERE id = ?`,
+  )
+    .bind(projectId)
+    .first<{
+      status: string;
+      closed_at: string | null;
+      closed_by: string | null;
+      close_reason: string | null;
+      revision: number;
+    }>();
+  if (!project) throw new Error("closed project fixture is missing");
+  return project;
+}
+
+async function correctionAudits(projectId: string) {
+  const rows = (
+    await env.DB.prepare(
+      `SELECT details_json FROM audit_logs
+       WHERE action = 'CLOSED_PROJECT_ORGANIZATION_CORRECTED'
+         AND entity_type = 'PROJECT_ORGANIZATION'
+         AND details_json LIKE ?
+       ORDER BY rowid`,
+    )
+      .bind(`%"projectId":"${projectId}"%`)
+      .all<{ details_json: string }>()
+  ).results;
+  return rows.map((row) => JSON.parse(row.details_json));
+}
 
 async function seedCorrectionCandidates() {
   const operator = await seedOperator();
