@@ -1218,6 +1218,10 @@ it.each([
     expect(
       screen.getByRole("link", { name: "최신 프로젝트 보기" }),
     ).toHaveAttribute("href", "/projects/project-1");
+    expect(
+      screen.queryByLabelText("종료 후 이력 보정"),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("엑셀 파일")).not.toBeInTheDocument();
   },
 );
 

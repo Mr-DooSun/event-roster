@@ -396,6 +396,7 @@ export function ImportWizard({
     : linkedOrganizations.filter(
         (organization) => organization.isActive && organization.masterIsActive,
       );
+  const showWorkflow = !correctionMode || !workflowUnavailable;
   const canCommit =
     validation !== null &&
     !resolutionDirty &&
@@ -417,7 +418,7 @@ export function ImportWizard({
           명단으로 돌아가기
         </a>
       </header>
-      {correctionMode ? (
+      {correctionMode && showWorkflow ? (
         <Card
           className="er-history-correction-banner"
           aria-label="종료 후 이력 보정"
@@ -439,143 +440,152 @@ export function ImportWizard({
           최신 프로젝트 보기
         </a>
       ) : null}
-      <Card className="er-panel" aria-busy={organizationLoading || undefined}>
-        <h2>{correctionMode ? "연결된 조직 상태" : "가져오기 대상 조직"}</h2>
-        {organizationLoading ? (
-          <div aria-busy="true">
-            <LoadingStatus>프로젝트 조직 불러오는 중…</LoadingStatus>
-          </div>
-        ) : organizationError ? (
-          <RetryableError
-            message={organizationError}
-            onRetry={loadOrganizations}
-            retrying={organizationLoading}
-          />
-        ) : (
-          <>
-            <p className="er-muted">
-              {correctionMode ? "연결된 조직" : "활성 조직"}{" "}
-              {visibleOrganizations.length}개
-            </p>
-            <ul
-              className="er-compact-list"
-              aria-label={correctionMode ? "연결된 조직 상태" : undefined}
-            >
-              {visibleOrganizations.map((organization) => (
-                <li key={organization.organizationId}>
-                  {organization.name}
-                  {correctionMode ? (
-                    organization.masterIsDeleted ? (
-                      <span className="er-badge er-badge--inactive">
-                        삭제됨
-                      </span>
-                    ) : !organization.isActive ||
-                      !organization.masterIsActive ? (
-                      <span className="er-badge er-badge--inactive">
-                        비활성
-                      </span>
-                    ) : (
-                      <span className="er-badge">활성</span>
-                    )
-                  ) : null}
-                </li>
-              ))}
-            </ul>
-          </>
-        )}
-      </Card>
-      <Card
-        className="er-panel"
-        aria-busy={busyAction === "READ_FILE" || undefined}
-      >
-        <label className="er-field">
-          <span>엑셀 파일</span>
-          <input
-            ref={fileInput}
-            type="file"
-            disabled={busy}
-            accept=".xlsx,.xls,.csv"
-            onChange={(event) =>
-              void chooseFile(event.currentTarget.files?.[0])
-            }
-          />
-        </label>
-        {busyAction === "READ_FILE" ? (
-          <LoadingStatus>파일 읽는 중…</LoadingStatus>
-        ) : null}
-      </Card>
-      {parsed ? (
-        <Card
-          className="er-panel er-page-stack"
-          aria-busy={busyAction === "VALIDATE" || undefined}
-        >
-          <label className="er-field">
-            <span>시트</span>
-            <select
-              disabled={busy}
-              value={sheetName}
-              onChange={(event) => changeSheet(event.currentTarget.value)}
-            >
-              {parsed.sheetNames.map((name) => (
-                <option key={name} value={name}>
-                  {name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <ColumnMapping
-            headers={headers}
-            columns={columns}
-            disabled={busy}
-            onChange={(next) => {
-              workflowGeneration.current += 1;
-              setColumns(next);
-              setNormalizedRows([]);
-              setValidation(null);
-              setResolutionDirty(false);
-              setMessage(null);
-            }}
-          />
-          <div className="er-action-row">
-            <Button
-              type="button"
-              variant="primary"
-              loading={busyAction === "VALIDATE"}
-              loadingText="검증 중…"
-              disabled={busyAction === "COMMIT"}
-              onClick={() => void validate()}
-            >
-              {resolutionDirty ? "다시 검증" : "서버 검증"}
-            </Button>
-            <Button type="button" disabled={busy} onClick={clearWorkbook}>
-              취소
-            </Button>
-          </div>
-        </Card>
-      ) : null}
-      {validation ? (
-        <Card
-          className="er-panel er-page-stack"
-          aria-busy={busyAction === "COMMIT" || undefined}
-        >
-          <h2>검증 결과</h2>
-          <ValidationTable
-            rows={validation.rows}
-            normalizedRows={normalizedRows}
-            disabled={busy}
-            onResolve={resolveCandidate}
-          />
-          <Button
-            type="button"
-            variant="primary"
-            loading={busyAction === "COMMIT"}
-            loadingText="가져오는 중…"
-            disabled={!canCommit || busyAction === "VALIDATE"}
-            onClick={() => void commit()}
+      {showWorkflow ? (
+        <>
+          <Card
+            className="er-panel"
+            aria-busy={organizationLoading || undefined}
           >
-            명단 확정
-          </Button>
-        </Card>
+            <h2>
+              {correctionMode ? "연결된 조직 상태" : "가져오기 대상 조직"}
+            </h2>
+            {organizationLoading ? (
+              <div aria-busy="true">
+                <LoadingStatus>프로젝트 조직 불러오는 중…</LoadingStatus>
+              </div>
+            ) : organizationError ? (
+              <RetryableError
+                message={organizationError}
+                onRetry={loadOrganizations}
+                retrying={organizationLoading}
+              />
+            ) : (
+              <>
+                <p className="er-muted">
+                  {correctionMode ? "연결된 조직" : "활성 조직"}{" "}
+                  {visibleOrganizations.length}개
+                </p>
+                <ul
+                  className="er-compact-list"
+                  aria-label={correctionMode ? "연결된 조직 상태" : undefined}
+                >
+                  {visibleOrganizations.map((organization) => (
+                    <li key={organization.organizationId}>
+                      {organization.name}
+                      {correctionMode ? (
+                        organization.masterIsDeleted ? (
+                          <span className="er-badge er-badge--inactive">
+                            삭제됨
+                          </span>
+                        ) : !organization.isActive ||
+                          !organization.masterIsActive ? (
+                          <span className="er-badge er-badge--inactive">
+                            비활성
+                          </span>
+                        ) : (
+                          <span className="er-badge">활성</span>
+                        )
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+          </Card>
+          <Card
+            className="er-panel"
+            aria-busy={busyAction === "READ_FILE" || undefined}
+          >
+            <label className="er-field">
+              <span>엑셀 파일</span>
+              <input
+                ref={fileInput}
+                type="file"
+                disabled={busy}
+                accept=".xlsx,.xls,.csv"
+                onChange={(event) =>
+                  void chooseFile(event.currentTarget.files?.[0])
+                }
+              />
+            </label>
+            {busyAction === "READ_FILE" ? (
+              <LoadingStatus>파일 읽는 중…</LoadingStatus>
+            ) : null}
+          </Card>
+          {parsed ? (
+            <Card
+              className="er-panel er-page-stack"
+              aria-busy={busyAction === "VALIDATE" || undefined}
+            >
+              <label className="er-field">
+                <span>시트</span>
+                <select
+                  disabled={busy}
+                  value={sheetName}
+                  onChange={(event) => changeSheet(event.currentTarget.value)}
+                >
+                  {parsed.sheetNames.map((name) => (
+                    <option key={name} value={name}>
+                      {name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <ColumnMapping
+                headers={headers}
+                columns={columns}
+                disabled={busy}
+                onChange={(next) => {
+                  workflowGeneration.current += 1;
+                  setColumns(next);
+                  setNormalizedRows([]);
+                  setValidation(null);
+                  setResolutionDirty(false);
+                  setMessage(null);
+                }}
+              />
+              <div className="er-action-row">
+                <Button
+                  type="button"
+                  variant="primary"
+                  loading={busyAction === "VALIDATE"}
+                  loadingText="검증 중…"
+                  disabled={busyAction === "COMMIT"}
+                  onClick={() => void validate()}
+                >
+                  {resolutionDirty ? "다시 검증" : "서버 검증"}
+                </Button>
+                <Button type="button" disabled={busy} onClick={clearWorkbook}>
+                  취소
+                </Button>
+              </div>
+            </Card>
+          ) : null}
+          {validation ? (
+            <Card
+              className="er-panel er-page-stack"
+              aria-busy={busyAction === "COMMIT" || undefined}
+            >
+              <h2>검증 결과</h2>
+              <ValidationTable
+                rows={validation.rows}
+                normalizedRows={normalizedRows}
+                disabled={busy}
+                onResolve={resolveCandidate}
+              />
+              <Button
+                type="button"
+                variant="primary"
+                loading={busyAction === "COMMIT"}
+                loadingText="가져오는 중…"
+                disabled={!canCommit || busyAction === "VALIDATE"}
+                onClick={() => void commit()}
+              >
+                명단 확정
+              </Button>
+            </Card>
+          ) : null}
+        </>
       ) : null}
     </div>
   );
