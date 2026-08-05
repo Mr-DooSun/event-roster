@@ -74,6 +74,38 @@ it("rejects import validation after the project is deleted", async () => {
   expect(response.status).toBe(404);
 });
 
+it("keeps the ordinary import endpoint closed for a closed project", async () => {
+  const fixture = await setupPreRegistration();
+  const timestamp = "2026-08-05T00:00:00.000Z";
+  await env.DB.prepare(
+    `UPDATE projects
+     SET status = 'CLOSED', revision = revision + 1, updated_at = ?,
+         closed_at = ?, closed_by = ?, close_reason = 'MANUAL'
+     WHERE id = ?`,
+  )
+    .bind(timestamp, timestamp, fixture.operator.userId, fixture.project.id)
+    .run();
+
+  const response = await authedRequest(
+    fixture.operator,
+    `/api/v1/projects/${fixture.project.id}/imports/validate`,
+    {
+      method: "POST",
+      body: JSON.stringify([
+        {
+          rowNumber: 2,
+          name: "종료 일반 가져오기",
+          organizationName: "1팀",
+          ...studentProfile,
+        },
+      ]),
+    },
+  );
+
+  expect(response.status).toBe(409);
+  expect(await response.json()).toMatchObject({ code: "PROJECT_CLOSED" });
+});
+
 it("treats a deleted organization as unavailable for import validation and commit", async () => {
   const fixture = await setupPreRegistration();
   const deletedAt = "2026-08-03T00:00:00.000Z";

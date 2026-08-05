@@ -3,6 +3,7 @@ import { afterEach, beforeEach, expect, it } from "vitest";
 import type { Env } from "../src/env";
 import { requireActor } from "../src/middleware/authentication";
 import {
+  commitClosedProjectImport,
   correctClosedProjectRoster,
   correctClosedProjectRosterBulk,
   patchClosedProjectRoster,
@@ -28,6 +29,582 @@ afterEach(async () => {
      SET deleted_at = NULL, deleted_by = NULL
      WHERE deleted_at IS NOT NULL`,
   ).run();
+});
+
+const importStudentProfile = {
+  role: "STUDENT" as const,
+  grade: "M1" as const,
+};
+
+it("validates closed-project import rows against active historical memberships", async () => {
+  const fixture = await seedCorrectionCandidates();
+  await linkHistoricalImportOrganizations(fixture.operator.userId);
+
+  const response = await authedRequest(
+    fixture.operator,
+    `/api/v1/projects/${fixture.closedProjectId}/history-corrections/imports/validate`,
+    {
+      method: "POST",
+      body: JSON.stringify([
+        {
+          rowNumber: 2,
+          name: "가동 참가자",
+          organizationName: "가동 조직",
+          ...importStudentProfile,
+        },
+        {
+          rowNumber: 3,
+          name: "나중 참가자",
+          organizationName: "나중 비활성 조직",
+          role: "TEACHER",
+          grade: null,
+        },
+        {
+          rowNumber: 4,
+          name: "다음 참가자",
+          organizationName: "다음 삭제 조직",
+          role: "STUDENT",
+          grade: "H3",
+        },
+      ]),
+    },
+  );
+
+  expect(response.status).toBe(200);
+  expect(await response.json()).toEqual({
+    projectRevision: 3,
+    rows: [
+      {
+        rowNumber: 2,
+        name: "가동 참가자",
+        organizationName: "가동 조직",
+        role: "STUDENT",
+        grade: "M1",
+        issues: [],
+        candidates: [
+          {
+            participantId: "active-participant",
+            participantNumber: "P-ACTIVE",
+            name: "가동 참가자",
+          },
+        ],
+      },
+      {
+        rowNumber: 3,
+        name: "나중 참가자",
+        organizationName: "나중 비활성 조직",
+        role: "TEACHER",
+        grade: null,
+        issues: [],
+        candidates: [
+          {
+            participantId: "inactive-participant",
+            participantNumber: "P-INACTIVE",
+            name: "나중 참가자",
+          },
+        ],
+      },
+      {
+        rowNumber: 4,
+        name: "다음 참가자",
+        organizationName: "다음 삭제 조직",
+        role: "STUDENT",
+        grade: "H3",
+        issues: [],
+        candidates: [
+          {
+            participantId: "deleted-participant",
+            participantNumber: "P-DELETED",
+            name: "다음 참가자",
+          },
+        ],
+      },
+    ],
+  });
+});
+
+it("rejects a closed import row when only the project membership is inactive", async () => {
+  const fixture = await seedCorrectionCandidates();
+  const now = "2026-08-05T00:00:00.000Z";
+  await env.DB.prepare(
+    `INSERT INTO project_organizations
+     (project_id, organization_id, is_active, added_at, deactivated_at,
+      added_by, updated_by)
+     VALUES (?, 'org-inactive', 0, ?, ?, ?, ?)`,
+  )
+    .bind(
+      fixture.closedProjectId,
+      now,
+      now,
+      fixture.operator.userId,
+      fixture.operator.userId,
+    )
+    .run();
+
+  const response = await authedRequest(
+    fixture.operator,
+    `/api/v1/projects/${fixture.closedProjectId}/history-corrections/imports/validate`,
+    {
+      method: "POST",
+      body: JSON.stringify([
+        {
+          rowNumber: 2,
+          name: "나중 참가자",
+          organizationName: "나중 비활성 조직",
+          ...importStudentProfile,
+        },
+      ]),
+    },
+  );
+
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({
+    rows: [{ issues: ["UNKNOWN_ORGANIZATION"] }],
+  });
+});
+
+it("commits a closed import as actual history without rewriting participant masters", async () => {
+  const fixture = await seedCorrectionCandidates();
+  await linkHistoricalImportOrganizations(fixture.operator.userId);
+  await env.DB.batch([
+    env.DB.prepare(
+      `UPDATE project_roster_entries
+       SET source = 'PRE_REGISTRATION', status = 'CANCELLED',
+           was_expected_at_start = 1
+       WHERE id = 'roster-active-old'`,
+    ),
+    env.DB.prepare(
+      `INSERT INTO project_expected_snapshots
+       (project_id, organization_id, expected_count, captured_at)
+       VALUES (?, 'org-active', 7, '2026-08-05T00:00:00.000Z')`,
+    ).bind(fixture.closedProjectId),
+  ]);
+  const participantsBefore = await participantStates([
+    "active-participant",
+    "inactive-participant",
+  ]);
+
+  const response = await authedRequest(
+    fixture.operator,
+    `/api/v1/projects/${fixture.closedProjectId}/history-corrections/imports/commit`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        expectedProjectRevision: 3,
+        rows: [
+          {
+            rowNumber: 2,
+            name: "가동 참가자",
+            organizationName: "가동 조직",
+            role: "TEACHER",
+            grade: null,
+          },
+          {
+            rowNumber: 3,
+            name: "나중 참가자",
+            organizationName: "나중 비활성 조직",
+            role: "STUDENT",
+            grade: "H2",
+          },
+          {
+            rowNumber: 4,
+            name: "종료 신규 참가자",
+            organizationName: "다음 삭제 조직",
+            role: "TEACHER",
+            grade: null,
+          },
+        ],
+      }),
+    },
+  );
+
+  expect(response.status).toBe(201);
+  expect(await response.json()).toEqual({
+    importedCount: 3,
+    projectRevision: 4,
+  });
+  expect(
+    (
+      await env.DB.prepare(
+        `SELECT participant_name_snapshot AS name,
+                organization_id AS organizationId,
+                participant_role_snapshot AS role,
+                student_grade_snapshot AS grade, source, status,
+                was_expected_at_start AS wasExpected
+         FROM project_roster_entries
+         WHERE project_id = ?
+         ORDER BY participant_name_snapshot`,
+      )
+        .bind(fixture.closedProjectId)
+        .all()
+    ).results,
+  ).toEqual([
+    {
+      name: "가동 참가자",
+      organizationId: "org-active",
+      role: "TEACHER",
+      grade: null,
+      source: "IN_PROGRESS",
+      status: "ACTIVE",
+      wasExpected: 0,
+    },
+    {
+      name: "나중 참가자",
+      organizationId: "org-inactive",
+      role: "STUDENT",
+      grade: "H2",
+      source: "IN_PROGRESS",
+      status: "ACTIVE",
+      wasExpected: 0,
+    },
+    {
+      name: "종료 신규 참가자",
+      organizationId: "org-deleted",
+      role: "TEACHER",
+      grade: null,
+      source: "IN_PROGRESS",
+      status: "ACTIVE",
+      wasExpected: 0,
+    },
+  ]);
+  expect(
+    await participantStates(["active-participant", "inactive-participant"]),
+  ).toEqual(participantsBefore);
+  expect(await expectedSnapshotState(fixture.closedProjectId)).toEqual([
+    { organization_id: "org-active", expected_count: 7 },
+  ]);
+
+  const importRuns = (
+    await env.DB.prepare(
+      `SELECT id, row_count FROM project_import_runs
+       WHERE project_id = ?`,
+    )
+      .bind(fixture.closedProjectId)
+      .all<{ id: string; row_count: number }>()
+  ).results;
+  expect(importRuns).toHaveLength(1);
+  expect(importRuns[0]).toMatchObject({ row_count: 3 });
+
+  const audits = await closedImportAudits(fixture.closedProjectId);
+  expect(audits).toHaveLength(3);
+  expect(new Set(audits.map((audit) => audit.batchId))).toEqual(
+    new Set([importRuns[0]?.id]),
+  );
+  expect(audits).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        projectId: fixture.closedProjectId,
+        organizationId: "org-active",
+        role: "TEACHER",
+        grade: null,
+        before: {
+          name: "스냅샷 참가자",
+          organizationId: "org-active",
+          role: "STUDENT",
+          grade: "M1",
+          status: "CANCELLED",
+        },
+        after: {
+          name: "가동 참가자",
+          organizationId: "org-active",
+          role: "TEACHER",
+          grade: null,
+          status: "ACTIVE",
+        },
+      }),
+      expect.objectContaining({
+        organizationId: "org-inactive",
+        role: "STUDENT",
+        grade: "H2",
+        before: null,
+        after: expect.objectContaining({
+          name: "나중 참가자",
+          status: "ACTIVE",
+        }),
+      }),
+      expect.objectContaining({
+        organizationId: "org-deleted",
+        role: "TEACHER",
+        grade: null,
+        before: null,
+        after: expect.objectContaining({
+          name: "종료 신규 참가자",
+          status: "ACTIVE",
+        }),
+      }),
+    ]),
+  );
+
+  const summary = await authedRequest(
+    fixture.operator,
+    `/api/v1/projects/${fixture.closedProjectId}/summary`,
+  );
+  expect(await summary.json()).toMatchObject({
+    expectedTotal: 7,
+    finalTotal: 3,
+    deltaTotal: -4,
+  });
+});
+
+it("rolls back a closed import with a bad final row or stale revision", async () => {
+  const fixture = await seedCorrectionCandidates();
+  await linkHistoricalImportOrganizations(fixture.operator.userId);
+  const before = await closedImportMutationState(fixture.closedProjectId);
+  const rows = [
+    {
+      rowNumber: 2,
+      name: "원자 정상 참가자",
+      organizationName: "가동 조직",
+      ...importStudentProfile,
+    },
+    {
+      rowNumber: 3,
+      name: "원자 오류 참가자",
+      organizationName: "연결되지 않은 조직",
+      role: "TEACHER" as const,
+      grade: null,
+    },
+  ];
+
+  const invalid = await authedRequest(
+    fixture.operator,
+    `/api/v1/projects/${fixture.closedProjectId}/history-corrections/imports/commit`,
+    {
+      method: "POST",
+      body: JSON.stringify({ rows, expectedProjectRevision: 3 }),
+    },
+  );
+  expect(invalid.status).toBe(422);
+  expect(await closedImportMutationState(fixture.closedProjectId)).toEqual(
+    before,
+  );
+
+  const stale = await authedRequest(
+    fixture.operator,
+    `/api/v1/projects/${fixture.closedProjectId}/history-corrections/imports/commit`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        rows: [rows[0]],
+        expectedProjectRevision: 2,
+      }),
+    },
+  );
+  expect(stale.status).toBe(409);
+  expect(await closedImportMutationState(fixture.closedProjectId)).toEqual(
+    before,
+  );
+});
+
+it.each([
+  {
+    race: "reopened",
+    expectedCode: "INVALID_TRANSITION",
+    mutate: async (
+      fixture: Awaited<ReturnType<typeof seedCorrectionCandidates>>,
+    ) => {
+      await env.DB.prepare(
+        `UPDATE projects
+         SET status = 'IN_PROGRESS', revision = revision + 1,
+             closed_at = NULL, closed_by = NULL, close_reason = NULL
+         WHERE id = ?`,
+      )
+        .bind(fixture.closedProjectId)
+        .run();
+    },
+  },
+  {
+    race: "deleted",
+    expectedCode: "NOT_FOUND",
+    mutate: async (
+      fixture: Awaited<ReturnType<typeof seedCorrectionCandidates>>,
+    ) => {
+      const timestamp = "2026-08-05T03:00:00.000Z";
+      await env.DB.prepare(
+        `UPDATE projects
+         SET revision = revision + 1, deleted_at = ?, deleted_by = ?,
+             deleted_revision = revision + 1
+         WHERE id = ?`,
+      )
+        .bind(timestamp, fixture.operator.userId, fixture.closedProjectId)
+        .run();
+    },
+  },
+])(
+  "rolls back a closed import when the project is $race before the batch",
+  async ({ expectedCode, mutate }) => {
+    const fixture = await seedCorrectionCandidates();
+    const actor = await correctionActor(fixture.operator);
+    const raceDb = beforeClosedImportBatch(() => mutate(fixture));
+
+    await expect(
+      commitClosedProjectImport(
+        { ...(env as Env), DB: raceDb },
+        actor,
+        fixture.closedProjectId,
+        [
+          {
+            rowNumber: 2,
+            name: "경쟁 보정 참가자",
+            organizationName: "가동 조직",
+            ...importStudentProfile,
+          },
+        ],
+        3,
+      ),
+    ).rejects.toMatchObject({ code: expectedCode });
+    expect(
+      await env.DB.prepare(
+        `SELECT COUNT(*) AS count FROM participants
+         WHERE name = '경쟁 보정 참가자'`,
+      ).first(),
+    ).toEqual({ count: 0 });
+    expect(await closedImportAudits(fixture.closedProjectId)).toEqual([]);
+    expect(
+      await env.DB.prepare(
+        `SELECT COUNT(*) AS count FROM project_import_runs
+         WHERE project_id = ?`,
+      )
+        .bind(fixture.closedProjectId)
+        .first(),
+    ).toEqual({ count: 0 });
+  },
+);
+
+it("rolls back when a selected closed-import participant is replaced after resolution", async () => {
+  const fixture = await seedCorrectionCandidates();
+  await linkHistoricalImportOrganizations(fixture.operator.userId);
+  const actor = await correctionActor(fixture.operator);
+  const timestamp = "2026-08-05T03:30:00.000Z";
+  const raceDb = beforeClosedImportBatch(async () => {
+    await env.DB.batch([
+      env.DB.prepare(
+        "DELETE FROM participants WHERE id = 'inactive-participant'",
+      ),
+      env.DB.prepare(
+        `INSERT INTO participants
+         (id, participant_id, name, organization_id, revision,
+          created_at, updated_at)
+         VALUES ('replacement-participant', 'P-REPLACEMENT', '나중 참가자',
+                 'org-inactive', 0, ?, ?)`,
+      ).bind(timestamp, timestamp),
+    ]);
+  });
+
+  await expect(
+    commitClosedProjectImport(
+      { ...(env as Env), DB: raceDb },
+      actor,
+      fixture.closedProjectId,
+      [
+        {
+          rowNumber: 2,
+          name: "나중 참가자",
+          organizationName: "나중 비활성 조직",
+          ...importStudentProfile,
+        },
+      ],
+      3,
+    ),
+  ).rejects.toMatchObject({ code: "STALE_REVISION" });
+  expect(
+    await env.DB.prepare(
+      `SELECT COUNT(*) AS count FROM project_roster_entries
+       WHERE project_id = ? AND participant_id = 'replacement-participant'`,
+    )
+      .bind(fixture.closedProjectId)
+      .first(),
+  ).toEqual({ count: 0 });
+  expect(await closedImportAudits(fixture.closedProjectId)).toEqual([]);
+  expect(
+    await env.DB.prepare(
+      `SELECT COUNT(*) AS count FROM project_import_runs
+       WHERE project_id = ?`,
+    )
+      .bind(fixture.closedProjectId)
+      .first(),
+  ).toEqual({ count: 0 });
+});
+
+it("rolls back a closed import when a correction audit statement fails", async () => {
+  const fixture = await seedCorrectionCandidates();
+  const before = await closedImportMutationState(fixture.closedProjectId);
+  await env.DB.prepare(
+    `CREATE TRIGGER reject_closed_import_audit
+     BEFORE INSERT ON audit_logs
+     WHEN NEW.action = 'CLOSED_PROJECT_ROSTER_IMPORTED'
+     BEGIN SELECT RAISE(ABORT, 'REJECT_CLOSED_IMPORT_AUDIT'); END`,
+  ).run();
+  try {
+    const response = await authedRequest(
+      fixture.operator,
+      `/api/v1/projects/${fixture.closedProjectId}/history-corrections/imports/commit`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          expectedProjectRevision: 3,
+          rows: [
+            {
+              rowNumber: 2,
+              name: "감사 실패 첫 행",
+              organizationName: "가동 조직",
+              ...importStudentProfile,
+            },
+            {
+              rowNumber: 3,
+              name: "감사 실패 둘째 행",
+              organizationName: "가동 조직",
+              role: "TEACHER",
+              grade: null,
+            },
+          ],
+        }),
+      },
+    );
+    expect(response.status).toBe(500);
+    expect(await closedImportMutationState(fixture.closedProjectId)).toEqual(
+      before,
+    );
+  } finally {
+    await env.DB.prepare("DROP TRIGGER reject_closed_import_audit").run();
+  }
+});
+
+it("protects closed import routes with origin, CSRF, and administrative-operator checks", async () => {
+  const fixture = await seedCorrectionCandidates();
+  const path = `/api/v1/projects/${fixture.closedProjectId}/history-corrections/imports/validate`;
+  const body = JSON.stringify([
+    {
+      rowNumber: 2,
+      name: "보안 검증",
+      organizationName: "가동 조직",
+      ...importStudentProfile,
+    },
+  ]);
+
+  const wrongOrigin = await apiRequest(path, {
+    method: "POST",
+    headers: {
+      ...authenticatedHeaders(fixture.operator),
+      Origin: "https://evil.example",
+    },
+    body,
+  });
+  expect(wrongOrigin.status).toBe(403);
+  const noCsrf = await apiRequest(path, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${fixture.operator.body.accessToken}`,
+      Origin: "https://event-roster.test",
+    },
+    body,
+  });
+  expect(noCsrf.status).toBe(403);
+  const forbidden = await authedRequest(fixture.manager, path, {
+    method: "POST",
+    body,
+  });
+  expect(forbidden.status).toBe(403);
 });
 
 it("returns every master candidate only to an administrative operator for a closed project", async () => {
@@ -1615,6 +2192,136 @@ async function participantState(participantId: string) {
   )
     .bind(participantId)
     .first();
+}
+
+async function participantStates(participantIds: string[]) {
+  return (
+    await env.DB.prepare(
+      `SELECT id, participant_id, name, organization_id, revision,
+              created_at, updated_at
+       FROM participants
+       WHERE id IN (${participantIds.map(() => "?").join(", ")})
+       ORDER BY id`,
+    )
+      .bind(...participantIds)
+      .all()
+  ).results;
+}
+
+async function linkHistoricalImportOrganizations(actorUserId: string) {
+  const now = "2026-08-05T00:00:00.000Z";
+  await env.DB.prepare(
+    `INSERT INTO project_organizations
+     (project_id, organization_id, is_active, added_at, added_by, updated_by)
+     VALUES ('project-closed', 'org-inactive', 1, ?, ?, ?),
+            ('project-closed', 'org-deleted', 1, ?, ?, ?)`,
+  )
+    .bind(now, actorUserId, actorUserId, now, actorUserId, actorUserId)
+    .run();
+}
+
+async function closedImportMutationState(projectId: string) {
+  const results = await env.DB.batch([
+    env.DB.prepare("SELECT COUNT(*) AS count FROM participants"),
+    env.DB.prepare(
+      `SELECT COUNT(*) AS count FROM project_roster_entries
+       WHERE project_id = ?`,
+    ).bind(projectId),
+    env.DB.prepare("SELECT revision FROM projects WHERE id = ?").bind(
+      projectId,
+    ),
+    env.DB.prepare(
+      `SELECT COUNT(*) AS count FROM project_import_runs
+       WHERE project_id = ?`,
+    ).bind(projectId),
+    env.DB.prepare(
+      `SELECT COUNT(*) AS count FROM audit_logs
+       WHERE action = 'CLOSED_PROJECT_ROSTER_IMPORTED'
+         AND details_json LIKE ?`,
+    ).bind(`%"projectId":"${projectId}"%`),
+    env.DB.prepare(
+      `SELECT COUNT(*) AS count FROM project_expected_snapshots
+       WHERE project_id = ?`,
+    ).bind(projectId),
+  ]);
+  const participantRow = results[0]?.results[0] as
+    | { count: number }
+    | undefined;
+  const rosterRow = results[1]?.results[0] as { count: number } | undefined;
+  const projectRow = results[2]?.results[0] as { revision: number } | undefined;
+  const importRunRow = results[3]?.results[0] as { count: number } | undefined;
+  const auditRow = results[4]?.results[0] as { count: number } | undefined;
+  const snapshotRow = results[5]?.results[0] as { count: number } | undefined;
+  if (
+    !participantRow ||
+    !rosterRow ||
+    !projectRow ||
+    !importRunRow ||
+    !auditRow ||
+    !snapshotRow
+  ) {
+    throw new Error("closed import mutation state query failed");
+  }
+  return {
+    participants: participantRow.count,
+    roster: rosterRow.count,
+    projectRevision: projectRow.revision,
+    importRuns: importRunRow.count,
+    audits: auditRow.count,
+    expectedSnapshots: snapshotRow.count,
+  };
+}
+
+async function closedImportAudits(projectId: string) {
+  const rows = (
+    await env.DB.prepare(
+      `SELECT details_json FROM audit_logs
+       WHERE action = 'CLOSED_PROJECT_ROSTER_IMPORTED'
+         AND entity_type = 'ROSTER_ENTRY'
+         AND details_json LIKE ?
+       ORDER BY rowid`,
+    )
+      .bind(`%"projectId":"${projectId}"%`)
+      .all<{ details_json: string }>()
+  ).results;
+  return rows.map(
+    ({ details_json }) =>
+      JSON.parse(details_json) as {
+        batchId: string;
+        projectId: string;
+        organizationId: string;
+        role: string;
+        grade: string | null;
+        before: null | {
+          name: string;
+          organizationId: string;
+          role: string | null;
+          grade: string | null;
+          status: string;
+        };
+        after: {
+          name: string;
+          organizationId: string;
+          role: string;
+          grade: string | null;
+          status: string;
+        };
+      },
+  );
+}
+
+function beforeClosedImportBatch(before: () => Promise<void>): D1Database {
+  let pending = true;
+  return {
+    prepare: (query: string) => env.DB.prepare(query),
+    batch: async (statements: D1PreparedStatement[]) => {
+      if (pending) {
+        pending = false;
+        await before();
+      }
+      return env.DB.batch(statements);
+    },
+  } as D1Database;
 }
 
 async function correctionActor(

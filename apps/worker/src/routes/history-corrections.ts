@@ -2,10 +2,14 @@ import {
   AddProjectOrganizationSchema,
   BulkRosterCreateRequestSchema,
   ClosedProjectRosterPatchRequestSchema,
+  ImportCommitRequestSchema,
+  NormalizedImportRowSchema,
   ProjectOrganizationPatchSchema,
   RosterCreateRequestSchema,
 } from "@event-roster/contracts";
 import { Hono } from "hono";
+import { z } from "zod";
+import { IMPORT_LIMIT } from "../db/imports";
 import type { Env } from "../env";
 import { assertExactOrigin } from "../http/origin";
 import { requireActor } from "../middleware/authentication";
@@ -13,15 +17,59 @@ import { requireFullSession } from "../middleware/authorization";
 import { requireCsrf } from "../middleware/csrf";
 import { requireAdministrativeOperator } from "../services/admin";
 import {
+  commitClosedProjectImport,
   correctClosedProjectOrganization,
   correctClosedProjectRoster,
   correctClosedProjectRosterBulk,
   getClosedCorrectionCandidates,
   patchClosedProjectRoster,
   setClosedProjectOrganizationActive,
+  validateClosedProjectImport,
 } from "../services/history-corrections";
 
+const RowsSchema = z.array(NormalizedImportRowSchema).min(1).max(IMPORT_LIMIT);
+
 export const historyCorrectionRoutes = new Hono<{ Bindings: Env }>();
+
+historyCorrectionRoutes.post(
+  "/projects/:projectId/history-corrections/imports/validate",
+  async (c) => {
+    assertExactOrigin(c.req.raw, c.env.APP_ORIGIN);
+    const actor = await requireActor(c.req.raw, c.env);
+    await requireCsrf(c.req.raw, actor);
+    requireAdministrativeOperator(actor);
+    const rows = RowsSchema.parse(await c.req.json());
+    return c.json(
+      await validateClosedProjectImport(
+        c.env,
+        actor,
+        c.req.param("projectId"),
+        rows,
+      ),
+    );
+  },
+);
+
+historyCorrectionRoutes.post(
+  "/projects/:projectId/history-corrections/imports/commit",
+  async (c) => {
+    assertExactOrigin(c.req.raw, c.env.APP_ORIGIN);
+    const actor = await requireActor(c.req.raw, c.env);
+    await requireCsrf(c.req.raw, actor);
+    requireAdministrativeOperator(actor);
+    const input = ImportCommitRequestSchema.parse(await c.req.json());
+    return c.json(
+      await commitClosedProjectImport(
+        c.env,
+        actor,
+        c.req.param("projectId"),
+        input.rows,
+        input.expectedProjectRevision,
+      ),
+      201,
+    );
+  },
+);
 
 historyCorrectionRoutes.get(
   "/projects/:projectId/history-corrections/candidates",

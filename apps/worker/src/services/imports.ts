@@ -22,6 +22,35 @@ const PARTICIPANT_CHUNK_SIZE = 15;
 const ROSTER_CHUNK_SIZE = 9;
 const AUDIT_CHUNK_SIZE = 45;
 
+interface ImportMutationPolicy {
+  mode: "ORDINARY" | "CLOSED_CORRECTION";
+  source: "PRE_REGISTRATION" | "IN_PROGRESS";
+  auditAction: "ROSTER_IMPORTED" | "CLOSED_PROJECT_ROSTER_IMPORTED";
+  allowHistoricalOrganizationMasters: boolean;
+}
+
+const ORDINARY_IMPORT_POLICY: ImportMutationPolicy = {
+  mode: "ORDINARY",
+  source: "PRE_REGISTRATION",
+  auditAction: "ROSTER_IMPORTED",
+  allowHistoricalOrganizationMasters: false,
+};
+
+const CLOSED_CORRECTION_IMPORT_POLICY: ImportMutationPolicy = {
+  mode: "CLOSED_CORRECTION",
+  source: "IN_PROGRESS",
+  auditAction: "CLOSED_PROJECT_ROSTER_IMPORTED",
+  allowHistoricalOrganizationMasters: true,
+};
+
+interface ImportRosterSnapshot {
+  name: string;
+  organizationId: string;
+  role: ParticipantRole | null;
+  grade: StudentGrade | null;
+  status: RosterStatus;
+}
+
 interface ResolvedImportRow {
   rowNumber: number;
   name: string;
@@ -36,6 +65,8 @@ interface ResolvedImportRow {
   organizationParticipantCountAfterInsert: number;
   organizationParticipantRevisionSum: number;
   mutateRoster: boolean;
+  before: ImportRosterSnapshot | null;
+  after: ImportRosterSnapshot;
   role: ParticipantRole;
   grade: StudentGrade | null;
 }
@@ -67,9 +98,36 @@ export async function validateImport(
   projectId: string,
   rows: NormalizedImportRow[],
 ) {
+  return validateImportWithPolicy(env, projectId, rows, ORDINARY_IMPORT_POLICY);
+}
+
+export async function validateClosedCorrectionImport(
+  env: Env,
+  projectId: string,
+  rows: NormalizedImportRow[],
+) {
+  return validateImportWithPolicy(
+    env,
+    projectId,
+    rows,
+    CLOSED_CORRECTION_IMPORT_POLICY,
+  );
+}
+
+async function validateImportWithPolicy(
+  env: Env,
+  projectId: string,
+  rows: NormalizedImportRow[],
+  policy: ImportMutationPolicy,
+) {
   const normalized = validateNormalizedRows(rows);
-  const project = await requireImportProject(env, projectId, new Date());
-  const resolved = await resolveRows(env.DB, projectId, normalized);
+  const project = await requireImportProject(
+    env,
+    projectId,
+    new Date(),
+    policy,
+  );
+  const resolved = await resolveRows(env.DB, projectId, normalized, policy);
   return {
     projectRevision: project.revision,
     rows: resolved.map((row) => ({
@@ -96,9 +154,48 @@ export async function commitImport(
   expectedProjectRevision: number,
   currentTime = new Date(),
 ) {
+  return commitImportWithPolicy(
+    env,
+    actor,
+    projectId,
+    rows,
+    expectedProjectRevision,
+    currentTime,
+    ORDINARY_IMPORT_POLICY,
+  );
+}
+
+export async function commitClosedCorrectionImport(
+  env: Env,
+  actor: Actor,
+  projectId: string,
+  rows: NormalizedImportRow[],
+  expectedProjectRevision: number,
+  currentTime = new Date(),
+) {
+  return commitImportWithPolicy(
+    env,
+    actor,
+    projectId,
+    rows,
+    expectedProjectRevision,
+    currentTime,
+    CLOSED_CORRECTION_IMPORT_POLICY,
+  );
+}
+
+async function commitImportWithPolicy(
+  env: Env,
+  actor: Actor,
+  projectId: string,
+  rows: NormalizedImportRow[],
+  expectedProjectRevision: number,
+  currentTime: Date,
+  policy: ImportMutationPolicy,
+) {
   const normalized = validateNormalizedRows(rows);
-  await requireImportProject(env, projectId, currentTime);
-  const resolution = await resolveRows(env.DB, projectId, normalized);
+  await requireImportProject(env, projectId, currentTime, policy);
+  const resolution = await resolveRows(env.DB, projectId, normalized, policy);
   if (resolution.some((row) => row.issues.length > 0)) {
     throw new DomainError("VALIDATION_FAILED", {
       rows: resolution.map((row) => ({
@@ -120,10 +217,27 @@ export async function commitImport(
   const resolved: ResolvedImportRow[] = resolution.map((row) => {
     const selected = selectCandidate(row.input, row.candidates);
     const organizationId = row.organizationId as string;
+    const expectedParticipantName = selected?.name ?? row.input.name;
+    const before = selected?.entry_id
+      ? {
+          name: selected.entry_participant_name as string,
+          organizationId: selected.entry_organization_id as string,
+          role: selected.entry_role,
+          grade: selected.entry_grade,
+          status: selected.entry_status as RosterStatus,
+        }
+      : null;
+    const after: ImportRosterSnapshot = {
+      name: expectedParticipantName,
+      organizationId,
+      role: row.input.role,
+      grade: row.input.grade,
+      status: "ACTIVE",
+    };
     return {
       rowNumber: row.input.rowNumber,
       name: row.input.name,
-      expectedParticipantName: selected?.name ?? row.input.name,
+      expectedParticipantName,
       organizationId,
       organizationName: row.organizationName as string,
       organizationCanonicalName: row.organizationCanonicalName as string,
@@ -136,12 +250,20 @@ export async function commitImport(
         (createdByOrganization.get(organizationId) ?? 0),
       organizationParticipantRevisionSum:
         row.organizationParticipantRevisionSum,
-      mutateRoster: selected?.entry_status !== "ACTIVE",
+      mutateRoster: shouldMutateRoster(
+        policy,
+        selected,
+        after,
+        row.organizationName as string,
+      ),
+      before,
+      after,
       role: row.input.role,
       grade: row.input.grade,
     };
   });
   const now = currentTime.toISOString();
+  const batchId = crypto.randomUUID();
   const statements: D1PreparedStatement[] = [];
   const newParticipants = resolved.filter((row) => row.createParticipant);
   for (const chunk of chunks(newParticipants, PARTICIPANT_CHUNK_SIZE)) {
@@ -149,13 +271,28 @@ export async function commitImport(
   }
   for (const chunk of chunks(resolved, ROSTER_CHUNK_SIZE)) {
     statements.push(
-      rosterUpsert(env.DB, chunk, projectId, actor.session.user.id, now),
+      rosterUpsert(
+        env.DB,
+        chunk,
+        projectId,
+        actor.session.user.id,
+        now,
+        policy,
+      ),
     );
   }
   const rosterMutations = resolved.filter((row) => row.mutateRoster);
   for (const chunk of chunks(rosterMutations, AUDIT_CHUNK_SIZE)) {
     statements.push(
-      importAuditInsert(env.DB, chunk, projectId, actor.session.user.id, now),
+      importAuditInsert(
+        env.DB,
+        chunk,
+        projectId,
+        actor.session.user.id,
+        now,
+        batchId,
+        policy,
+      ),
     );
   }
   statements.push(
@@ -163,12 +300,9 @@ export async function commitImport(
       `UPDATE projects SET revision = revision + 1, updated_at = ?
        WHERE id = ? AND deleted_at IS NULL`,
     ).bind(now, projectId),
-    env.DB.prepare(
-      `INSERT INTO project_import_runs
-       (id, project_id, actor_user_id, row_count, created_at, details_json)
-       VALUES (?, ?, ?, ?, ?, '{}')`,
-    ).bind(
-      crypto.randomUUID(),
+    importRunInsert(
+      env.DB,
+      batchId,
       projectId,
       actor.session.user.id,
       resolved.length,
@@ -183,13 +317,13 @@ export async function commitImport(
         env.DB,
         guardId,
         actor,
-        `EXISTS (
-           SELECT 1 FROM projects
-           WHERE id = ? AND status = 'PRE_REGISTRATION' AND revision = ?
-             AND deleted_at IS NULL
-             AND (end_date IS NULL OR end_date >= ?)
-         )`,
-        [projectId, expectedProjectRevision, toKstDate(currentTime)],
+        importProjectGuardPredicate(policy),
+        importProjectGuardBindings(
+          policy,
+          projectId,
+          expectedProjectRevision,
+          currentTime,
+        ),
       ),
       statements,
       failureCode: "STALE_REVISION",
@@ -197,17 +331,30 @@ export async function commitImport(
   } catch (error) {
     if (
       error instanceof Error &&
-      error.message.includes(
+      (error.message.includes(
         "NOT NULL constraint failed: project_roster_entries.organization_id",
-      )
+      ) ||
+        error.message.includes(
+          "NOT NULL constraint failed: project_roster_entries.participant_id",
+        ))
     ) {
       throw new DomainError("STALE_REVISION");
     }
-    if (error instanceof DomainError) {
+    if (error instanceof DomainError && policy.mode === "ORDINARY") {
       await closeExpiredProject(env, projectId, currentTime);
       const latest = await findProject(env.DB, projectId);
       if (latest?.status === "CLOSED") {
         throw new DomainError("PROJECT_CLOSED");
+      }
+    }
+    if (error instanceof DomainError && policy.mode === "CLOSED_CORRECTION") {
+      const latest = await findProject(env.DB, projectId);
+      if (!latest) throw new DomainError("NOT_FOUND");
+      if (latest.status !== "CLOSED") {
+        throw new DomainError("INVALID_TRANSITION");
+      }
+      if (latest.revision !== expectedProjectRevision) {
+        throw new DomainError("STALE_REVISION");
       }
     }
     throw error;
@@ -283,13 +430,18 @@ async function resolveRows(
   db: D1Database,
   projectId: string,
   rows: NormalizedImportRow[],
+  policy: ImportMutationPolicy,
 ) {
   const organizations = (
     await db
       .prepare(
         `SELECT o.id, o.name, o.canonical_name,
-                (o.is_active = 1 AND o.deleted_at IS NULL
-                 AND po.is_active = 1) AS is_active
+                (po.is_active = 1
+                 ${
+                   policy.allowHistoricalOrganizationMasters
+                     ? ""
+                     : "AND o.is_active = 1 AND o.deleted_at IS NULL"
+}) AS is_active
          FROM project_organizations po
          JOIN organizations o ON o.id = po.organization_id
          WHERE po.project_id = ?`,
@@ -306,7 +458,13 @@ async function resolveRows(
     await db
       .prepare(
         `SELECT p.id, p.participant_id, p.name, p.organization_id, p.revision,
-              r.id AS entry_id, r.status AS entry_status
+              r.id AS entry_id, r.participant_name_snapshot AS entry_participant_name,
+              r.organization_id AS entry_organization_id,
+              r.organization_name_snapshot AS entry_organization_name,
+              r.participant_role_snapshot AS entry_role,
+              r.student_grade_snapshot AS entry_grade,
+              r.source AS entry_source, r.status AS entry_status,
+              r.was_expected_at_start AS entry_was_expected
        FROM participants p
        LEFT JOIN project_roster_entries r
          ON r.participant_id = p.id AND r.project_id = ?`,
@@ -319,7 +477,14 @@ async function resolveRows(
         organization_id: string;
         revision: number;
         entry_id: string | null;
-        entry_status: string | null;
+        entry_participant_name: string | null;
+        entry_organization_id: string | null;
+        entry_organization_name: string | null;
+        entry_role: ParticipantRole | null;
+        entry_grade: StudentGrade | null;
+        entry_source: RosterSource | null;
+        entry_status: RosterStatus | null;
+        entry_was_expected: number | null;
       }>()
   ).results;
   return rows.map((input) => {
@@ -378,6 +543,40 @@ function selectCandidate<T extends { id: string }>(
   return candidates.length === 1 ? candidates[0] : undefined;
 }
 
+function shouldMutateRoster(
+  policy: ImportMutationPolicy,
+  selected:
+    | {
+        entry_id: string | null;
+        entry_participant_name: string | null;
+        entry_organization_id: string | null;
+        entry_organization_name: string | null;
+        entry_role: ParticipantRole | null;
+        entry_grade: StudentGrade | null;
+        entry_source: RosterSource | null;
+        entry_status: RosterStatus | null;
+        entry_was_expected: number | null;
+      }
+    | undefined,
+  after: ImportRosterSnapshot,
+  organizationName: string,
+) {
+  if (policy.mode === "ORDINARY") {
+    return selected?.entry_status !== "ACTIVE";
+  }
+  if (!selected?.entry_id) return true;
+  return (
+    selected.entry_participant_name !== after.name ||
+    selected.entry_organization_id !== after.organizationId ||
+    selected.entry_organization_name !== organizationName ||
+    selected.entry_role !== after.role ||
+    selected.entry_grade !== after.grade ||
+    selected.entry_source !== policy.source ||
+    selected.entry_status !== "ACTIVE" ||
+    selected.entry_was_expected !== 0
+  );
+}
+
 function participantInsert(
   db: D1Database,
   rows: ResolvedImportRow[],
@@ -407,6 +606,7 @@ function rosterUpsert(
   projectId: string,
   actorId: string,
   now: string,
+  policy: ImportMutationPolicy,
 ) {
   const values = rows.map(() => "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").join(",");
   return db
@@ -426,8 +626,11 @@ function rosterUpsert(
               CASE WHEN p.name = i.expected_name
                          AND p.organization_id = i.expected_organization_id
                          AND p.revision = i.expected_revision
-                         AND o.is_active = 1
-                         AND o.deleted_at IS NULL
+                         ${
+                           policy.allowHistoricalOrganizationMasters
+                             ? ""
+                             : "AND o.is_active = 1 AND o.deleted_at IS NULL"
+}
                          AND EXISTS (
                            SELECT 1 FROM project_organizations po
                            WHERE po.project_id = ? AND po.organization_id = o.id
@@ -443,27 +646,11 @@ function rosterUpsert(
                              = i.expected_organization_revision_sum
                    THEN p.organization_id ELSE NULL END,
               p.name, o.name, i.participant_role, i.student_grade,
-              'PRE_REGISTRATION', 'ACTIVE', 0, 0, ?, ?, ?, ?
-       FROM incoming i JOIN participants p ON p.id = i.participant_id
-       JOIN organizations o ON o.id = p.organization_id
+              '${policy.source}', 'ACTIVE', 0, 0, ?, ?, ?, ?
+       FROM incoming i LEFT JOIN participants p ON p.id = i.participant_id
+       LEFT JOIN organizations o ON o.id = p.organization_id
        WHERE 1 = 1
-       ON CONFLICT(project_id, participant_id) DO UPDATE SET
-         status = CASE WHEN project_roster_entries.status = 'CANCELLED'
-                       THEN 'ACTIVE' ELSE project_roster_entries.status END,
-         participant_role_snapshot =
-           CASE WHEN project_roster_entries.status = 'CANCELLED'
-                THEN excluded.participant_role_snapshot
-                ELSE project_roster_entries.participant_role_snapshot END,
-         student_grade_snapshot =
-           CASE WHEN project_roster_entries.status = 'CANCELLED'
-                THEN excluded.student_grade_snapshot
-                ELSE project_roster_entries.student_grade_snapshot END,
-         updated_by = CASE WHEN project_roster_entries.status = 'CANCELLED'
-                           THEN excluded.updated_by ELSE project_roster_entries.updated_by END,
-         updated_at = CASE WHEN project_roster_entries.status = 'CANCELLED'
-                           THEN excluded.updated_at ELSE project_roster_entries.updated_at END,
-         revision = project_roster_entries.revision +
-                    CASE WHEN project_roster_entries.status = 'CANCELLED' THEN 1 ELSE 0 END`,
+       ${rosterConflictClause(policy)}`,
     )
     .bind(
       ...rows.flatMap((row) => [
@@ -487,12 +674,60 @@ function rosterUpsert(
     );
 }
 
+function rosterConflictClause(policy: ImportMutationPolicy) {
+  if (policy.mode === "ORDINARY") {
+    return `ON CONFLICT(project_id, participant_id) DO UPDATE SET
+      status = CASE WHEN project_roster_entries.status = 'CANCELLED'
+                    THEN 'ACTIVE' ELSE project_roster_entries.status END,
+      participant_role_snapshot =
+        CASE WHEN project_roster_entries.status = 'CANCELLED'
+             THEN excluded.participant_role_snapshot
+             ELSE project_roster_entries.participant_role_snapshot END,
+      student_grade_snapshot =
+        CASE WHEN project_roster_entries.status = 'CANCELLED'
+             THEN excluded.student_grade_snapshot
+             ELSE project_roster_entries.student_grade_snapshot END,
+      updated_by = CASE WHEN project_roster_entries.status = 'CANCELLED'
+                        THEN excluded.updated_by ELSE project_roster_entries.updated_by END,
+      updated_at = CASE WHEN project_roster_entries.status = 'CANCELLED'
+                        THEN excluded.updated_at ELSE project_roster_entries.updated_at END,
+      revision = project_roster_entries.revision +
+                 CASE WHEN project_roster_entries.status = 'CANCELLED' THEN 1 ELSE 0 END`;
+  }
+  return `ON CONFLICT(project_id, participant_id) DO UPDATE SET
+    organization_id = excluded.organization_id,
+    participant_name_snapshot = excluded.participant_name_snapshot,
+    organization_name_snapshot = excluded.organization_name_snapshot,
+    participant_role_snapshot = excluded.participant_role_snapshot,
+    student_grade_snapshot = excluded.student_grade_snapshot,
+    source = excluded.source,
+    status = 'ACTIVE',
+    was_expected_at_start = 0,
+    revision = project_roster_entries.revision + 1,
+    updated_by = excluded.updated_by,
+    updated_at = excluded.updated_at
+  WHERE project_roster_entries.participant_name_snapshot
+          IS NOT excluded.participant_name_snapshot
+     OR project_roster_entries.organization_id IS NOT excluded.organization_id
+     OR project_roster_entries.organization_name_snapshot
+          IS NOT excluded.organization_name_snapshot
+     OR project_roster_entries.participant_role_snapshot
+          IS NOT excluded.participant_role_snapshot
+     OR project_roster_entries.student_grade_snapshot
+          IS NOT excluded.student_grade_snapshot
+     OR project_roster_entries.source IS NOT excluded.source
+     OR project_roster_entries.status IS NOT 'ACTIVE'
+     OR project_roster_entries.was_expected_at_start IS NOT 0`;
+}
+
 function importAuditInsert(
   db: D1Database,
   rows: ResolvedImportRow[],
   projectId: string,
   actorId: string,
   now: string,
+  batchId: string,
+  policy: ImportMutationPolicy,
 ) {
   const values = rows.map(() => "(?, ?)").join(",");
   return db
@@ -500,23 +735,80 @@ function importAuditInsert(
       `WITH incoming(entry_id, details_json) AS (VALUES ${values})
      INSERT INTO audit_logs
        (id, actor_user_id, action, entity_type, entity_id, occurred_at, details_json)
-     SELECT lower(hex(randomblob(16))), ?, 'ROSTER_IMPORTED', 'ROSTER_ENTRY',
+     SELECT lower(hex(randomblob(16))), ?, '${policy.auditAction}', 'ROSTER_ENTRY',
             entry_id, ?, details_json
      FROM incoming`,
     )
     .bind(
       ...rows.flatMap((row) => [
         row.entryId,
-        JSON.stringify({
-          projectId,
-          organizationId: row.organizationId,
-          role: row.role,
-          grade: row.grade,
-        }),
+        JSON.stringify(
+          policy.mode === "CLOSED_CORRECTION"
+            ? {
+                batchId,
+                projectId,
+                organizationId: row.organizationId,
+                role: row.role,
+                grade: row.grade,
+                before: row.before,
+                after: row.after,
+              }
+            : {
+                projectId,
+                organizationId: row.organizationId,
+                role: row.role,
+                grade: row.grade,
+              },
+        ),
       ]),
       actorId,
       now,
     );
+}
+
+function importRunInsert(
+  db: D1Database,
+  batchId: string,
+  projectId: string,
+  actorUserId: string,
+  rowCount: number,
+  now: string,
+) {
+  return db
+    .prepare(
+      `INSERT INTO project_import_runs
+       (id, project_id, actor_user_id, row_count, created_at, details_json)
+       VALUES (?, ?, ?, ?, ?, '{}')`,
+    )
+    .bind(batchId, projectId, actorUserId, rowCount, now);
+}
+
+function importProjectGuardPredicate(policy: ImportMutationPolicy) {
+  if (policy.mode === "CLOSED_CORRECTION") {
+    return `EXISTS (
+      SELECT 1 FROM projects
+      WHERE id = ? AND status = 'CLOSED' AND revision = ?
+        AND deleted_at IS NULL
+    )`;
+  }
+  return `EXISTS (
+    SELECT 1 FROM projects
+    WHERE id = ? AND status = 'PRE_REGISTRATION' AND revision = ?
+      AND deleted_at IS NULL
+      AND (end_date IS NULL OR end_date >= ?)
+  )`;
+}
+
+function importProjectGuardBindings(
+  policy: ImportMutationPolicy,
+  projectId: string,
+  expectedProjectRevision: number,
+  currentTime: Date,
+): Array<string | number> {
+  if (policy.mode === "CLOSED_CORRECTION") {
+    return [projectId, expectedProjectRevision];
+  }
+  return [projectId, expectedProjectRevision, toKstDate(currentTime)];
 }
 
 function chunks<T>(rows: T[], size: number): T[][] {
@@ -531,10 +823,23 @@ function canonical(value: string): string {
   return value.normalize("NFKC").trim().toLocaleLowerCase();
 }
 
-async function requireImportProject(env: Env, projectId: string, now: Date) {
-  await closeExpiredProject(env, projectId, now);
+async function requireImportProject(
+  env: Env,
+  projectId: string,
+  now: Date,
+  policy: ImportMutationPolicy,
+) {
+  if (policy.mode === "ORDINARY") {
+    await closeExpiredProject(env, projectId, now);
+  }
   const project = await findProject(env.DB, projectId);
   if (!project) throw new DomainError("NOT_FOUND");
+  if (policy.mode === "CLOSED_CORRECTION") {
+    if (project.status !== "CLOSED") {
+      throw new DomainError("INVALID_TRANSITION");
+    }
+    return project;
+  }
   if (project.status === "CLOSED") throw new DomainError("PROJECT_CLOSED");
   if (project.status !== "PRE_REGISTRATION") {
     throw new DomainError("CONFLICT");

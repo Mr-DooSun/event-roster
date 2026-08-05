@@ -6,6 +6,7 @@ import {
   type ClosedProjectCorrectionCandidateOrganization,
   type ClosedProjectCorrectionCandidateParticipant,
   canonicalizeParticipantName,
+  type NormalizedImportRow,
   type ParticipantRole,
   ParticipantRoleSchema,
   type ProjectOrganizationMutationResult,
@@ -31,6 +32,10 @@ import {
 import type { Env } from "../env";
 import type { Actor } from "../middleware/authentication";
 import { createOperatorGuard, requireAdministrativeOperator } from "./admin";
+import {
+  commitClosedCorrectionImport,
+  validateClosedCorrectionImport,
+} from "./imports";
 import { canonicalizeOrganizationName } from "./organizations";
 
 interface OrganizationCandidateRow {
@@ -97,6 +102,35 @@ interface ClosedRosterCorrectionHooks {
 const CLOSED_BULK_PARTICIPANT_CHUNK_SIZE = 15;
 const CLOSED_BULK_ROSTER_CHUNK_SIZE = 15;
 const CLOSED_BULK_AUDIT_CHUNK_SIZE = 18;
+
+export async function validateClosedProjectImport(
+  env: Env,
+  actor: Actor,
+  projectId: string,
+  rows: NormalizedImportRow[],
+) {
+  requireAdministrativeOperator(actor);
+  return validateClosedCorrectionImport(env, projectId, rows);
+}
+
+export async function commitClosedProjectImport(
+  env: Env,
+  actor: Actor,
+  projectId: string,
+  rows: NormalizedImportRow[],
+  expectedProjectRevision: number,
+  currentTime = new Date(),
+) {
+  requireAdministrativeOperator(actor);
+  return commitClosedCorrectionImport(
+    env,
+    actor,
+    projectId,
+    rows,
+    expectedProjectRevision,
+    currentTime,
+  );
+}
 
 export async function requireClosedCorrectionProject(
   env: Env,
