@@ -10,6 +10,13 @@
 - 배포 전 로컬 전체 검증과 `wrangler deploy --dry-run`을 통과시킨다.
 - 기존 D1에 migration `0003`을 적용하기 전에는 반드시 원격 전체 export와 체크섬을 확보한다. export 확인 전에는 migration이나 Worker 배포를 진행하지 않는다.
 
+종료 프로젝트 이력 보정 release에는 D1 migration이 없다. 이 release만 배포할
+때는 `wrangler d1 migrations apply`를 실행하지 않으며, 7.3의 원격 pending
+목록이 비어 있어야 한다. 예상하지 않은 pending migration이 있으면 보정
+release와 함께 적용하지 말고 해당 전용 gate와 승인 상태를 확인할 때까지
+배포를 중단한다. Cloudflare 배포 방식은 계속 7절의 깨끗한 `main` checkout을
+사용하는 수동 절차이며 feature branch에서 deploy하지 않는다.
+
 ## 1. 계정 확인과 재승인
 
 ```bash
@@ -463,6 +470,30 @@ corepack pnpm@10.28.1 --filter @event-roster/worker run smoke:remote
 5. `project_organizations`와 project roster migration 행 수 확인
 6. 운영자에게만 `조직 관리`가 보이고 대표 한 명·추가 관리자 여러 명을 배정할 수 있는지 확인
 7. 대표와 추가 관리자가 담당 조직의 `PRE_REGISTRATION` 명단만 변경하고 `IN_PROGRESS`에서는 읽기 전용인지 확인
+
+종료 프로젝트 이력 보정은 별도의 격리된 smoke 프로젝트에서 다음 순서로
+확인한다. 테스트가 끝나면 프로젝트와 테스트 조직을 soft-delete해 운영 목록과
+담당자 범위를 원래대로 돌린다.
+
+1. 운영자로 예상 인원이 1명 이상인 프로젝트를 진행 시작 후 수동 종료하고
+   `status`, `closed_at`, `closed_by`, `close_reason`, 예상 인원을 기록한다.
+2. 별도 조직을 사용 중지하거나 삭제한 뒤 `이력 보정 시작`으로 진입한다.
+   해당 조직 연결, 학생·교사 추가, 당시 snapshot 수정, 한 행 취소·복원,
+   `mode=history-correction` Excel 검증·확정을 수행한다.
+3. 프로젝트가 계속 `종료`이고 1번의 종료 metadata와 예상 인원이 그대로인지,
+   실제 인원과 증감만 바뀌었는지 확인한다. 변경 이력에서 `종료 후 조직 이력
+   보정`, `종료 후 명단 이력 보정`, `종료 후 엑셀 이력 보정`을 모두 확인한다.
+4. 프로젝트 상세에서 보정 mode를 종료한다. 보정 banner, 조직 추가·제외,
+   참가자 추가·수정·취소·복원, 보정 Excel 진입 control이 사라지는지 확인한다.
+5. 현재 활성 연결 조직의 조직 담당자로 로그인해 같은 종료 프로젝트가 읽기
+   전용인지 확인한다. `이력 보정 시작`이 없어야 하며 correction 후보 read와
+   write 요청은 `403`이어야 한다. 비활성·삭제 조직 연결만으로 새 조회 범위가
+   생겼다고 판단하지 않는다.
+6. 두 운영자 탭에서 같은 revision을 읽고 모두 보정 mode에 진입한다. 첫 탭에서
+   한 건을 반영한 뒤 두 번째 탭의 준비된 변경을 제출해 의도적으로 stale
+   revision을 만든다. 두 번째 요청은 `409 STALE_REVISION`이어야 하며 그 요청의
+   데이터, project revision 증가, correction 감사 중 어느 것도 남지 않아야
+   한다. 하나라도 부분 반영되면 배포 실패로 기록하고 Worker/D1을 조사한다.
 
 Wrangler 4.112.0의 dry-run 요약이 Cron을 별도로 출력하지 않는 경우에는 exit 0과 `apps/worker/wrangler.jsonc`의 `triggers.crons`가 `["0 15 * * *"]` 하나인지를 함께 대조한다. 실제 원격 Trigger 존재 여부는 2번에서 확정한다.
 

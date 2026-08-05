@@ -41,6 +41,29 @@ PRE_REGISTRATION → IN_PROGRESS → CLOSED 상태와 revision을 가진다.
 - 계정(`users`)과 참가자(`participants`)는 별도다. 담당자 발급·배정은 참가자나 `project_roster_entries`를 만들지 않는다.
 - 명단 행은 당시 이름·조직 snapshot을 보존하고 현재 참가자 마스터 변경이 과거 프로젝트를 다시 쓰지 않게 한다.
 
+### 종료 프로젝트 이력 보정 경계
+
+종료 이력 보정은 프로젝트 상태를 되돌리지 않는 별도 API 경계다. 일반 조직,
+명단, 참가자, bulk, Excel import mutation API는 `CLOSED` 프로젝트를 계속
+`PROJECT_CLOSED`로 거부한다. `/history-corrections` 아래의 전용 read/write
+API는 반대로 삭제되지 않은 `CLOSED` 프로젝트와 비 bootstrap 운영자를
+요구한다. write는 여기에 최신 project revision과, 행 변경이면 최신 entry
+revision까지 추가로 요구한다. 브라우저의 `이력 보정 시작` 상태는 현재
+프로젝트 상세 화면에만 있는 로컬 UI mode이며 `projects.status`나 D1에 저장되지
+않는다.
+
+- `participants`는 프로젝트를 넘어 재사용하는 참가자 identity master다.
+  `project_roster_entries`가 당시 이름, 조직, 참가자 구분, 학년과 상태 snapshot을
+  소유한다. 기존 참가자의 보정은 master를 수정하지 않고 이 snapshot만 바꾼다.
+- `project_expected_snapshots`는 진행 시작 시점의 예상 인원을 소유하며 종료
+  보정 중에는 insert, update, delete하지 않는다. 보정으로 바뀌는 것은 실제
+  참석 인원과 예상 대비 증감뿐이다.
+- 보정 중 연결한 비활성·삭제 조직은 과거 표시와 집계를 위한 참조다. 그 연결은
+  조직 담당자에게 새 프로젝트 조회 범위나 mutation 권한을 부여하지 않는다.
+- 조직 연결, 단일·bulk 명단 보정, Excel 보정은 각각 project revision 증가와
+  correction 전용 감사를 같은 guarded D1 batch에 넣는다. stale revision이면
+  데이터, revision, 감사 모두 반영되지 않는다.
+
 ## 조직 삭제 overlay
 
 - 조직 삭제는 `is_active`와 별개인 복구 가능한 수명주기 overlay다.
