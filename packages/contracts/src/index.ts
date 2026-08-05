@@ -1,5 +1,6 @@
 export * from "./auth";
 export * from "./common";
+export * from "./history-corrections";
 export * from "./imports";
 export * from "./organizations";
 export * from "./participant-names";

@@ -1,5 +1,7 @@
 import { describe, expect, expectTypeOf, it } from "vitest";
 import type {
+  ClosedProjectCorrectionCandidateOrganization,
+  ClosedProjectCorrectionCandidateParticipant,
   OrganizationDetail,
   OrganizationSummary,
   Participant,
@@ -11,6 +13,7 @@ import {
   AddProjectOrganizationSchema,
   API_PROBLEM_CODES,
   BulkRosterCreateRequestSchema,
+  ClosedProjectRosterPatchRequestSchema,
   CreateProjectRequestSchema,
   DeleteProjectRequestSchema,
   LoginIdSchema,
@@ -169,6 +172,63 @@ describe("organization contracts", () => {
 });
 
 describe("roster contracts", () => {
+  it("defines strict closed-project history correction contracts", () => {
+    expectTypeOf<ClosedProjectCorrectionCandidateOrganization>().toMatchTypeOf<{
+      id: string;
+      name: string;
+      isActive: boolean;
+      isDeleted: boolean;
+    }>();
+    expectTypeOf<ClosedProjectCorrectionCandidateParticipant>().toMatchTypeOf<{
+      id: string;
+      participantId: string;
+      name: string;
+      organizationId: string;
+      revision: number;
+      suggestedRole: ParticipantRole | null;
+      suggestedGrade: StudentGrade | null;
+    }>();
+
+    expect(
+      ClosedProjectRosterPatchRequestSchema.parse({
+        name: "당시 이름",
+        organizationId: "org-deleted",
+        role: "STUDENT",
+        grade: "M2",
+        expectedProjectRevision: 7,
+        expectedEntryRevision: 3,
+      }),
+    ).toMatchObject({ name: "당시 이름", grade: "M2" });
+    expect(
+      ClosedProjectRosterPatchRequestSchema.parse({
+        status: "CANCELLED",
+        expectedProjectRevision: 7,
+        expectedEntryRevision: 3,
+      }),
+    ).toMatchObject({ status: "CANCELLED" });
+    expect(() =>
+      ClosedProjectRosterPatchRequestSchema.parse({
+        expectedProjectRevision: 7,
+        expectedEntryRevision: 3,
+      }),
+    ).toThrow();
+    expect(() =>
+      ClosedProjectRosterPatchRequestSchema.parse({
+        role: "STUDENT",
+        expectedProjectRevision: 7,
+        expectedEntryRevision: 3,
+      }),
+    ).toThrow();
+    expect(() =>
+      ClosedProjectRosterPatchRequestSchema.parse({
+        role: "TEACHER",
+        grade: "M2",
+        expectedProjectRevision: 7,
+        expectedEntryRevision: 3,
+      }),
+    ).toThrow();
+  });
+
   it("keeps participant profile suggestions nullable and enum constrained", () => {
     expectTypeOf<
       Participant["suggestedRole"]
