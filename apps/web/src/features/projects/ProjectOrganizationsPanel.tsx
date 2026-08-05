@@ -179,6 +179,15 @@ export function ProjectOrganizationsPanel({
         }
         const reservedId = getReservedOrganizationId(error);
         if (reservedId) {
+          if (correctionMode) {
+            setNewConfirmation(null);
+            await onChanged();
+            setMessage({
+              tone: "info",
+              text: "최신 이력 후보를 불러왔습니다. 삭제된 조직을 선택해 주세요.",
+            });
+            return false;
+          }
           setReservedOrganizationId(reservedId);
           setMessage({
             tone: "error",
@@ -260,7 +269,7 @@ export function ProjectOrganizationsPanel({
       {message ? (
         <StatusMessage tone={message.tone}>{message.text}</StatusMessage>
       ) : null}
-      {canManageOrganizations ? (
+      {canManageOrganizations && canMutateMemberships ? (
         <Card className="er-panel">
           <h2>조직 추가</h2>
           <form className="er-inline-form" onSubmit={addExisting}>

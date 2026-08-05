@@ -449,7 +449,8 @@ export function ProjectRosterPage({
       ) : null}
       <div className="er-roster-actions er-action-row er-action-row--wrap">
         {auth?.session.user.role === "OPERATOR" &&
-        (project.status === "PRE_REGISTRATION" || correctionMode) ? (
+        (project.status === "PRE_REGISTRATION" || correctionMode) &&
+        (!correctionMode || canMutate) ? (
           <a
             className="er-button er-button--secondary"
             href={`/projects/${project.id}/import${correctionMode ? "?mode=history-correction" : ""}`}

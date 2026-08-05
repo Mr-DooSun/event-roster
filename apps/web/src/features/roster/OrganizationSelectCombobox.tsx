@@ -21,6 +21,7 @@ export interface OrganizationSelectComboboxProps {
   value: string;
   recentOrganizationIds?: readonly string[];
   disabled?: boolean;
+  preserveUnavailableValue?: boolean;
   onChange(organizationId: string): void;
 }
 
@@ -30,6 +31,7 @@ export function OrganizationSelectCombobox({
   value,
   recentOrganizationIds = EMPTY_RECENT_ORGANIZATION_IDS,
   disabled = false,
+  preserveUnavailableValue = false,
   onChange,
 }: OrganizationSelectComboboxProps) {
   const listboxId = useId();
@@ -39,8 +41,9 @@ export function OrganizationSelectCombobox({
   const committedValueRef = useRef<string | null>(value || null);
   const observedValueRef = useRef(value);
   const selected = organizations.find(
-    (organization) => organization.isActive && organization.id === value,
+    (organization) => organization.id === value,
   );
+  const selectedIsAvailable = selected?.isActive === true;
   const [query, setQuery] = useState(selected?.name ?? "");
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);
@@ -66,17 +69,24 @@ export function OrganizationSelectCombobox({
       committedValueRef.current = null;
       return;
     }
-    if (!selected) {
+    if (!selectedIsAvailable && !preserveUnavailableValue) {
       committedValueRef.current = null;
       setQuery("");
       onChange("");
       return;
     }
+    if (!selected) return;
     if (valueChanged || committedValueRef.current === value) {
       committedValueRef.current = value;
       setQuery(selected.name);
     }
-  }, [onChange, selected, value]);
+  }, [
+    onChange,
+    preserveUnavailableValue,
+    selected,
+    selectedIsAvailable,
+    value,
+  ]);
 
   const options = useMemo(() => {
     const key =
@@ -151,6 +161,11 @@ export function OrganizationSelectCombobox({
               : undefined
           }
           autoComplete="off"
+          aria-invalid={
+            preserveUnavailableValue && value && !selectedIsAvailable
+              ? true
+              : undefined
+          }
           disabled={disabled}
           value={query}
           onBlur={closeWhenFocusLeaves}

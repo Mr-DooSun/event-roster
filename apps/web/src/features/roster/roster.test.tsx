@@ -84,6 +84,104 @@ it("starts new mode empty and submits two structured participant profiles", asyn
   );
 });
 
+it("preserves an existing-participant draft when a stale refresh deactivates its organization", async () => {
+  const activeOrganizations = [
+    { id: "org-1", name: "1팀", isActive: true },
+    { id: "org-2", name: "2팀", isActive: true },
+  ];
+  const inactiveOrganizations = [
+    { id: "org-1", name: "1팀", isActive: true },
+    { id: "org-2", name: "2팀", isActive: false },
+  ];
+  let view: ReturnType<typeof render>;
+  const onAdd = vi.fn(async () => {
+    view.rerender(renderDialog(inactiveOrganizations));
+  });
+  function renderDialog(organizations: typeof activeOrganizations) {
+    return (
+      <ParticipantDialog
+        participants={bulkDialogProps.participants}
+        organizations={organizations}
+        onAdd={onAdd}
+        onCreateAndAdd={vi.fn().mockResolvedValue({ kind: "SUCCESS" })}
+        onClose={vi.fn()}
+      />
+    );
+  }
+
+  view = render(renderDialog(activeOrganizations));
+  fireEvent.change(screen.getByLabelText("확정 이름"), {
+    target: { value: "작성 중인 이름" },
+  });
+  const organization = screen.getByRole("combobox", {
+    name: "확정 소속 조직",
+  });
+  fireEvent.change(organization, { target: { value: "2팀" } });
+  fireEvent.click(screen.getByRole("option", { name: "2팀" }));
+  fireEvent.click(screen.getByRole("button", { name: "명단에 추가" }));
+
+  expect(
+    await screen.findByText(
+      "선택한 조직을 더 이상 사용할 수 없습니다. 다른 조직을 선택해 주세요.",
+    ),
+  ).toBeVisible();
+  expect(screen.getByLabelText("확정 이름")).toHaveValue("작성 중인 이름");
+  expect(organization).toHaveValue("2팀");
+  expect(organization).toHaveAttribute("aria-invalid", "true");
+  expect(screen.getByRole("button", { name: "명단에 추가" })).toBeDisabled();
+  expect(onAdd).toHaveBeenCalledTimes(1);
+});
+
+it("preserves a bulk draft when a stale refresh deactivates its organization", async () => {
+  const activeOrganizations = [
+    { id: "org-1", name: "1팀", isActive: true },
+    { id: "org-2", name: "2팀", isActive: true },
+  ];
+  const inactiveOrganizations = [
+    { id: "org-1", name: "1팀", isActive: true },
+    { id: "org-2", name: "2팀", isActive: false },
+  ];
+  let view: ReturnType<typeof render>;
+  const onCreateAndAdd = vi.fn(async () => {
+    view.rerender(renderDialog(inactiveOrganizations));
+    return { kind: "FAILED" as const };
+  });
+  function renderDialog(organizations: typeof activeOrganizations) {
+    return (
+      <ParticipantDialog
+        participants={[]}
+        organizations={organizations}
+        onAdd={vi.fn().mockResolvedValue(undefined)}
+        onCreateAndAdd={onCreateAndAdd}
+        onClose={vi.fn()}
+      />
+    );
+  }
+
+  view = render(renderDialog(activeOrganizations));
+  fireEvent.click(screen.getByRole("button", { name: "새 참가자" }));
+  const organization = screen.getByRole("combobox", { name: "소속 조직" });
+  fireEvent.change(organization, { target: { value: "2팀" } });
+  fireEvent.click(screen.getByRole("option", { name: "2팀" }));
+  addStudentParticipantRow("작성 중인 신규 참가자");
+  fireEvent.click(screen.getByRole("button", { name: "1명 명단에 추가" }));
+
+  expect(
+    await screen.findByText(
+      "선택한 조직을 더 이상 사용할 수 없습니다. 다른 조직을 선택해 주세요.",
+    ),
+  ).toBeVisible();
+  expect(screen.getByRole("textbox", { name: "1번 이름" })).toHaveValue(
+    "작성 중인 신규 참가자",
+  );
+  expect(organization).toHaveValue("2팀");
+  expect(organization).toHaveAttribute("aria-invalid", "true");
+  expect(
+    screen.getByRole("button", { name: "1명 명단에 추가" }),
+  ).toBeDisabled();
+  expect(onCreateAndAdd).toHaveBeenCalledTimes(1);
+});
+
 it("keeps all structured rows and profiles after a duplicate response", async () => {
   const onCreateAndAdd = vi.fn().mockResolvedValue({
     kind: "DUPLICATES",
@@ -349,7 +447,7 @@ it("clears duplicate confirmation when names change", async () => {
   );
 });
 
-it("clears duplicate confirmation when the selected organization becomes inactive", async () => {
+it("preserves duplicate confirmation while an inactive organization requires reselection", async () => {
   const onCreateAndAdd = vi.fn().mockResolvedValue({
     kind: "DUPLICATES",
     duplicates: [{ name: "홍길동", kinds: ["EXISTING_PARTICIPANT"] }],
@@ -374,11 +472,20 @@ it("clears duplicate confirmation when the selected organization becomes inactiv
 
   view.rerender(renderDialog(false));
 
-  await waitFor(() =>
-    expect(
-      screen.queryByRole("checkbox", { name: "중복 이름을 확인했습니다" }),
-    ).not.toBeInTheDocument(),
+  expect(
+    await screen.findByText(
+      "선택한 조직을 더 이상 사용할 수 없습니다. 다른 조직을 선택해 주세요.",
+    ),
+  ).toBeVisible();
+  expect(
+    screen.getByRole("checkbox", { name: "중복 이름을 확인했습니다" }),
+  ).toBeVisible();
+  expect(screen.getByRole("combobox", { name: "소속 조직" })).toHaveValue(
+    "1팀",
   );
+  expect(
+    screen.getByRole("button", { name: "1명 명단에 추가" }),
+  ).toBeDisabled();
 });
 
 it("keeps the current inactive organization while editing an existing participant", () => {
@@ -1063,7 +1170,7 @@ it("clears a selected organization when its search text changes", () => {
   expect(screen.getByRole("button", { name: "명단에 추가" })).toBeEnabled();
 });
 
-it("preserves an edited participant name and clears a removed organization candidate", async () => {
+it("preserves an edited participant name and marks a removed organization invalid", async () => {
   const participant = {
     id: "person-1",
     participantId: "P-001",
@@ -1106,7 +1213,13 @@ it("preserves an edited participant name and clears a removed organization candi
     />,
   );
 
-  await waitFor(() => expect(organization).toHaveValue(""));
+  expect(
+    await screen.findByText(
+      "선택한 조직을 더 이상 사용할 수 없습니다. 다른 조직을 선택해 주세요.",
+    ),
+  ).toBeVisible();
+  expect(organization).toHaveValue("황룡사");
+  expect(organization).toHaveAttribute("aria-invalid", "true");
   expect(screen.getByLabelText("확정 이름")).toHaveValue("작성 중인 이름");
   expect(screen.getByRole("button", { name: "명단에 추가" })).toBeDisabled();
 });

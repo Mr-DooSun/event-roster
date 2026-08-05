@@ -902,6 +902,51 @@ it("guides an administrator to recover a deleted organization reserved during in
   expect(mockApi.post).toHaveBeenCalledTimes(1);
 });
 
+it("refreshes correction candidates without exposing master restore for a reserved name", async () => {
+  const onChanged = vi.fn().mockResolvedValue(undefined);
+  mockApi.post.mockRejectedValueOnce(
+    new ApiError(409, {
+      code: "ORGANIZATION_NAME_RESERVED",
+      message: "삭제된 동일 이름의 조직이 있습니다.",
+      requestId: "request-correction-reserved",
+      details: { organizationId: "deleted-org" },
+    }),
+  );
+  render(
+    <ProjectOrganizationsPanel
+      projectId="project-1"
+      projectRevision={7}
+      memberships={[]}
+      allOrganizations={[]}
+      canMutateMemberships
+      canManageOrganizations
+      mutationMode="CLOSED_CORRECTION"
+      onChanged={onChanged}
+    />,
+  );
+
+  const input = screen.getByRole("combobox", {
+    name: "조직 이름 검색 또는 입력",
+  });
+  fireEvent.change(input, { target: { value: "삭제된 조직" } });
+  fireEvent.click(screen.getByRole("option", { name: /새 조직 생성 후 추가/ }));
+  fireEvent.click(screen.getByRole("button", { name: "생성 후 추가" }));
+
+  expect(
+    await screen.findByText(
+      "최신 이력 후보를 불러왔습니다. 삭제된 조직을 선택해 주세요.",
+    ),
+  ).toBeVisible();
+  expect(
+    screen.queryByRole("link", { name: "삭제된 조직 복구하기" }),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("dialog", { name: "새 조직 생성 후 추가" }),
+  ).not.toBeInTheDocument();
+  expect(input).toHaveValue("삭제된 조직");
+  expect(onChanged).toHaveBeenCalledTimes(1);
+});
+
 it("clears a reserved recovery link when an inline creation retry has a generic error", async () => {
   mockApi.post
     .mockRejectedValueOnce(
@@ -1058,7 +1103,7 @@ it("hides deleted memberships from project organization management", () => {
   expect(screen.getByText("연결된 조직이 없습니다.")).toBeVisible();
 });
 
-it("separates disabled membership mutations from operator organization management", () => {
+it("keeps operator organization management links without membership mutation controls", () => {
   render(
     <ProjectOrganizationsPanel
       projectId="project-1"
@@ -1072,11 +1117,11 @@ it("separates disabled membership mutations from operator organization managemen
   );
 
   expect(
-    screen.getByRole("combobox", { name: "조직 이름 검색 또는 입력" }),
-  ).toBeDisabled();
+    screen.queryByRole("combobox", { name: "조직 이름 검색 또는 입력" }),
+  ).not.toBeInTheDocument();
   expect(
-    screen.getByRole("button", { name: "프로젝트에 추가" }),
-  ).toBeDisabled();
+    screen.queryByRole("button", { name: "프로젝트에 추가" }),
+  ).not.toBeInTheDocument();
   expect(
     screen.getByRole("link", { name: "조직 관리에서 담당자 지정" }),
   ).toHaveAttribute("href", "/organizations/org-1");
@@ -2600,7 +2645,7 @@ it("refreshes a project edit once when the project closed concurrently", async (
   expect(projectReads).toBe(2);
 });
 
-it("refreshes once and hides organization controls when the project closes", async () => {
+it("refreshes once and removes organization mutation controls when the project closes", async () => {
   let projectReads = 0;
   mockApi.get.mockImplementation(async (path: string) => {
     if (path === "/projects/project-1") {
@@ -2643,14 +2688,12 @@ it("refreshes once and hides organization controls when the project closes", asy
   ).toBeVisible();
   expect(screen.getByText("종료")).toBeVisible();
   expect(projectReads).toBe(2);
-  const preservedInput = screen.getByRole("combobox", {
-    name: "조직 이름 검색 또는 입력",
-  });
-  expect(preservedInput).toHaveValue("종료 중 조직");
-  expect(preservedInput).toBeDisabled();
   expect(
-    screen.getByRole("button", { name: "프로젝트에 추가" }),
-  ).toBeDisabled();
+    screen.queryByRole("combobox", { name: "조직 이름 검색 또는 입력" }),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("button", { name: "프로젝트에 추가" }),
+  ).not.toBeInTheDocument();
   expect(
     screen.queryByRole("button", { name: /사용 중지|다시 사용/ }),
   ).not.toBeInTheDocument();
@@ -2706,6 +2749,45 @@ it("owns closed history correction as an administrative operator-only local mode
   expect(
     screen.queryByRole("button", { name: "이력 보정 시작" }),
   ).not.toBeInTheDocument();
+});
+
+it("omits organization mutation controls before entering closed correction", async () => {
+  mockApi.get.mockImplementation((path: string) => {
+    if (path === "/projects/project-1") return closedProject();
+    if (path === "/projects/project-1/organizations") {
+      return [organizationMembership()];
+    }
+    if (path === "/projects/project-1/history-corrections/candidates") {
+      return {
+        organizations: [
+          { id: "org-2", name: "2팀", isActive: true, isDeleted: false },
+        ],
+        participants: [],
+      };
+    }
+    return defaultGet(path);
+  });
+
+  render(<ProjectDetailPage projectId="project-1" />);
+  fireEvent.click(await screen.findByRole("tab", { name: "조직" }));
+
+  expect(
+    screen.queryByRole("heading", { name: "조직 추가" }),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("combobox", { name: "조직 이름 검색 또는 입력" }),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.getByRole("link", { name: "조직 관리에서 담당자 지정" }),
+  ).toBeVisible();
+
+  fireEvent.click(screen.getByRole("button", { name: "이력 보정 시작" }));
+  expect(
+    await screen.findByRole("heading", { name: "조직 추가" }),
+  ).toBeVisible();
+  expect(
+    screen.getByRole("combobox", { name: "조직 이름 검색 또는 입력" }),
+  ).toBeEnabled();
 });
 
 it("discards open correction dialogs when the local mode exits", async () => {
@@ -2911,9 +2993,16 @@ it("disables correction controls while a project transition confirmation is open
     await screen.findByRole("button", { name: "이력 보정 시작" }),
   );
   await screen.findByText("종료 후 이력 보정 중");
+  fireEvent.click(screen.getByRole("tab", { name: "참가 명단" }));
+  expect(
+    await screen.findByRole("link", { name: "엑셀 가져오기" }),
+  ).toBeVisible();
   fireEvent.click(screen.getByRole("button", { name: "프로젝트 재개" }));
 
   expect(screen.getByRole("button", { name: "이력 보정 종료" })).toBeDisabled();
+  expect(
+    screen.queryByRole("link", { name: "엑셀 가져오기" }),
+  ).not.toBeInTheDocument();
   expect(
     screen.getByRole("dialog", { name: "프로젝트 상태 변경" }),
   ).toBeVisible();
@@ -2933,9 +3022,16 @@ it("disables correction controls while a project deletion confirmation is open",
     await screen.findByRole("button", { name: "이력 보정 시작" }),
   );
   await screen.findByText("종료 후 이력 보정 중");
+  fireEvent.click(screen.getByRole("tab", { name: "참가 명단" }));
+  expect(
+    await screen.findByRole("link", { name: "엑셀 가져오기" }),
+  ).toBeVisible();
   fireEvent.click(screen.getByRole("button", { name: "프로젝트 삭제" }));
 
   expect(screen.getByRole("button", { name: "이력 보정 종료" })).toBeDisabled();
+  expect(
+    screen.queryByRole("link", { name: "엑셀 가져오기" }),
+  ).not.toBeInTheDocument();
   expect(screen.getByRole("dialog", { name: "프로젝트 삭제" })).toBeVisible();
 });
 

@@ -9,6 +9,7 @@ import { normalizeParticipantName } from "@event-roster/contracts";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "../../components/ui/Button";
 import { Dialog } from "../../components/ui/Dialog";
+import { StatusMessage } from "../../components/ui/StatusMessage";
 import { TextInput } from "../../components/ui/TextInput";
 import { orderOrganizationsByRecent } from "../../lib/recent-organizations";
 import {
@@ -213,19 +214,6 @@ export function ParticipantDialog({
 
   useEffect(() => {
     if (
-      allowExistingOrganizationChange &&
-      confirmedOrganizationId &&
-      !organizations.some(
-        (organization) =>
-          organization.isActive && organization.id === confirmedOrganizationId,
-      )
-    ) {
-      setConfirmedOrganizationId("");
-    }
-  }, [allowExistingOrganizationChange, confirmedOrganizationId, organizations]);
-
-  useEffect(() => {
-    if (
       !allowExistingOrganizationChange &&
       selectedParticipantOrganizationId &&
       confirmedOrganizationId !== selectedParticipantOrganizationId
@@ -238,19 +226,19 @@ export function ParticipantDialog({
     selectedParticipantOrganizationId,
   ]);
 
-  useEffect(() => {
-    if (
-      organizationId &&
-      !organizations.some(
-        (organization) =>
-          organization.isActive && organization.id === organizationId,
-      )
-    ) {
-      setOrganizationId("");
-      setDuplicates([]);
-      setDuplicateNamesConfirmed(false);
-    }
-  }, [organizationId, organizations]);
+  const confirmedOrganizationUnavailable =
+    allowExistingOrganizationChange &&
+    Boolean(confirmedOrganizationId) &&
+    !organizations.some(
+      (organization) =>
+        organization.isActive && organization.id === confirmedOrganizationId,
+    );
+  const bulkOrganizationUnavailable =
+    Boolean(organizationId) &&
+    !organizations.some(
+      (organization) =>
+        organization.isActive && organization.id === organizationId,
+    );
 
   function selectParticipant(nextParticipantId: string) {
     const participant = participants.find(
@@ -276,6 +264,7 @@ export function ParticipantDialog({
       !selectedParticipant ||
       !confirmedName.trim() ||
       !confirmedOrganizationId ||
+      confirmedOrganizationUnavailable ||
       (confirmedRole === "STUDENT" && confirmedGrade === null)
     ) {
       return;
@@ -301,6 +290,7 @@ export function ParticipantDialog({
     if (
       busy ||
       !organizationId ||
+      bulkOrganizationUnavailable ||
       rows.length === 0 ||
       rows.length > 30 ||
       rows.some((row) => !isValidBulkParticipantDraft(row)) ||
@@ -423,6 +413,7 @@ export function ParticipantDialog({
                 organizations={displayOrganizations}
                 recentOrganizationIds={recentOrganizationIds}
                 value={confirmedOrganizationId}
+                preserveUnavailableValue
                 disabled={busy !== null}
                 onChange={setConfirmedOrganizationId}
               />
@@ -439,6 +430,12 @@ export function ParticipantDialog({
                 readOnly
               />
             )}
+            {confirmedOrganizationUnavailable ? (
+              <StatusMessage tone="info">
+                선택한 조직을 더 이상 사용할 수 없습니다. 다른 조직을 선택해
+                주세요.
+              </StatusMessage>
+            ) : null}
             <label className="er-field">
               <span>참가자 구분</span>
               <select
@@ -492,6 +489,7 @@ export function ParticipantDialog({
                   !selectedParticipant ||
                   !confirmedName.trim() ||
                   !confirmedOrganizationId ||
+                  confirmedOrganizationUnavailable ||
                   (confirmedRole === "STUDENT" && confirmedGrade === null)
                 }
               >
@@ -506,9 +504,16 @@ export function ParticipantDialog({
               organizations={displayOrganizations}
               recentOrganizationIds={recentOrganizationIds}
               value={organizationId}
+              preserveUnavailableValue
               disabled={busy !== null}
               onChange={changeOrganization}
             />
+            {bulkOrganizationUnavailable ? (
+              <StatusMessage tone="info">
+                선택한 조직을 더 이상 사용할 수 없습니다. 다른 조직을 선택해
+                주세요.
+              </StatusMessage>
+            ) : null}
             <BulkParticipantRowsField
               rows={rows}
               duplicates={duplicates}
@@ -529,6 +534,7 @@ export function ParticipantDialog({
                 disabled={
                   busy !== null ||
                   !organizationId ||
+                  bulkOrganizationUnavailable ||
                   rows.length === 0 ||
                   rows.length > 30 ||
                   hasInvalidRow ||
