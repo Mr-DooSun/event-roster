@@ -1,6 +1,12 @@
 import { expect, request, test } from "@playwright/test";
 import * as XLSX from "xlsx";
-import { fixture, login } from "./support";
+import {
+  cleanupE2eResources,
+  describeE2eCleanupFailures,
+  type E2eCleanupFailure,
+  fixture,
+  login,
+} from "./support";
 
 interface AuthTokens {
   accessToken: string;
@@ -25,7 +31,7 @@ interface ProjectSummaryView {
 
 test("operator corrects closed history while an organization manager stays read-only", async ({
   page,
-}) => {
+}, testInfo) => {
   const data = fixture();
   const projectName = "E2E 종료 이력 보정 프로젝트";
   const activeOrganizationName = "E2E 보정 기준 조직";
@@ -45,6 +51,8 @@ test("operator corrects closed history while an organization manager stays read-
   let cleanupAuth: AuthTokens | null = null;
   let cleanupProject: { id: string; name: string } | null = null;
   const cleanupOrganizations: Array<{ id: string; name: string }> = [];
+  let bodyFailed = false;
+  let bodyError: unknown;
 
   try {
     const operatorAuth = await authenticate(
@@ -548,42 +556,216 @@ test("operator corrects closed history while an organization manager stays read-
     await expect(page.getByRole("button", { name: "참가자 추가" })).toHaveCount(
       0,
     );
-  } finally {
-    if (cleanupAuth) {
-      const headers = authHeaders(cleanupAuth);
-      if (cleanupProject) {
-        const latestProjectResponse = await api.get(
-          `/api/v1/projects/${cleanupProject.id}`,
-          { headers },
-        );
-        if (latestProjectResponse.ok()) {
-          const latestProject =
-            (await latestProjectResponse.json()) as ProjectView;
-          const deleteProjectResponse = await api.delete(
-            `/api/v1/projects/${cleanupProject.id}`,
-            {
-              headers,
-              data: {
-                confirmationName: cleanupProject.name,
-                expectedRevision: latestProject.revision,
-              },
-            },
-          );
-          expect(deleteProjectResponse.ok()).toBe(true);
-        }
-      }
-      for (const organization of [...cleanupOrganizations].reverse()) {
-        const deleteOrganizationResponse = await api.delete(
-          `/api/v1/organizations/${organization.id}`,
-          {
-            headers,
-            data: { confirmationName: organization.name },
-          },
-        );
-        expect(deleteOrganizationResponse.ok()).toBe(true);
-      }
+  } catch (error) {
+    bodyFailed = true;
+    bodyError = error;
+  }
+
+  const cleanupFailures: E2eCleanupFailure[] = [];
+  if (cleanupAuth) {
+    try {
+      cleanupFailures.push(
+        ...(await cleanupE2eResources({
+          api,
+          headers: authHeaders(cleanupAuth),
+          project: cleanupProject,
+          organizations: cleanupOrganizations,
+        })),
+      );
+    } catch (error) {
+      cleanupFailures.push({
+        resource: "api",
+        id: "request-context",
+        operation: "cleanup orchestration",
+        message: error instanceof Error ? error.message : String(error),
+      });
     }
+  }
+  try {
     await api.dispose();
+  } catch (error) {
+    cleanupFailures.push({
+      resource: "api",
+      id: "request-context",
+      operation: "dispose",
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
+  if (cleanupFailures.length > 0) {
+    const description = describeE2eCleanupFailures(cleanupFailures);
+    testInfo.annotations.push({ type: "cleanup failure", description });
+  }
+  if (bodyFailed) throw bodyError;
+  if (cleanupFailures.length > 0) {
+    throw new Error(
+      `E2E cleanup failed: ${describeE2eCleanupFailures(cleanupFailures)}`,
+    );
+  }
+});
+
+test("cleanup closes and deletes a pre-registration project before deleting every organization", async () => {
+  const data = fixture();
+  const api = await request.newContext({
+    baseURL: data.baseUrl,
+    ignoreHTTPSErrors: true,
+    extraHTTPHeaders: { Origin: data.baseUrl },
+  });
+  let headers: Record<string, string> | null = null;
+  let cleanupProject: { id: string; name: string } | null = null;
+  const cleanupOrganizations: Array<{ id: string; name: string }> = [];
+
+  try {
+    headers = authHeaders(
+      await authenticate(api, data.operator.loginId, data.operator.password),
+    );
+    for (const name of ["E2E 정리 검증 조직 1", "E2E 정리 검증 조직 2"]) {
+      const response = await api.post("/api/v1/organizations", {
+        headers,
+        data: { name },
+      });
+      expect(response.ok()).toBe(true);
+      const organization = (await response.json()) as { id: string };
+      cleanupOrganizations.push({ id: organization.id, name });
+    }
+
+    const projectResponse = await api.post("/api/v1/projects", {
+      headers,
+      data: { name: "E2E 정리 검증 프로젝트" },
+    });
+    expect(projectResponse.ok()).toBe(true);
+    const project = (await projectResponse.json()) as ProjectView;
+    expect(project.status).toBe("PRE_REGISTRATION");
+    cleanupProject = { id: project.id, name: project.name };
+
+    const failures = await cleanupE2eResources({
+      api,
+      headers,
+      project: cleanupProject,
+      organizations: cleanupOrganizations,
+    });
+    expect(failures).toEqual([]);
+
+    const deletedProjectResponse = await api.get(
+      `/api/v1/projects/${project.id}`,
+      { headers },
+    );
+    expect(deletedProjectResponse.status()).toBe(404);
+    const organizationsResponse = await api.get("/api/v1/organizations", {
+      headers,
+    });
+    expect(organizationsResponse.ok()).toBe(true);
+    const organizations = (await organizationsResponse.json()) as Array<{
+      id: string;
+    }>;
+    expect(
+      organizations.some((organization) =>
+        cleanupOrganizations.some(
+          (cleanupOrganization) => cleanupOrganization.id === organization.id,
+        ),
+      ),
+    ).toBe(false);
+  } finally {
+    try {
+      if (headers) {
+        await cleanupE2eResources({
+          api,
+          headers,
+          project: cleanupProject,
+          organizations: cleanupOrganizations,
+        });
+      }
+    } catch {
+      // Emergency cleanup must not replace the test's assertion error.
+    }
+    try {
+      await api.dispose();
+    } catch {
+      // Disposal must not replace the test's assertion error.
+    }
+  }
+});
+
+test("cleanup records one organization failure and still deletes the next organization", async () => {
+  const data = fixture();
+  const api = await request.newContext({
+    baseURL: data.baseUrl,
+    ignoreHTTPSErrors: true,
+    extraHTTPHeaders: { Origin: data.baseUrl },
+  });
+  let headers: Record<string, string> | null = null;
+  const createdOrganizations: Array<{ id: string; name: string }> = [];
+
+  try {
+    headers = authHeaders(
+      await authenticate(api, data.operator.loginId, data.operator.password),
+    );
+    for (const name of ["E2E 독립 정리 후속 조직", "E2E 독립 정리 실패 조직"]) {
+      const response = await api.post("/api/v1/organizations", {
+        headers,
+        data: { name },
+      });
+      expect(response.ok()).toBe(true);
+      const organization = (await response.json()) as { id: string };
+      createdOrganizations.push({ id: organization.id, name });
+    }
+
+    const [deletedAfterFailure, failedOrganization] = createdOrganizations;
+    if (!deletedAfterFailure || !failedOrganization) {
+      throw new Error("organization cleanup fixtures were not created");
+    }
+    const failures = await cleanupE2eResources({
+      api,
+      headers,
+      project: null,
+      organizations: [
+        deletedAfterFailure,
+        { ...failedOrganization, name: "잘못된 확인 이름" },
+      ],
+    });
+    expect(failures).toEqual([
+      {
+        resource: "organization",
+        id: failedOrganization.id,
+        operation: "delete",
+        status: 409,
+      },
+    ]);
+
+    const organizationsResponse = await api.get("/api/v1/organizations", {
+      headers,
+    });
+    expect(organizationsResponse.ok()).toBe(true);
+    const organizations = (await organizationsResponse.json()) as Array<{
+      id: string;
+    }>;
+    expect(
+      organizations.some(
+        (organization) => organization.id === deletedAfterFailure.id,
+      ),
+    ).toBe(false);
+    expect(
+      organizations.some(
+        (organization) => organization.id === failedOrganization.id,
+      ),
+    ).toBe(true);
+  } finally {
+    try {
+      if (headers) {
+        await cleanupE2eResources({
+          api,
+          headers,
+          project: null,
+          organizations: createdOrganizations,
+        });
+      }
+    } catch {
+      // Emergency cleanup must not replace the test's assertion error.
+    }
+    try {
+      await api.dispose();
+    } catch {
+      // Disposal must not replace the test's assertion error.
+    }
   }
 });
 
