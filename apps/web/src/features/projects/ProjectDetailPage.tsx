@@ -1,4 +1,6 @@
 import type {
+  ClosedProjectCorrectionCandidateOrganization,
+  ClosedProjectCorrectionCandidateParticipant,
   Organization,
   Project,
   ProjectOrganization,
@@ -48,6 +50,11 @@ interface RequestContext {
 
 interface AuditPaginationContext extends RequestContext {
   auditResourceToken: number;
+}
+
+interface ClosedCorrectionCandidates {
+  organizations: ClosedProjectCorrectionCandidateOrganization[];
+  participants: ClosedProjectCorrectionCandidateParticipant[];
 }
 
 const RESOURCE_ERROR_MESSAGE: Record<DetailResource, string> = {
@@ -155,6 +162,14 @@ export function ProjectDetailPage({
   const [projectLoadError, setProjectLoadError] = useState<string | null>(null);
   const [resourceErrors, setResourceErrors] = useState<DetailErrors>({});
   const [message, setMessage] = useState<string | null>(null);
+  const [historyCorrection, setHistoryCorrection] = useState(false);
+  const [correctionCandidates, setCorrectionCandidates] =
+    useState<ClosedCorrectionCandidates | null>(null);
+  const [correctionCandidatesLoading, setCorrectionCandidatesLoading] =
+    useState(false);
+  const [correctionCandidatesError, setCorrectionCandidatesError] = useState<
+    string | null
+  >(null);
   const [showEdit, setShowEdit] = useState(false);
   const [showTransition, setShowTransition] = useState(false);
   const [showDeletion, setShowDeletion] = useState(false);
@@ -163,6 +178,8 @@ export function ProjectDetailPage({
   const loadGeneration = useRef(0);
   const projectRequestToken = useRef(0);
   const transitionRequestToken = useRef(0);
+  const correctionCandidateRequestToken = useRef(0);
+  const historyCorrectionRef = useRef(false);
   const currentProjectId = useRef(projectId);
   const resourceRequestTokens = useRef({
     ...INITIAL_RESOURCE_REQUEST_TOKEN,
@@ -182,6 +199,15 @@ export function ProjectDetailPage({
       loadGeneration.current === context.generation,
     [],
   );
+
+  const stopHistoryCorrection = useCallback(() => {
+    historyCorrectionRef.current = false;
+    correctionCandidateRequestToken.current += 1;
+    setHistoryCorrection(false);
+    setCorrectionCandidates(null);
+    setCorrectionCandidatesLoading(false);
+    setCorrectionCandidatesError(null);
+  }, []);
 
   const loadResource = useCallback(
     async <T,>(
@@ -296,7 +322,7 @@ export function ProjectDetailPage({
   );
 
   const loadProject = useCallback(
-    async (context: RequestContext) => {
+    async (context: RequestContext, allowDeletedFallback = false) => {
       if (!isCurrent(context)) return null;
       const requestToken = projectRequestToken.current + 1;
       projectRequestToken.current = requestToken;
@@ -308,8 +334,31 @@ export function ProjectDetailPage({
         const nextProject = await api.get<Project>(projectPath);
         if (!ownsRequest()) return null;
         setProject(nextProject);
+        if (nextProject.isDeleted || nextProject.status !== "CLOSED") {
+          stopHistoryCorrection();
+        }
         return nextProject;
-      } catch {
+      } catch (error) {
+        if (
+          ownsRequest() &&
+          (historyCorrectionRef.current || allowDeletedFallback) &&
+          administrativeOperator &&
+          !includeDeleted &&
+          error instanceof ApiError &&
+          error.problem?.code === "NOT_FOUND"
+        ) {
+          try {
+            const deletedProject = await api.get<Project>(
+              `/projects/${context.projectId}?includeDeleted=true`,
+            );
+            if (!ownsRequest()) return null;
+            setProject(deletedProject);
+            stopHistoryCorrection();
+            return deletedProject;
+          } catch {
+            // Fall through to the standard retryable project error.
+          }
+        }
         if (ownsRequest()) {
           setProjectLoadError("프로젝트 정보를 불러오지 못했습니다.");
         }
@@ -318,58 +367,107 @@ export function ProjectDetailPage({
         if (ownsRequest()) setProjectLoading(false);
       }
     },
-    [api, isCurrent, projectPath],
+    [
+      administrativeOperator,
+      api,
+      includeDeleted,
+      isCurrent,
+      projectPath,
+      stopHistoryCorrection,
+    ],
   );
 
-  const load = useCallback(() => {
-    const context = {
-      projectId,
-      generation: ++loadGeneration.current,
-    };
-    if (!isCurrent(context)) return;
-    auditPaginationRequest.current = null;
-    setAuditLoadingMore(false);
-    updateAuditNextCursor(null);
-    setResourceLoading({});
-    setResourceErrors({});
-    setAuditPaginationError(null);
-    setMessage(null);
+  const load = useCallback(
+    (options: { allowDeletedFallback?: boolean } = {}) => {
+      const context = {
+        projectId,
+        generation: ++loadGeneration.current,
+      };
+      if (!isCurrent(context)) return;
+      auditPaginationRequest.current = null;
+      setAuditLoadingMore(false);
+      updateAuditNextCursor(null);
+      setResourceLoading({});
+      setResourceErrors({});
+      setAuditPaginationError(null);
+      setMessage(null);
 
-    if (deletedDetailForbidden) {
-      setProject(null);
-      setProjectLoading(false);
-      setProjectLoadError("삭제된 프로젝트를 볼 권한이 없습니다.");
-      return;
-    }
-    const projectRequest = loadProject(context);
-    const loadChildren = () =>
-      Promise.all(
-        (
-          [
-            "summary",
-            "memberships",
-            "organizations",
-            "roster",
-            "participants",
-            "audit",
-          ] satisfies DetailResource[]
-        ).map((resource) => loadDetailResource(context, resource)),
+      if (deletedDetailForbidden) {
+        setProject(null);
+        setProjectLoading(false);
+        setProjectLoadError("삭제된 프로젝트를 볼 권한이 없습니다.");
+        return;
+      }
+      const projectRequest = loadProject(
+        context,
+        options.allowDeletedFallback === true,
       );
-    const detailRefresh = includeDeleted
-      ? projectRequest.then((nextProject) =>
-          nextProject?.isDeleted ? [] : loadChildren(),
-        )
-      : loadChildren();
-    return { projectRequest, detailRefresh };
-  }, [
-    deletedDetailForbidden,
-    includeDeleted,
-    isCurrent,
-    loadDetailResource,
-    loadProject,
-    projectId,
-    updateAuditNextCursor,
-  ]);
+      const loadChildren = () =>
+        Promise.all(
+          (
+            [
+              "summary",
+              "memberships",
+              "organizations",
+              "roster",
+              "participants",
+              "audit",
+            ] satisfies DetailResource[]
+          ).map((resource) => loadDetailResource(context, resource)),
+        );
+      const detailRefresh = includeDeleted
+        ? projectRequest.then((nextProject) =>
+            nextProject?.isDeleted ? [] : loadChildren(),
+          )
+        : loadChildren();
+      return { projectRequest, detailRefresh };
+    },
+    [
+      deletedDetailForbidden,
+      includeDeleted,
+      isCurrent,
+      loadDetailResource,
+      loadProject,
+      projectId,
+      updateAuditNextCursor,
+    ],
+  );
+
+  const loadCorrectionCandidates = useCallback(
+    async (context: RequestContext) => {
+      if (!isCurrent(context) || !historyCorrectionRef.current) return false;
+      const requestToken = correctionCandidateRequestToken.current + 1;
+      correctionCandidateRequestToken.current = requestToken;
+      const ownsRequest = () =>
+        isCurrent(context) &&
+        historyCorrectionRef.current &&
+        correctionCandidateRequestToken.current === requestToken;
+      setCorrectionCandidatesLoading(true);
+      setCorrectionCandidatesError(null);
+      try {
+        const candidates = await api.get<ClosedCorrectionCandidates>(
+          `/projects/${context.projectId}/history-corrections/candidates`,
+        );
+        if (!ownsRequest()) return false;
+        setCorrectionCandidates(candidates);
+        return true;
+      } catch (error) {
+        if (!ownsRequest()) return false;
+        if (isCorrectionUnavailable(error)) {
+          const allowDeletedFallback =
+            error instanceof ApiError && error.problem?.code === "NOT_FOUND";
+          stopHistoryCorrection();
+          load({ allowDeletedFallback });
+          return false;
+        }
+        setCorrectionCandidatesError("이력 보정 후보를 불러오지 못했습니다.");
+        return false;
+      } finally {
+        if (ownsRequest()) setCorrectionCandidatesLoading(false);
+      }
+    },
+    [api, isCurrent, load, stopHistoryCorrection],
+  );
 
   const retryProject = useCallback(
     () =>
@@ -391,7 +489,35 @@ export function ProjectDetailPage({
     [isCurrent, loadDetailResource, projectId],
   );
 
+  function startHistoryCorrection() {
+    if (
+      !administrativeOperator ||
+      !project ||
+      project.isDeleted ||
+      project.status !== "CLOSED" ||
+      historyCorrectionRef.current
+    ) {
+      return;
+    }
+    historyCorrectionRef.current = true;
+    setHistoryCorrection(true);
+    setCorrectionCandidates(null);
+    setCorrectionCandidatesError(null);
+    void loadCorrectionCandidates({
+      projectId,
+      generation: loadGeneration.current,
+    });
+  }
+
+  function retryCorrectionCandidates() {
+    void loadCorrectionCandidates({
+      projectId,
+      generation: loadGeneration.current,
+    });
+  }
+
   useEffect(() => {
+    stopHistoryCorrection();
     setSelectedTab("overview");
     setProject(null);
     setSummary(EMPTY_SUMMARY(projectId));
@@ -419,7 +545,7 @@ export function ProjectDetailPage({
     return () => {
       loadGeneration.current += 1;
     };
-  }, [load, projectId, updateAuditNextCursor]);
+  }, [load, projectId, stopHistoryCorrection, updateAuditNextCursor]);
 
   async function reloadProjectForContext(context: RequestContext) {
     return loadProject(context);
@@ -696,22 +822,19 @@ export function ProjectDetailPage({
   }
 
   const action = NEXT_ACTION[project.status];
+  const correctionActive =
+    administrativeOperator && project.status === "CLOSED" && historyCorrection;
   const reopenBlocked =
     project.status === "CLOSED" &&
     project.endDate !== null &&
     project.endDate < currentKstDate();
-  const canMutateRoster =
+  const ordinaryCanMutateRoster =
     project.status !== "CLOSED" &&
     (operator ||
       (project.status === "PRE_REGISTRATION" &&
         memberships.some(
           (membership) => membership.isActive && membership.masterIsActive,
         )));
-  const rosterOrganizations: Organization[] = memberships.map((membership) => ({
-    id: membership.organizationId,
-    name: membership.name,
-    isActive: membership.isActive && membership.masterIsActive,
-  }));
   const childContext = {
     projectId: project.id,
     generation: loadGeneration.current,
@@ -722,10 +845,41 @@ export function ProjectDetailPage({
   const renderGeneration = loadGeneration.current;
   const projectActionsBlocked =
     projectLoading || Boolean(projectLoadError) || transitioning;
+  const correctionControlsBlocked =
+    Boolean(projectLoadError) ||
+    transitioning ||
+    showTransition ||
+    showDeletion;
+  const correctionExitBlocked = transitioning || showTransition || showDeletion;
+  const canMutateRoster = correctionActive
+    ? !correctionControlsBlocked
+    : ordinaryCanMutateRoster;
+  const mutationMode = correctionActive
+    ? ("CLOSED_CORRECTION" as const)
+    : ("ORDINARY" as const);
+  const organizationCandidates = correctionActive
+    ? (correctionCandidates?.organizations ?? [])
+    : allOrganizations;
+  const participantCandidates = correctionActive
+    ? (correctionCandidates?.participants ?? [])
+    : participants;
+  const rosterOrganizations = memberships.map((membership) => ({
+    id: membership.organizationId,
+    name: membership.name,
+    isActive: correctionActive
+      ? membership.isActive
+      : membership.isActive && membership.masterIsActive,
+    isDeleted: membership.masterIsDeleted,
+    masterIsActive: membership.masterIsActive,
+  }));
   const membershipsLoaded = Boolean(resourceLoaded.memberships);
-  const organizationsLoaded = Boolean(resourceLoaded.organizations);
+  const organizationsLoaded = correctionActive
+    ? correctionCandidates !== null
+    : Boolean(resourceLoaded.organizations);
   const rosterLoaded = Boolean(resourceLoaded.roster);
-  const participantsLoaded = Boolean(resourceLoaded.participants);
+  const participantsLoaded = correctionActive
+    ? correctionCandidates !== null
+    : Boolean(resourceLoaded.participants);
 
   function renderResourceFeedback(
     resource: DetailResource,
@@ -763,7 +917,17 @@ export function ProjectDetailPage({
     if (!isCurrent(childContext)) return;
     const refresh = load();
     if (!refresh) return;
-    await Promise.all([refresh.projectRequest, refresh.detailRefresh]);
+    const correctionCandidateRefresh = historyCorrectionRef.current
+      ? loadCorrectionCandidates({
+          projectId,
+          generation: loadGeneration.current,
+        })
+      : Promise.resolve(false);
+    await Promise.all([
+      refresh.projectRequest,
+      refresh.detailRefresh,
+      correctionCandidateRefresh,
+    ]);
   }
 
   async function handleChildProjectClosed() {
@@ -813,6 +977,20 @@ export function ProjectDetailPage({
             >
               {action.label}
             </Button>
+            {administrativeOperator &&
+            project.status === "CLOSED" &&
+            !correctionActive ? (
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={
+                  projectActionsBlocked || showTransition || showDeletion
+                }
+                onClick={startHistoryCorrection}
+              >
+                이력 보정 시작
+              </Button>
+            ) : null}
             {administrativeOperator && project.status === "CLOSED" ? (
               <Button
                 type="button"
@@ -831,6 +1009,34 @@ export function ProjectDetailPage({
           </div>
         ) : null}
       </header>
+      {correctionActive ? (
+        <Card
+          className="er-history-correction-banner"
+          aria-label="종료 후 이력 보정"
+        >
+          <div>
+            <h2>종료 후 이력 보정 중</h2>
+            <p>예상 인원은 변경되지 않고 실제 참석 인원에 반영됩니다.</p>
+            {correctionCandidatesLoading ? (
+              <LoadingStatus>이력 보정 후보 불러오는 중…</LoadingStatus>
+            ) : null}
+            {correctionCandidatesError ? (
+              <RetryableError
+                message={correctionCandidatesError}
+                retrying={correctionCandidatesLoading}
+                onRetry={retryCorrectionCandidates}
+              />
+            ) : null}
+          </div>
+          <Button
+            type="button"
+            disabled={correctionExitBlocked}
+            onClick={stopHistoryCorrection}
+          >
+            이력 보정 종료
+          </Button>
+        </Card>
+      ) : null}
       {projectLoadError ? (
         <RetryableError
           message={projectLoadError}
@@ -883,14 +1089,19 @@ export function ProjectDetailPage({
             {renderResourceFeedback("organizations", { compact: true })}
             {membershipsLoaded ? (
               <ProjectOrganizationsPanel
-                key={project.id}
+                key={`${project.id}:${mutationMode}`}
                 projectId={project.id}
                 projectRevision={project.revision}
                 memberships={memberships}
-                allOrganizations={allOrganizations}
+                allOrganizations={organizationCandidates}
                 organizationCandidatesAvailable={organizationsLoaded}
-                canMutateMemberships={operator && project.status !== "CLOSED"}
-                canManageOrganizations={operator}
+                canMutateMemberships={
+                  correctionActive
+                    ? !correctionControlsBlocked
+                    : Boolean(operator && project.status !== "CLOSED")
+                }
+                canManageOrganizations={Boolean(operator)}
+                mutationMode={mutationMode}
                 onChanged={reloadAfterChildMutation}
                 onProjectClosed={handleChildProjectClosed}
               />
@@ -904,14 +1115,15 @@ export function ProjectDetailPage({
             {renderResourceFeedback("participants", { compact: true })}
             {membershipsLoaded && rosterLoaded ? (
               <ProjectRosterPage
-                key={project.id}
+                key={`${project.id}:${mutationMode}`}
                 project={project}
                 rows={rows}
-                participants={participants}
+                participants={participantCandidates}
                 organizations={rosterOrganizations}
                 memberships={memberships}
                 canMutate={canMutateRoster}
                 participantCandidatesAvailable={participantsLoaded}
+                mutationMode={mutationMode}
                 onChanged={reloadAfterChildMutation}
               />
             ) : null}
@@ -1011,6 +1223,14 @@ function formatKstDate(value: string) {
 function navigate(href: string) {
   window.history.pushState(null, "", href);
   window.dispatchEvent(new PopStateEvent("popstate"));
+}
+
+function isCorrectionUnavailable(error: unknown) {
+  return (
+    error instanceof ApiError &&
+    (error.problem?.code === "INVALID_TRANSITION" ||
+      error.problem?.code === "NOT_FOUND")
+  );
 }
 
 function assertNever(value: never): never {

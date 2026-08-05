@@ -1,13 +1,12 @@
-import type {
-  Organization,
-  ParticipantRole,
-  StudentGrade,
-} from "@event-roster/contracts";
+import type { ParticipantRole, StudentGrade } from "@event-roster/contracts";
 import { useState } from "react";
 import { Button } from "../../components/ui/Button";
 import { Dialog } from "../../components/ui/Dialog";
 import { TextInput } from "../../components/ui/TextInput";
-import type { ParticipantView } from "./ParticipantDialog";
+import type {
+  ParticipantView,
+  RosterOrganizationView,
+} from "./ParticipantDialog";
 import type { RosterView } from "./RosterTable";
 
 export function ParticipantEditDialog({
@@ -15,13 +14,15 @@ export function ParticipantEditDialog({
   roster,
   organizations,
   allowOrganizationChange,
+  snapshotMode = false,
   onSave,
   onClose,
 }: {
   participant: ParticipantView;
   roster: RosterView;
-  organizations: Organization[];
+  organizations: RosterOrganizationView[];
   allowOrganizationChange: boolean;
+  snapshotMode?: boolean;
   onSave: (input: {
     name: string;
     organizationId: string;
@@ -31,9 +32,11 @@ export function ParticipantEditDialog({
   }) => Promise<void>;
   onClose: () => void;
 }) {
-  const [name, setName] = useState(participant.name);
+  const [name, setName] = useState(
+    snapshotMode ? roster.participantName : participant.name,
+  );
   const [organizationId, setOrganizationId] = useState(
-    participant.organizationId,
+    snapshotMode ? roster.organizationId : participant.organizationId,
   );
   const [role, setRole] = useState<ParticipantRole>(
     roster.role === "TEACHER" ? "TEACHER" : "STUDENT",
@@ -44,7 +47,7 @@ export function ParticipantEditDialog({
   const [busy, setBusy] = useState(false);
   const selectableOrganizations = organizations.filter(
     (organization) =>
-      organization.isActive || organization.id === participant.organizationId,
+      organization.isActive || organization.id === organizationId,
   );
 
   async function save() {
@@ -63,7 +66,7 @@ export function ParticipantEditDialog({
         organizationId,
         role,
         grade,
-        expectedRevision: participant.revision,
+        expectedRevision: snapshotMode ? roster.revision : participant.revision,
       });
     } catch {
       // The parent owns mutation feedback; keep this dialog and its input.
@@ -91,6 +94,11 @@ export function ParticipantEditDialog({
           {selectableOrganizations.map((organization) => (
             <option key={organization.id} value={organization.id}>
               {organization.name}
+              {organization.isDeleted
+                ? " · 삭제됨"
+                : organization.masterIsActive === false
+                  ? " · 사용 중지"
+                  : ""}
             </option>
           ))}
         </select>

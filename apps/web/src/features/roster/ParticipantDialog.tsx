@@ -6,7 +6,7 @@ import type {
   StudentGrade,
 } from "@event-roster/contracts";
 import { normalizeParticipantName } from "@event-roster/contracts";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "../../components/ui/Button";
 import { Dialog } from "../../components/ui/Dialog";
 import { TextInput } from "../../components/ui/TextInput";
@@ -26,6 +26,11 @@ export interface ParticipantView {
   suggestedRole?: ParticipantRole | null;
   suggestedGrade?: StudentGrade | null;
   revision: number;
+}
+
+export interface RosterOrganizationView extends Organization {
+  isDeleted?: boolean;
+  masterIsActive?: boolean;
 }
 
 export interface ExistingParticipantConfirmation {
@@ -50,7 +55,7 @@ export type BulkParticipantSubmitOutcome =
 
 function initialConfirmedOrganizationId(
   participant: ParticipantView | undefined,
-  organizations: Organization[],
+  organizations: RosterOrganizationView[],
   allowExistingOrganizationChange: boolean,
 ) {
   if (!allowExistingOrganizationChange && participant) {
@@ -69,7 +74,7 @@ function initialConfirmedOrganizationId(
 }
 
 function firstActiveOrganizationId(
-  organizations: Organization[],
+  organizations: RosterOrganizationView[],
   recentOrganizationIds: readonly string[],
 ) {
   return (
@@ -119,7 +124,7 @@ export function ParticipantDialog({
   onClose,
 }: {
   participants: ParticipantView[];
-  organizations: Organization[];
+  organizations: RosterOrganizationView[];
   recentOrganizationIds?: readonly string[];
   onAdd: (input: ExistingParticipantConfirmation) => Promise<void>;
   onCreateAndAdd: (
@@ -160,6 +165,14 @@ export function ParticipantDialog({
   );
   const [organizationId, setOrganizationId] = useState(
     firstActiveOrganizationId(organizations, recentOrganizationIds),
+  );
+  const displayOrganizations = useMemo(
+    () =>
+      organizations.map((organization) => ({
+        ...organization,
+        name: organizationDisplayName(organization),
+      })),
+    [organizations],
   );
   const initializationContextRef = useRef({
     allowExistingOrganizationChange,
@@ -407,7 +420,7 @@ export function ParticipantDialog({
             {allowExistingOrganizationChange ? (
               <OrganizationSelectCombobox
                 label="확정 소속 조직"
-                organizations={organizations}
+                organizations={displayOrganizations}
                 recentOrganizationIds={recentOrganizationIds}
                 value={confirmedOrganizationId}
                 disabled={busy !== null}
@@ -416,12 +429,12 @@ export function ParticipantDialog({
             ) : (
               <TextInput
                 label="확정 소속 조직"
-                value={
+                value={organizationDisplayName(
                   organizations.find(
                     (organization) =>
                       organization.id === selectedParticipant?.organizationId,
-                  )?.name ?? ""
-                }
+                  ),
+                )}
                 disabled
                 readOnly
               />
@@ -490,7 +503,7 @@ export function ParticipantDialog({
           <>
             <OrganizationSelectCombobox
               label="소속 조직"
-              organizations={organizations}
+              organizations={displayOrganizations}
               recentOrganizationIds={recentOrganizationIds}
               value={organizationId}
               disabled={busy !== null}
@@ -532,4 +545,13 @@ export function ParticipantDialog({
       </form>
     </Dialog>
   );
+}
+
+function organizationDisplayName(organization?: RosterOrganizationView) {
+  if (!organization) return "";
+  if (organization.isDeleted) return `${organization.name} · 삭제됨`;
+  if (organization.masterIsActive === false) {
+    return `${organization.name} · 사용 중지`;
+  }
+  return organization.name;
 }

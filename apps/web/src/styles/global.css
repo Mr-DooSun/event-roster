@@ -488,6 +488,23 @@ a {
   border-style: dashed;
   background: var(--er-color-canvas);
 }
+.er-history-correction-banner {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--er-space-4);
+  border-color: var(--er-color-danger);
+  padding: var(--er-space-6);
+  background: var(--er-color-danger-soft);
+}
+.er-history-correction-banner h2,
+.er-history-correction-banner p {
+  margin: 0;
+}
+.er-history-correction-banner > div {
+  display: grid;
+  gap: var(--er-space-2);
+}
 .er-project-card--skeleton {
   align-content: start;
   pointer-events: none;
@@ -629,6 +646,9 @@ a {
   color: var(--er-color-muted);
 }
 .er-combobox-option {
+  display: flex;
+  align-items: center;
+  gap: var(--er-space-2);
   width: 100%;
   border: 0;
   border-radius: var(--er-radius-sm);
@@ -1034,7 +1054,8 @@ th {
     padding: var(--er-space-3);
   }
   .er-inline-form,
-  .er-page-heading {
+  .er-page-heading,
+  .er-history-correction-banner {
     align-items: stretch;
     flex-direction: column;
   }

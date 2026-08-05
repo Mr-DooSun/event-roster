@@ -7,16 +7,17 @@ export type OrganizationComboboxSelection =
   | { kind: "NEW"; name: string };
 
 export interface OrganizationComboboxProps {
-  organizations: Organization[];
+  organizations: Array<Organization & { isDeleted?: boolean }>;
   linkedOrganizationIds: ReadonlySet<string>;
   disabled: boolean;
+  includeInactive?: boolean;
   onSelect(selection: OrganizationComboboxSelection): void;
   onQueryChange?(): void;
 }
 
 interface ExistingOption {
   kind: "EXISTING";
-  organization: Organization;
+  organization: Organization & { isDeleted?: boolean };
   disabled: boolean;
 }
 
@@ -32,6 +33,7 @@ export function OrganizationCombobox({
   organizations,
   linkedOrganizationIds,
   disabled,
+  includeInactive = false,
   onSelect,
   onQueryChange,
 }: OrganizationComboboxProps) {
@@ -45,7 +47,7 @@ export function OrganizationCombobox({
     const existing: ExistingOption[] = organizations
       .filter(
         (organization) =>
-          organization.isActive &&
+          (includeInactive || organization.isActive) &&
           (!canonicalQuery ||
             canonicalizeOrganizationInput(organization.name).includes(
               canonicalQuery,
@@ -64,7 +66,7 @@ export function OrganizationCombobox({
     return canonicalQuery && !exactMatch
       ? [...existing, { kind: "NEW", name: trimmed, disabled: false }]
       : existing;
-  }, [linkedOrganizationIds, organizations, query]);
+  }, [includeInactive, linkedOrganizationIds, organizations, query]);
 
   useEffect(() => {
     if (activeIndex < 0) return;
@@ -161,10 +163,12 @@ export function OrganizationCombobox({
         <div id={listboxId} className="er-combobox-list" role="listbox">
           {options.map((option, index) => {
             const linked = option.kind === "EXISTING" && option.disabled;
-            const label =
-              option.kind === "EXISTING"
-                ? `${option.organization.name}${linked ? " · 이미 추가됨" : ""}`
-                : `“${option.name}” 새 조직 생성 후 추가`;
+            const statusLabel =
+              option.kind === "EXISTING" && option.organization.isDeleted
+                ? "삭제됨"
+                : option.kind === "EXISTING" && !option.organization.isActive
+                  ? "사용 중지"
+                  : null;
             return (
               <button
                 key={
@@ -179,12 +183,31 @@ export function OrganizationCombobox({
                 className="er-combobox-option"
                 type="button"
                 role="option"
+                aria-label={
+                  option.kind === "EXISTING"
+                    ? `${option.organization.name}${statusLabel ? ` · ${statusLabel}` : ""}${linked ? " · 이미 추가됨" : ""}`
+                    : undefined
+                }
                 aria-selected={activeIndex === index}
                 disabled={option.disabled}
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={() => select(option)}
               >
-                {label}
+                {option.kind === "EXISTING" ? (
+                  <>
+                    <span>{option.organization.name}</span>
+                    {statusLabel ? (
+                      <span
+                        className={`er-badge er-badge--${option.organization.isDeleted ? "deleted" : "inactive"}`}
+                      >
+                        {statusLabel}
+                      </span>
+                    ) : null}
+                    {linked ? <span>이미 추가됨</span> : null}
+                  </>
+                ) : (
+                  `“${option.name}” 새 조직 생성 후 추가`
+                )}
               </button>
             );
           })}

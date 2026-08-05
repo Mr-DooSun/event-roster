@@ -2660,6 +2660,447 @@ it("refreshes once and hides organization controls when the project closes", asy
   expect(mockApi.post).toHaveBeenCalledTimes(1);
 });
 
+it("owns closed history correction as an administrative operator-only local mode", async () => {
+  mockApi.get.mockImplementation((path: string) => {
+    if (path === "/projects/project-1") return closedProject();
+    if (path === "/projects/project-1/history-corrections/candidates") {
+      return { organizations: [], participants: [] };
+    }
+    return defaultGet(path);
+  });
+
+  const operatorView = render(<ProjectDetailPage projectId="project-1" />);
+  const start = await screen.findByRole("button", { name: "이력 보정 시작" });
+  expect(screen.queryByText("종료 후 이력 보정 중")).not.toBeInTheDocument();
+
+  fireEvent.click(start);
+
+  expect(await screen.findByText("종료 후 이력 보정 중")).toBeVisible();
+  expect(
+    screen.getByText("예상 인원은 변경되지 않고 실제 참석 인원에 반영됩니다."),
+  ).toBeVisible();
+  expect(screen.getByRole("button", { name: "이력 보정 종료" })).toBeEnabled();
+  expect(screen.getByText("종료", { exact: true })).toBeVisible();
+  expect(screen.getByRole("button", { name: "프로젝트 재개" })).toBeVisible();
+  expect(mockApi.post).not.toHaveBeenCalledWith(
+    "/projects/project-1/transition",
+    expect.anything(),
+  );
+
+  fireEvent.click(screen.getByRole("tab", { name: "참가 명단" }));
+  expect(
+    await screen.findByRole("button", { name: "참가자 추가" }),
+  ).toBeVisible();
+
+  fireEvent.click(screen.getByRole("button", { name: "이력 보정 종료" }));
+  expect(screen.queryByText("종료 후 이력 보정 중")).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("button", { name: "참가자 추가" }),
+  ).not.toBeInTheDocument();
+  expect(screen.getByText("종료", { exact: true })).toBeVisible();
+  operatorView.unmount();
+
+  mockRole.current = "ORGANIZATION_MANAGER";
+  render(<ProjectDetailPage projectId="project-1" />);
+  await screen.findByRole("heading", { name: project.name });
+  expect(
+    screen.queryByRole("button", { name: "이력 보정 시작" }),
+  ).not.toBeInTheDocument();
+});
+
+it("discards open correction dialogs when the local mode exits", async () => {
+  mockApi.get.mockImplementation((path: string) => {
+    if (path === "/projects/project-1") return closedProject();
+    if (path === "/projects/project-1/history-corrections/candidates") {
+      return { organizations: [], participants: [] };
+    }
+    return defaultGet(path);
+  });
+
+  render(<ProjectDetailPage projectId="project-1" />);
+  fireEvent.click(
+    await screen.findByRole("button", { name: "이력 보정 시작" }),
+  );
+  fireEvent.click(screen.getByRole("tab", { name: "참가 명단" }));
+  fireEvent.click(await screen.findByRole("button", { name: "참가자 추가" }));
+  expect(screen.getByRole("dialog", { name: "참가자 추가" })).toBeVisible();
+
+  fireEvent.click(screen.getByRole("button", { name: "이력 보정 종료" }));
+  expect(
+    screen.queryByRole("dialog", { name: "참가자 추가" }),
+  ).not.toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "이력 보정 시작" }));
+  await screen.findByText("종료 후 이력 보정 중");
+  expect(
+    screen.queryByRole("dialog", { name: "참가자 추가" }),
+  ).not.toBeInTheDocument();
+});
+
+it.each([
+  { outcome: "reopened", code: "INVALID_TRANSITION" as const },
+  { outcome: "deleted", code: "NOT_FOUND" as const },
+])(
+  "reloads the latest project when the initial correction candidates report $outcome",
+  async ({ outcome, code }) => {
+    let projectReads = 0;
+    const latestProject =
+      outcome === "reopened"
+        ? { ...closedProject(), status: "IN_PROGRESS" as const, revision: 3 }
+        : { ...deletedProject(), name: project.name, revision: 3 };
+    mockApi.get.mockImplementation((path: string) => {
+      if (path === "/projects/project-1") {
+        projectReads += 1;
+        if (projectReads === 1) return closedProject();
+        if (outcome === "deleted") {
+          throw new ApiError(404, {
+            code: "NOT_FOUND",
+            message: "deleted",
+            requestId: "candidate-deleted",
+          });
+        }
+        return latestProject;
+      }
+      if (path === "/projects/project-1?includeDeleted=true") {
+        return latestProject;
+      }
+      if (path === "/projects/project-1/history-corrections/candidates") {
+        throw new ApiError(code === "NOT_FOUND" ? 404 : 409, {
+          code,
+          message: outcome,
+          requestId: `candidate-${outcome}`,
+        });
+      }
+      return defaultGet(path);
+    });
+
+    render(<ProjectDetailPage projectId="project-1" />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "이력 보정 시작" }),
+    );
+
+    expect(
+      await screen.findByText(
+        outcome === "deleted" ? "삭제된 프로젝트" : "진행 중",
+        { exact: true },
+      ),
+    ).toBeVisible();
+    expect(screen.queryByText("종료 후 이력 보정 중")).not.toBeInTheDocument();
+    expect(projectReads).toBe(2);
+  },
+);
+
+it("never exposes closed history correction to bootstrap operators", async () => {
+  mockBootstrap.current = true;
+  mockApi.get.mockImplementation((path: string) => {
+    if (path === "/projects/project-1") return closedProject();
+    return defaultGet(path);
+  });
+
+  render(<ProjectDetailPage projectId="project-1" />);
+
+  await screen.findByRole("heading", { name: project.name });
+  expect(
+    screen.queryByRole("button", { name: "이력 보정 시작" }),
+  ).not.toBeInTheDocument();
+  expect(mockApi.get).not.toHaveBeenCalledWith(
+    "/projects/project-1/history-corrections/candidates",
+  );
+});
+
+it("loads inactive and deleted correction candidates and routes organization mutations", async () => {
+  mockApi.get.mockImplementation((path: string) => {
+    if (path === "/projects/project-1") return closedProject();
+    if (path === "/projects/project-1/organizations") {
+      return [
+        organizationMembership({
+          organizationId: "org-deleted",
+          name: "삭제 조직",
+          isActive: false,
+          masterIsActive: false,
+          masterIsDeleted: true,
+        }),
+      ];
+    }
+    if (path === "/projects/project-1/history-corrections/candidates") {
+      return {
+        organizations: [
+          {
+            id: "org-inactive",
+            name: "휴면 조직",
+            isActive: false,
+            isDeleted: false,
+          },
+          {
+            id: "org-deleted",
+            name: "삭제 조직",
+            isActive: false,
+            isDeleted: true,
+          },
+        ],
+        participants: [],
+      };
+    }
+    return defaultGet(path);
+  });
+
+  render(<ProjectDetailPage projectId="project-1" />);
+  fireEvent.click(
+    await screen.findByRole("button", { name: "이력 보정 시작" }),
+  );
+  await waitFor(() =>
+    expect(mockApi.get).toHaveBeenCalledWith(
+      "/projects/project-1/history-corrections/candidates",
+    ),
+  );
+  fireEvent.click(screen.getByRole("tab", { name: "조직" }));
+
+  expect(await screen.findByText("삭제 조직")).toBeVisible();
+  expect(screen.getByText("삭제됨", { exact: true })).toHaveClass(
+    "er-badge--deleted",
+  );
+  fireEvent.change(
+    screen.getByRole("combobox", { name: "조직 이름 검색 또는 입력" }),
+    { target: { value: "휴면" } },
+  );
+  fireEvent.click(
+    screen.getByRole("option", { name: "휴면 조직 · 사용 중지" }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "프로젝트에 추가" }));
+
+  await waitFor(() =>
+    expect(mockApi.post).toHaveBeenCalledWith(
+      "/projects/project-1/history-corrections/organizations",
+      { organizationId: "org-inactive", expectedProjectRevision: 2 },
+    ),
+  );
+
+  fireEvent.click(screen.getByRole("button", { name: "다시 사용" }));
+  await waitFor(() =>
+    expect(mockApi.patch).toHaveBeenCalledWith(
+      "/projects/project-1/history-corrections/organizations/org-deleted",
+      { isActive: true, expectedProjectRevision: 8 },
+    ),
+  );
+  for (const path of [
+    "/projects/project-1",
+    "/projects/project-1/organizations",
+    "/projects/project-1/summary",
+    "/projects/project-1/roster",
+    "/projects/project-1/audit?limit=50",
+    "/projects/project-1/history-corrections/candidates",
+  ]) {
+    expect(
+      mockApi.get.mock.calls.filter(([requestedPath]) => requestedPath === path)
+        .length,
+    ).toBeGreaterThanOrEqual(2);
+  }
+});
+
+it("disables correction controls while a project transition confirmation is open", async () => {
+  mockApi.get.mockImplementation((path: string) => {
+    if (path === "/projects/project-1") return closedProject();
+    if (path === "/projects/project-1/history-corrections/candidates") {
+      return { organizations: [], participants: [] };
+    }
+    return defaultGet(path);
+  });
+
+  render(<ProjectDetailPage projectId="project-1" />);
+  fireEvent.click(
+    await screen.findByRole("button", { name: "이력 보정 시작" }),
+  );
+  await screen.findByText("종료 후 이력 보정 중");
+  fireEvent.click(screen.getByRole("button", { name: "프로젝트 재개" }));
+
+  expect(screen.getByRole("button", { name: "이력 보정 종료" })).toBeDisabled();
+  expect(
+    screen.getByRole("dialog", { name: "프로젝트 상태 변경" }),
+  ).toBeVisible();
+});
+
+it("disables correction controls while a project deletion confirmation is open", async () => {
+  mockApi.get.mockImplementation((path: string) => {
+    if (path === "/projects/project-1") return closedProject();
+    if (path === "/projects/project-1/history-corrections/candidates") {
+      return { organizations: [], participants: [] };
+    }
+    return defaultGet(path);
+  });
+
+  render(<ProjectDetailPage projectId="project-1" />);
+  fireEvent.click(
+    await screen.findByRole("button", { name: "이력 보정 시작" }),
+  );
+  await screen.findByText("종료 후 이력 보정 중");
+  fireEvent.click(screen.getByRole("button", { name: "프로젝트 삭제" }));
+
+  expect(screen.getByRole("button", { name: "이력 보정 종료" })).toBeDisabled();
+  expect(screen.getByRole("dialog", { name: "프로젝트 삭제" })).toBeVisible();
+});
+
+it("preserves a correction participant draft after stale reload", async () => {
+  let projectReads = 0;
+  let candidateReads = 0;
+  const staleProjectReload = deferred<Project>();
+  mockApi.get.mockImplementation((path: string) => {
+    if (path === "/projects/project-1") {
+      projectReads += 1;
+      return projectReads === 1 ? closedProject() : staleProjectReload.promise;
+    }
+    if (path === "/projects/project-1/organizations") {
+      return [organizationMembership()];
+    }
+    if (path === "/projects/project-1/history-corrections/candidates") {
+      candidateReads += 1;
+      return {
+        organizations: [
+          { id: "org-1", name: "1팀", isActive: true, isDeleted: false },
+        ],
+        participants: [
+          {
+            id: "person-2",
+            participantId: "P-002",
+            name: candidateReads === 1 ? "서버 이름" : "최신 서버 이름",
+            organizationId: "org-1",
+            revision: candidateReads,
+            suggestedRole: "STUDENT",
+            suggestedGrade: "M1",
+          },
+        ],
+      };
+    }
+    return defaultGet(path);
+  });
+  mockApi.post.mockRejectedValueOnce(
+    new ApiError(409, {
+      code: "STALE_REVISION",
+      message: "stale",
+      requestId: "correction-stale",
+    }),
+  );
+
+  render(<ProjectDetailPage projectId="project-1" />);
+  fireEvent.click(
+    await screen.findByRole("button", { name: "이력 보정 시작" }),
+  );
+  fireEvent.click(screen.getByRole("tab", { name: "참가 명단" }));
+  fireEvent.click(await screen.findByRole("button", { name: "참가자 추가" }));
+  fireEvent.change(screen.getByLabelText("확정 이름"), {
+    target: { value: "사용자 입력 보존" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "명단에 추가" }));
+
+  await waitFor(() => expect(projectReads).toBe(2));
+  expect(screen.getByRole("dialog", { name: "참가자 추가" })).toBeVisible();
+  expect(screen.getByLabelText("확정 이름")).toHaveValue("사용자 입력 보존");
+
+  await act(async () =>
+    staleProjectReload.resolve({ ...closedProject(), revision: 3 }),
+  );
+  expect(await screen.findByText("최신 이력을 불러왔습니다.")).toBeVisible();
+  expect(screen.getByRole("dialog", { name: "참가자 추가" })).toBeVisible();
+  expect(screen.getByLabelText("확정 이름")).toHaveValue("사용자 입력 보존");
+  expect(projectReads).toBe(2);
+  expect(candidateReads).toBe(2);
+});
+
+it.each([
+  { outcome: "reopened", code: "INVALID_TRANSITION" as const },
+  { outcome: "deleted", code: "NOT_FOUND" as const },
+])(
+  "leaves correction mode for a concurrently $outcome project",
+  async ({ outcome, code }) => {
+    let projectReads = 0;
+    const latestProject =
+      outcome === "reopened"
+        ? { ...closedProject(), status: "IN_PROGRESS" as const, revision: 3 }
+        : {
+            ...deletedProject(),
+            name: project.name,
+            revision: 3,
+          };
+    mockApi.get.mockImplementation((path: string) => {
+      if (path === "/projects/project-1") {
+        projectReads += 1;
+        if (projectReads === 1) return closedProject();
+        if (outcome === "deleted") {
+          throw new ApiError(404, {
+            code: "NOT_FOUND",
+            message: "deleted",
+            requestId: "correction-deleted",
+          });
+        }
+        return latestProject;
+      }
+      if (path === "/projects/project-1?includeDeleted=true") {
+        return latestProject;
+      }
+      if (path === "/projects/project-1/organizations") {
+        return [organizationMembership()];
+      }
+      if (path === "/projects/project-1/roster") {
+        return [
+          {
+            id: "entry-1",
+            projectId: "project-1",
+            participantId: "person-1",
+            participantNumber: "P-001",
+            organizationId: "org-1",
+            participantName: "박민수",
+            organizationName: "1팀",
+            role: "STUDENT",
+            grade: "M1",
+            source: "PRE_REGISTRATION",
+            status: "ACTIVE",
+            wasExpectedAtStart: true,
+            revision: 0,
+            updatedAt: "2026-08-05T00:00:00.000Z",
+          },
+        ];
+      }
+      if (path === "/projects/project-1/history-corrections/candidates") {
+        return {
+          organizations: [
+            { id: "org-1", name: "1팀", isActive: true, isDeleted: false },
+          ],
+          participants: [],
+        };
+      }
+      return defaultGet(path);
+    });
+    mockApi.patch.mockRejectedValueOnce(
+      new ApiError(code === "NOT_FOUND" ? 404 : 409, {
+        code,
+        message: outcome,
+        requestId: `correction-${outcome}`,
+      }),
+    );
+
+    render(<ProjectDetailPage projectId="project-1" />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "이력 보정 시작" }),
+    );
+    fireEvent.click(screen.getByRole("tab", { name: "참가 명단" }));
+    fireEvent.click(await screen.findByRole("button", { name: "박민수 취소" }));
+
+    await waitFor(() =>
+      expect(
+        screen.queryByText("종료 후 이력 보정 중"),
+      ).not.toBeInTheDocument(),
+    );
+    if (outcome === "deleted") {
+      expect(
+        screen.getByText("삭제된 프로젝트", { exact: true }),
+      ).toBeVisible();
+      expect(screen.queryByRole("tablist")).not.toBeInTheDocument();
+    } else {
+      expect(screen.getByText("진행 중", { exact: true })).toBeVisible();
+      expect(screen.getByRole("tablist")).toBeVisible();
+    }
+  },
+);
+
 async function defaultGet(path: string) {
   if (path === "/projects/project-1") return project;
   if (path === "/projects/project-1/organizations") return [];

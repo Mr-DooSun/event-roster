@@ -21,13 +21,16 @@ export interface ProjectOrganizationsPanelProps {
   projectId: string;
   projectRevision: number;
   memberships: ProjectOrganization[];
-  allOrganizations: Organization[];
+  allOrganizations: Array<Organization & { isDeleted?: boolean }>;
   organizationCandidatesAvailable?: boolean;
   canMutateMemberships: boolean;
   canManageOrganizations: boolean;
+  mutationMode?: ProjectMutationMode;
   onChanged(): Promise<void>;
   onProjectClosed?(): Promise<void>;
 }
+
+export type ProjectMutationMode = "ORDINARY" | "CLOSED_CORRECTION";
 
 interface PanelMessage {
   tone: "info" | "error";
@@ -48,30 +51,38 @@ export function ProjectOrganizationsPanel({
   organizationCandidatesAvailable = true,
   canMutateMemberships,
   canManageOrganizations,
+  mutationMode = "ORDINARY",
   onChanged,
   onProjectClosed,
 }: ProjectOrganizationsPanelProps) {
   const { api } = useAuth();
+  const correctionMode = mutationMode === "CLOSED_CORRECTION";
+  const organizationPath = correctionMode
+    ? `/projects/${projectId}/history-corrections/organizations`
+    : `/projects/${projectId}/organizations`;
   const visibleMemberships = useMemo(
     () =>
       memberships.filter(
         (membership) =>
-          membership.isActive &&
-          membership.masterIsActive &&
-          !membership.masterIsDeleted,
+          correctionMode ||
+          (membership.isActive &&
+            membership.masterIsActive &&
+            !membership.masterIsDeleted),
       ),
-    [memberships],
+    [correctionMode, memberships],
   );
   const linkedOrganizationIds = useMemo(
     () =>
       new Set(
         memberships
           .filter(
-            (membership) => membership.isActive && !membership.masterIsDeleted,
+            (membership) =>
+              membership.isActive &&
+              (correctionMode || !membership.masterIsDeleted),
           )
           .map((membership) => membership.organizationId),
       ),
-    [memberships],
+    [correctionMode, memberships],
   );
   const [pendingSelection, setPendingSelection] =
     useState<OrganizationComboboxSelection | null>(null);
@@ -100,7 +111,7 @@ export function ProjectOrganizationsPanel({
           (membership) =>
             membership.organizationId === pendingSelection.organizationId &&
             !membership.isActive &&
-            !membership.masterIsDeleted,
+            (correctionMode || !membership.masterIsDeleted),
         )
       : undefined;
 
@@ -143,14 +154,27 @@ export function ProjectOrganizationsPanel({
     } catch (error) {
       if (error instanceof ApiError) {
         if (error.problem?.code === "STALE_REVISION") {
-          setPendingSelection(null);
-          setNewConfirmation(null);
-          setPendingExclusion(null);
+          if (!correctionMode) {
+            setPendingSelection(null);
+            setNewConfirmation(null);
+            setPendingExclusion(null);
+          }
           await onChanged();
           setMessage({
             tone: "info",
-            text: "다른 변경이 먼저 반영되어 최신 프로젝트 정보를 불러왔습니다. 조직을 다시 선택해 주세요.",
+            text: correctionMode
+              ? "최신 이력을 불러왔습니다."
+              : "다른 변경이 먼저 반영되어 최신 프로젝트 정보를 불러왔습니다. 조직을 다시 선택해 주세요.",
           });
+          return false;
+        }
+        if (
+          correctionMode &&
+          (error.problem?.code === "INVALID_TRANSITION" ||
+            error.problem?.code === "NOT_FOUND")
+        ) {
+          await onChanged();
+          setMessage({ tone: "info", text: "최신 이력을 불러왔습니다." });
           return false;
         }
         const reservedId = getReservedOrganizationId(error);
@@ -196,33 +220,27 @@ export function ProjectOrganizationsPanel({
     event.preventDefault();
     if (pendingSelection?.kind !== "EXISTING") return;
     await mutate("ADD_EXISTING", () =>
-      api.post<ProjectOrganizationMutationResult>(
-        `/projects/${projectId}/organizations`,
-        {
-          organizationId: pendingSelection.organizationId,
-          expectedProjectRevision: observedProjectRevision,
-        },
-      ),
+      api.post<ProjectOrganizationMutationResult>(organizationPath, {
+        organizationId: pendingSelection.organizationId,
+        expectedProjectRevision: observedProjectRevision,
+      }),
     );
   }
 
   async function confirmCreate() {
     if (!newConfirmation) return;
     await mutate("CREATE_AND_ADD", () =>
-      api.post<ProjectOrganizationMutationResult>(
-        `/projects/${projectId}/organizations`,
-        {
-          newOrganizationName: newConfirmation.name,
-          expectedProjectRevision: observedProjectRevision,
-        },
-      ),
+      api.post<ProjectOrganizationMutationResult>(organizationPath, {
+        newOrganizationName: newConfirmation.name,
+        expectedProjectRevision: observedProjectRevision,
+      }),
     );
   }
 
   async function setActive(membership: ProjectOrganization, active: boolean) {
     return mutate(`TOGGLE:${membership.organizationId}`, () =>
       api.patch<ProjectOrganizationMutationResult>(
-        `/projects/${projectId}/organizations/${membership.organizationId}`,
+        `${organizationPath}/${membership.organizationId}`,
         {
           isActive: active,
           expectedProjectRevision: observedProjectRevision,
@@ -249,6 +267,7 @@ export function ProjectOrganizationsPanel({
             <OrganizationCombobox
               organizations={allOrganizations}
               linkedOrganizationIds={linkedOrganizationIds}
+              includeInactive={correctionMode}
               disabled={
                 busy ||
                 !canMutateMemberships ||
@@ -292,6 +311,7 @@ export function ProjectOrganizationsPanel({
                 membership={membership}
                 canMutateMemberships={canMutateMemberships}
                 canManageOrganizations={canManageOrganizations}
+                correctionMode={correctionMode}
                 busy={busy}
                 loading={busyAction === `TOGGLE:${membership.organizationId}`}
                 onExclude={() => setPendingExclusion(membership)}
@@ -377,6 +397,7 @@ function OrganizationMembershipRow({
   membership,
   canMutateMemberships,
   canManageOrganizations,
+  correctionMode,
   busy,
   loading,
   onExclude,
@@ -385,6 +406,7 @@ function OrganizationMembershipRow({
   membership: ProjectOrganization;
   canMutateMemberships: boolean;
   canManageOrganizations: boolean;
+  correctionMode: boolean;
   busy: boolean;
   loading: boolean;
   onExclude: () => void;
@@ -394,11 +416,16 @@ function OrganizationMembershipRow({
     <li>
       <div className="er-organization-membership">
         <strong>{membership.name}</strong>
-        <span className="er-muted">
-          {membership.isActive && membership.masterIsActive
-            ? "사용 중"
-            : "사용 중지"}
-          {!membership.masterIsActive ? " · 전역 비활성" : ""}
+        <span className="er-membership-state">
+          {membership.masterIsDeleted ? (
+            <span className="er-badge er-badge--deleted">삭제됨</span>
+          ) : !membership.masterIsActive ? (
+            <span className="er-badge er-badge--inactive">사용 중지</span>
+          ) : (
+            <span className="er-muted">
+              {membership.isActive ? "사용 중" : "사용 중지"}
+            </span>
+          )}
         </span>
         <div className="er-membership-meta">
           <span>
@@ -432,7 +459,7 @@ function OrganizationMembershipRow({
               variant="secondary"
               loading={loading}
               loadingText="변경 중…"
-              disabled={busy || !membership.masterIsActive}
+              disabled={busy || (!correctionMode && !membership.masterIsActive)}
               onClick={() => void onReactivate()}
             >
               다시 사용

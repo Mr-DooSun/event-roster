@@ -13,6 +13,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { AuthProvider, useAuth } from "../auth/AuthProvider";
 import { LoginPage } from "../auth/LoginPage";
 import { ProjectDetailPage } from "../projects/ProjectDetailPage";
+import { AuditPanel } from "./AuditPanel";
 import {
   type BulkParticipantSubmitOutcome,
   ParticipantDialog,
@@ -2804,6 +2805,325 @@ it("shows a project-closed message and reloads after a rejected mutation", async
     await screen.findByText("프로젝트가 종료되어 변경할 수 없습니다."),
   ).toBeVisible();
   expect(projectReads).toBe(2);
+});
+
+it("routes closed correction status changes and unlocks inactive or deleted rows", async () => {
+  const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.endsWith("/auth/login")) {
+      return Promise.resolve(Response.json(auth()));
+    }
+    if (
+      url.endsWith("/projects/project-1/history-corrections/roster/entry-1") &&
+      init?.method === "PATCH"
+    ) {
+      return Promise.resolve(Response.json({ projectRevision: 3 }));
+    }
+    throw new Error(`unexpected request: ${url}`);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  render(
+    <AuthProvider restoreOnMount={false}>
+      <Gate>
+        <ProjectRosterPage
+          project={{ ...project(), status: "CLOSED" }}
+          rows={[entry("ACTIVE")]}
+          participants={[]}
+          organizations={[
+            {
+              id: "org-1",
+              name: "삭제 조직",
+              isActive: true,
+              isDeleted: true,
+            },
+          ]}
+          memberships={[
+            {
+              organizationId: "org-1",
+              name: "삭제 조직",
+              isActive: true,
+              masterIsActive: false,
+              masterIsDeleted: true,
+              activeProjectCount: 0,
+              hasBusinessHistory: true,
+              primaryLeader: null,
+              managerCount: 0,
+              rosterCount: 1,
+            },
+          ]}
+          canMutate
+          mutationMode="CLOSED_CORRECTION"
+          onChanged={vi.fn().mockResolvedValue(undefined)}
+        />
+      </Gate>
+    </AuthProvider>,
+  );
+  await login();
+
+  expect(
+    await screen.findByRole("button", { name: "박민수 취소" }),
+  ).toBeEnabled();
+  expect(screen.getByRole("link", { name: "엑셀 가져오기" })).toHaveAttribute(
+    "href",
+    "/projects/project-1/import?mode=history-correction",
+  );
+  fireEvent.click(screen.getByRole("button", { name: "박민수 취소" }));
+
+  await waitFor(() => {
+    const call = fetchMock.mock.calls.find(
+      ([url, init]) =>
+        String(url).endsWith(
+          "/projects/project-1/history-corrections/roster/entry-1",
+        ) && init?.method === "PATCH",
+    );
+    expect(call).toBeDefined();
+    expect(JSON.parse(String(call?.[1]?.body))).toEqual({
+      status: "CANCELLED",
+      expectedProjectRevision: 2,
+      expectedEntryRevision: 0,
+    });
+  });
+});
+
+it("routes correction add, bulk, and snapshot requests without changing ordinary payloads", async () => {
+  const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.endsWith("/auth/login")) {
+      return Promise.resolve(Response.json(auth()));
+    }
+    if (
+      url.includes("/projects/project-1/history-corrections/roster") &&
+      (init?.method === "POST" || init?.method === "PATCH")
+    ) {
+      return Promise.resolve(Response.json({ projectRevision: 3 }));
+    }
+    throw new Error(`unexpected request: ${url}`);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  const rosterProject = { ...project(), status: "CLOSED" as const };
+  const participants = [
+    {
+      id: "person-1",
+      participantId: "P-001",
+      name: "현재 마스터 이름",
+      organizationId: "org-1",
+      revision: 1,
+      suggestedRole: "STUDENT" as const,
+      suggestedGrade: "M1" as const,
+    },
+    {
+      id: "person-2",
+      participantId: "P-002",
+      name: "추가 후보",
+      organizationId: "org-1",
+      revision: 4,
+      suggestedRole: "TEACHER" as const,
+      suggestedGrade: null,
+    },
+  ];
+
+  render(
+    <AuthProvider restoreOnMount={false}>
+      <Gate>
+        <ProjectRosterPage
+          project={rosterProject}
+          rows={[entry("ACTIVE")]}
+          participants={participants}
+          organizations={[
+            {
+              id: "org-1",
+              name: "휴면 조직",
+              isActive: true,
+              isDeleted: false,
+            },
+          ]}
+          canMutate
+          mutationMode="CLOSED_CORRECTION"
+          onChanged={vi.fn().mockResolvedValue(undefined)}
+        />
+      </Gate>
+    </AuthProvider>,
+  );
+  await login();
+
+  fireEvent.click(await screen.findByRole("button", { name: "정보 수정" }));
+  expect(screen.getByLabelText("이름")).toHaveValue("박민수");
+  fireEvent.change(screen.getByLabelText("이름"), {
+    target: { value: "보정 이름" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "정보 저장" }));
+  await waitFor(() => {
+    const call = fetchMock.mock.calls.find(
+      ([url, init]) =>
+        String(url).endsWith(
+          "/projects/project-1/history-corrections/roster/entry-1",
+        ) && init?.method === "PATCH",
+    );
+    expect(JSON.parse(String(call?.[1]?.body))).toEqual({
+      name: "보정 이름",
+      organizationId: "org-1",
+      role: "STUDENT",
+      grade: "M1",
+      expectedProjectRevision: 2,
+      expectedEntryRevision: 0,
+    });
+  });
+
+  fireEvent.click(screen.getByRole("button", { name: "참가자 추가" }));
+  expect(
+    screen.getByRole("option", { name: "추가 후보 · P-002" }),
+  ).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "명단에 추가" }));
+  await waitFor(() => {
+    const call = fetchMock.mock.calls.find(
+      ([url, init]) =>
+        String(url).endsWith(
+          "/projects/project-1/history-corrections/roster",
+        ) && init?.method === "POST",
+    );
+    expect(JSON.parse(String(call?.[1]?.body))).toEqual({
+      participantId: "person-2",
+      confirmedParticipant: {
+        name: "추가 후보",
+        organizationId: "org-1",
+        role: "TEACHER",
+        grade: null,
+      },
+      expectedParticipantRevision: 4,
+      expectedRevision: 2,
+    });
+  });
+
+  fireEvent.click(screen.getByRole("button", { name: "참가자 추가" }));
+  fireEvent.click(screen.getByRole("button", { name: "새 참가자" }));
+  addStudentParticipantRow("신규 보정");
+  fireEvent.click(screen.getByRole("button", { name: "1명 명단에 추가" }));
+  await waitFor(() =>
+    expect(
+      fetchMock.mock.calls.some(
+        ([url, init]) =>
+          String(url).endsWith(
+            "/projects/project-1/history-corrections/roster/bulk",
+          ) && init?.method === "POST",
+      ),
+    ).toBe(true),
+  );
+});
+
+it("retries a stale correction snapshot with the refreshed entry revision", async () => {
+  let patchCount = 0;
+  const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.endsWith("/auth/login")) {
+      return Promise.resolve(Response.json(auth()));
+    }
+    if (
+      url.endsWith("/projects/project-1/history-corrections/roster/entry-1") &&
+      init?.method === "PATCH"
+    ) {
+      patchCount += 1;
+      if (patchCount === 1) {
+        return Promise.resolve(
+          Response.json(
+            {
+              code: "STALE_REVISION",
+              message: "stale",
+              requestId: "snapshot-stale",
+            },
+            { status: 409 },
+          ),
+        );
+      }
+      return Promise.resolve(Response.json({ projectRevision: 4 }));
+    }
+    throw new Error(`unexpected request: ${url}`);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  let rosterProject = { ...project(), status: "CLOSED" as const };
+  let rosterRows = [entry("ACTIVE")];
+  let view: ReturnType<typeof render>;
+  const participants = [
+    {
+      id: "person-1",
+      participantId: "P-001",
+      name: "현재 마스터 이름",
+      organizationId: "org-1",
+      revision: 1,
+      suggestedRole: "STUDENT" as const,
+      suggestedGrade: "M1" as const,
+    },
+  ];
+  const organizations = [{ id: "org-1", name: "1팀", isActive: true }];
+  const onChanged = vi.fn(async () => {
+    rosterProject = { ...rosterProject, revision: 3 };
+    rosterRows = [{ ...entry("ACTIVE"), revision: 5 }];
+    view.rerender(renderRoster());
+  });
+  const renderRoster = () => (
+    <AuthProvider restoreOnMount={false}>
+      <Gate>
+        <ProjectRosterPage
+          project={rosterProject}
+          rows={rosterRows}
+          participants={participants}
+          organizations={organizations}
+          canMutate
+          mutationMode="CLOSED_CORRECTION"
+          onChanged={onChanged}
+        />
+      </Gate>
+    </AuthProvider>
+  );
+
+  view = render(renderRoster());
+  await login();
+  fireEvent.click(await screen.findByRole("button", { name: "정보 수정" }));
+  fireEvent.change(screen.getByLabelText("이름"), {
+    target: { value: "보존할 보정 이름" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "정보 저장" }));
+
+  expect(await screen.findByText("최신 이력을 불러왔습니다.")).toBeVisible();
+  expect(screen.getByLabelText("이름")).toHaveValue("보존할 보정 이름");
+  fireEvent.click(screen.getByRole("button", { name: "정보 저장" }));
+
+  await waitFor(() => expect(patchCount).toBe(2));
+  const patchBodies = fetchMock.mock.calls
+    .filter(
+      ([url, init]) =>
+        String(url).endsWith(
+          "/projects/project-1/history-corrections/roster/entry-1",
+        ) && init?.method === "PATCH",
+    )
+    .map(([, init]) => JSON.parse(String(init?.body)));
+  expect(patchBodies.map((body) => body.expectedEntryRevision)).toEqual([0, 5]);
+  expect(patchBodies[1].expectedProjectRevision).toBe(3);
+});
+
+it.each([
+  ["CLOSED_PROJECT_ORGANIZATION_CORRECTED", "종료 후 조직 이력 보정"],
+  ["CLOSED_PROJECT_ROSTER_CORRECTED", "종료 후 명단 이력 보정"],
+  ["CLOSED_PROJECT_ROSTER_IMPORTED", "종료 후 엑셀 이력 보정"],
+])("labels %s correction audits", (action, label) => {
+  render(
+    <AuditPanel
+      items={[
+        {
+          id: action,
+          actorUserId: "operator-1",
+          action,
+          entityType: "PROJECT",
+          entityId: "project-1",
+          occurredAt: "2026-08-05T00:00:00.000Z",
+        },
+      ]}
+      nextCursor={null}
+      onLoadMore={vi.fn().mockResolvedValue(undefined)}
+    />,
+  );
+
+  expect(screen.getByText(label)).toBeVisible();
 });
 
 function Gate({ children }: { children: React.ReactNode }) {

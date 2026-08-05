@@ -34,12 +34,17 @@ export interface ProjectRosterPageProps {
   project: Project;
   rows: RosterView[];
   participants: ParticipantView[];
-  organizations: Organization[];
+  organizations: Array<
+    Organization & { isDeleted?: boolean; masterIsActive?: boolean }
+  >;
   memberships?: ProjectOrganization[];
   canMutate: boolean;
+  mutationMode?: RosterMutationMode;
   participantCandidatesAvailable?: boolean;
   onChanged(): Promise<void>;
 }
+
+export type RosterMutationMode = "ORDINARY" | "CLOSED_CORRECTION";
 
 interface RecentOrganizationContext {
   generation: number;
@@ -75,10 +80,15 @@ export function ProjectRosterPage({
   organizations,
   memberships = [],
   canMutate,
+  mutationMode = "ORDINARY",
   participantCandidatesAvailable = true,
   onChanged,
 }: ProjectRosterPageProps) {
   const { api, auth } = useAuth();
+  const correctionMode = mutationMode === "CLOSED_CORRECTION";
+  const rosterPath = correctionMode
+    ? `/projects/${project.id}/history-corrections/roster`
+    : `/projects/${project.id}/roster`;
   const [showAdd, setShowAdd] = useState(false);
   const [editingParticipant, setEditingParticipant] =
     useState<EditingRosterParticipant | null>(null);
@@ -173,14 +183,21 @@ export function ProjectRosterPage({
     () =>
       participants.filter(
         (participant) =>
-          (auth?.session.user.role === "OPERATOR" ||
+          (correctionMode ||
+            auth?.session.user.role === "OPERATOR" ||
             validOrganizationIds.has(participant.organizationId)) &&
           !rows.some(
             (row) =>
               row.participantId === participant.id && row.status === "ACTIVE",
           ),
       ),
-    [auth?.session.user.role, participants, rows, validOrganizationIds],
+    [
+      auth?.session.user.role,
+      correctionMode,
+      participants,
+      rows,
+      validOrganizationIds,
+    ],
   );
 
   function rememberOrganization(
@@ -212,9 +229,14 @@ export function ProjectRosterPage({
         error.problem?.code === "STALE_REVISION"
       ) {
         setNotice({
-          text: "다른 변경이 먼저 반영되어 최신 명단을 다시 불러왔습니다.",
+          text: correctionMode
+            ? "최신 이력을 불러왔습니다."
+            : "다른 변경이 먼저 반영되어 최신 명단을 다시 불러왔습니다.",
           tone: "info",
         });
+        await onChanged();
+      } else if (correctionMode && isCorrectionUnavailable(error)) {
+        setNotice({ text: "최신 이력을 불러왔습니다.", tone: "info" });
         await onChanged();
       } else if (
         error instanceof ApiError &&
@@ -242,11 +264,20 @@ export function ProjectRosterPage({
     setBusyRowIds(nextBusyRowIds);
     try {
       await handleMutation(() =>
-        api.patch(`/projects/${project.id}/roster/${row.id}`, {
-          status,
-          expectedRevision: project.revision,
-          expectedEntryRevision: row.revision,
-        }),
+        api.patch(
+          `${rosterPath}/${row.id}`,
+          correctionMode
+            ? {
+                status,
+                expectedProjectRevision: project.revision,
+                expectedEntryRevision: row.revision,
+              }
+            : {
+                status,
+                expectedRevision: project.revision,
+                expectedEntryRevision: row.revision,
+              },
+        ),
       );
     } finally {
       const remainingBusyRowIds = new Set(busyRowIdsRef.current);
@@ -271,11 +302,23 @@ export function ProjectRosterPage({
     expectedRevision: number;
   }) {
     if (!editingParticipant) return;
+    const latestRoster =
+      rows.find((row) => row.id === editingParticipant.roster.id) ??
+      editingParticipant.roster;
     const completed = await handleMutation(() =>
-      api.patch(
-        `/projects/${project.id}/participants/${editingParticipant.participant.id}`,
-        { ...input, expectedProjectRevision: project.revision },
-      ),
+      correctionMode
+        ? api.patch(`${rosterPath}/${editingParticipant.roster.id}`, {
+            name: input.name,
+            organizationId: input.organizationId,
+            role: input.role,
+            grade: input.grade,
+            expectedProjectRevision: project.revision,
+            expectedEntryRevision: latestRoster.revision,
+          })
+        : api.patch(
+            `/projects/${project.id}/participants/${editingParticipant.participant.id}`,
+            { ...input, expectedProjectRevision: project.revision },
+          ),
     );
     if (completed) setEditingParticipant(null);
   }
@@ -289,7 +332,7 @@ export function ProjectRosterPage({
       ...confirmedParticipant
     } = input;
     const completed = await handleMutation(() =>
-      api.post(`/projects/${project.id}/roster`, {
+      api.post(rosterPath, {
         participantId,
         confirmedParticipant,
         expectedParticipantRevision,
@@ -309,13 +352,10 @@ export function ProjectRosterPage({
       recentOrganizationContextRef.current.generation;
     setNotice(null);
     try {
-      await api.post<BulkRosterCreateResponse>(
-        `/projects/${project.id}/roster/bulk`,
-        {
-          ...input,
-          expectedRevision: project.revision,
-        },
-      );
+      await api.post<BulkRosterCreateResponse>(`${rosterPath}/bulk`, {
+        ...input,
+        expectedRevision: project.revision,
+      });
     } catch (error) {
       const duplicateDetails = BulkParticipantDuplicateDetailsSchema.safeParse(
         error instanceof ApiError ? error.problem?.details : undefined,
@@ -336,9 +376,14 @@ export function ProjectRosterPage({
         error.problem?.code === "STALE_REVISION"
       ) {
         setNotice({
-          text: "다른 변경이 먼저 반영되어 최신 명단을 다시 불러왔습니다.",
+          text: correctionMode
+            ? "최신 이력을 불러왔습니다."
+            : "다른 변경이 먼저 반영되어 최신 명단을 다시 불러왔습니다.",
           tone: "info",
         });
+        await onChanged();
+      } else if (correctionMode && isCorrectionUnavailable(error)) {
+        setNotice({ text: "최신 이력을 불러왔습니다.", tone: "info" });
         await onChanged();
       } else if (
         error instanceof ApiError &&
@@ -404,10 +449,10 @@ export function ProjectRosterPage({
       ) : null}
       <div className="er-roster-actions er-action-row er-action-row--wrap">
         {auth?.session.user.role === "OPERATOR" &&
-        project.status === "PRE_REGISTRATION" ? (
+        (project.status === "PRE_REGISTRATION" || correctionMode) ? (
           <a
             className="er-button er-button--secondary"
-            href={`/projects/${project.id}/import`}
+            href={`/projects/${project.id}/import${correctionMode ? "?mode=history-correction" : ""}`}
           >
             엑셀 가져오기
           </a>
@@ -442,15 +487,17 @@ export function ProjectRosterPage({
           canMutate={canMutate}
           busyRowIds={busyRowIds}
           canMutateRow={(row) =>
-            !readOnlyOrganizationIds.has(row.organizationId) &&
-            (auth?.session.user.role === "OPERATOR" ||
-              validOrganizationIds.has(row.organizationId))
+            correctionMode ||
+            (!readOnlyOrganizationIds.has(row.organizationId) &&
+              (auth?.session.user.role === "OPERATOR" ||
+                validOrganizationIds.has(row.organizationId)))
           }
           canEditRow={(row) =>
             participantCandidatesAvailable &&
-            !readOnlyOrganizationIds.has(row.organizationId) &&
-            (auth?.session.user.role === "OPERATOR" ||
-              validOrganizationIds.has(row.organizationId))
+            (correctionMode ||
+              (!readOnlyOrganizationIds.has(row.organizationId) &&
+                (auth?.session.user.role === "OPERATOR" ||
+                  validOrganizationIds.has(row.organizationId))))
           }
           onStatusChange={changeStatus}
           onEdit={edit}
@@ -462,7 +509,7 @@ export function ProjectRosterPage({
           organizations={organizations}
           recentOrganizationIds={recentOrganizationIds}
           allowExistingOrganizationChange={
-            auth?.session.user.role === "OPERATOR"
+            correctionMode || auth?.session.user.role === "OPERATOR"
           }
           onAdd={add}
           onCreateAndAdd={createAndAdd}
@@ -474,9 +521,11 @@ export function ProjectRosterPage({
           participant={editingParticipant.participant}
           roster={editingParticipant.roster}
           organizations={organizations}
+          snapshotMode={correctionMode}
           allowOrganizationChange={
-            project.status === "PRE_REGISTRATION" &&
-            auth?.session.user.role === "OPERATOR"
+            correctionMode ||
+            (project.status === "PRE_REGISTRATION" &&
+              auth?.session.user.role === "OPERATOR")
           }
           onSave={updateParticipant}
           onClose={() => setEditingParticipant(null)}
@@ -493,5 +542,13 @@ export function ProjectRosterPage({
         />
       ) : null}
     </div>
+  );
+}
+
+function isCorrectionUnavailable(error: unknown) {
+  return (
+    error instanceof ApiError &&
+    (error.problem?.code === "INVALID_TRANSITION" ||
+      error.problem?.code === "NOT_FOUND")
   );
 }
