@@ -36,6 +36,7 @@ test("operator corrects closed history while an organization manager stays read-
   const addedTeacherName = "E2E 보정 추가 교사";
   const importedParticipantName = "E2E 보정 엑셀 학생";
   const managerLoginId = "e2e-closed-correction-manager";
+  const inactiveManagerLoginId = "e2e-inactive-correction-manager";
   const api = await request.newContext({
     baseURL: data.baseUrl,
     ignoreHTTPSErrors: true,
@@ -114,6 +115,39 @@ test("operator corrects closed history while an organization manager stays read-
       },
     );
     expect(passwordChangeResponse.ok()).toBe(true);
+
+    const inactiveManagerResponse = await api.post(
+      `/api/v1/organizations/${inactiveOrganization.id}/managers`,
+      {
+        headers: operatorHeaders,
+        data: {
+          kind: "NEW",
+          loginId: inactiveManagerLoginId,
+          displayName: "E2E 사용 중지 이력 조직장",
+          assignmentRole: "MANAGER",
+        },
+      },
+    );
+    expect(inactiveManagerResponse.ok()).toBe(true);
+    const inactiveManager = (await inactiveManagerResponse.json()) as {
+      temporaryPassword: string;
+    };
+    const temporaryInactiveManagerAuth = await authenticate(
+      api,
+      inactiveManagerLoginId,
+      inactiveManager.temporaryPassword,
+    );
+    const inactiveManagerPasswordChangeResponse = await api.post(
+      "/api/v1/auth/change-password",
+      {
+        headers: authHeaders(temporaryInactiveManagerAuth),
+        data: {
+          currentPassword: inactiveManager.temporaryPassword,
+          newPassword: data.organizationManager.password,
+        },
+      },
+    );
+    expect(inactiveManagerPasswordChangeResponse.ok()).toBe(true);
 
     const projectResponse = await api.post("/api/v1/projects", {
       headers: operatorHeaders,
@@ -430,6 +464,43 @@ test("operator corrects closed history while an organization manager stays read-
       deltaTotal: 3,
     });
 
+    const inactiveManagerAuth = await authenticate(
+      api,
+      inactiveManagerLoginId,
+      data.organizationManager.password,
+    );
+    const inactiveManagerHeaders = authHeaders(inactiveManagerAuth);
+    const inactiveManagerProjectsResponse = await api.get("/api/v1/projects", {
+      headers: inactiveManagerHeaders,
+    });
+    expect(inactiveManagerProjectsResponse.ok()).toBe(true);
+    const inactiveManagerProjects =
+      (await inactiveManagerProjectsResponse.json()) as Array<{ id: string }>;
+    expect(inactiveManagerProjects).not.toContainEqual(
+      expect.objectContaining({ id: project.id }),
+    );
+    const inactiveManagerProjectResponse = await api.get(
+      `/api/v1/projects/${project.id}`,
+      { headers: inactiveManagerHeaders },
+    );
+    expect(inactiveManagerProjectResponse.status()).toBe(403);
+    const inactiveManagerCorrectionRead = await api.get(
+      `/api/v1/projects/${project.id}/history-corrections/candidates`,
+      { headers: inactiveManagerHeaders },
+    );
+    expect(inactiveManagerCorrectionRead.status()).toBe(403);
+    const inactiveManagerCorrectionWrite = await api.post(
+      `/api/v1/projects/${project.id}/history-corrections/organizations`,
+      {
+        headers: inactiveManagerHeaders,
+        data: {
+          organizationId: inactiveOrganization.id,
+          expectedProjectRevision: projectAfterCorrection.revision,
+        },
+      },
+    );
+    expect(inactiveManagerCorrectionWrite.status()).toBe(403);
+
     const managerAuth = await authenticate(
       api,
       managerLoginId,
@@ -453,6 +524,13 @@ test("operator corrects closed history while an organization manager stays read-
     );
     expect(managerCorrectionWrite.status()).toBe(403);
 
+    await page.getByRole("button", { name: "로그아웃" }).click();
+    await login(
+      page,
+      inactiveManagerLoginId,
+      data.organizationManager.password,
+    );
+    await expect(page.getByRole("link", { name: projectName })).toHaveCount(0);
     await page.getByRole("button", { name: "로그아웃" }).click();
     await login(page, managerLoginId, data.organizationManager.password);
     await expect(page.getByRole("link", { name: projectName })).toBeVisible();
