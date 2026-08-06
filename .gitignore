@@ -1,6 +1,8 @@
 .superpowers/
 .worktrees/
 node_modules/
+.pnpm-store/
+.DS_Store
 .wrangler/
 .dev.vars
 .bootstrap-token.tmp

@@ -3,6 +3,9 @@
   "files": {
     "includes": [
       "**",
+      "!!**/.worktrees",
+      "!!**/.superpowers",
+      "!!**/.pnpm-store",
       "!!**/dist",
       "!!**/.wrangler",
       "!!**/.venv",
