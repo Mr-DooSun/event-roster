@@ -407,6 +407,10 @@ a {
 .er-project-organization-picker-actions {
   margin-top: var(--er-space-5);
 }
+
+.er-project-organization-picker-trigger {
+  margin-bottom: var(--er-space-4);
+}
 .er-field input[type="date"]:not(:disabled) {
   cursor: pointer;
 }

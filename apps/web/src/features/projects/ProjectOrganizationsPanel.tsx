@@ -330,6 +330,7 @@ export function ProjectOrganizationsPanel({
           <Button
             type="button"
             variant="primary"
+            className="er-project-organization-picker-trigger"
             disabled={busy || !organizationCandidatesAvailable}
             onClick={() => setOrganizationPickerOpen(true)}
           >
