@@ -58,6 +58,9 @@ export function RosterTable({
     "ALL",
   );
   const [gender, setGender] = useState<"ALL" | Gender | "UNSPECIFIED">("ALL");
+  const [activeFilter, setActiveFilter] = useState<
+    "organization" | "gender" | "status" | "role" | "grade" | null
+  >(null);
   const [sort, setSort] = useState<
     "DEFAULT" | "ORGANIZATION" | "GRADE" | "NAME"
   >("DEFAULT");
@@ -111,92 +114,107 @@ export function RosterTable({
           value={query}
           onChange={(event) => setQuery(event.currentTarget.value)}
         />
-        <label className="er-field">
-          <span>조직 필터</span>
-          <select
-            value={organization}
-            onChange={(event) => setOrganization(event.currentTarget.value)}
-          >
-            <option value="ALL">전체 조직</option>
-            {organizations.map((name) => (
-              <option key={name} value={name}>
-                {name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="er-field">
-          <span>성별 필터</span>
-          <select
-            value={gender}
-            onChange={(event) =>
-              setGender(event.currentTarget.value as typeof gender)
-            }
-          >
-            <option value="ALL">전체 성별</option>
-            <option value="MALE">남성</option>
-            <option value="FEMALE">여성</option>
-            <option value="UNSPECIFIED">미지정</option>
-          </select>
-        </label>
-        <label className="er-field">
-          <span>정렬</span>
-          <select
-            value={sort}
-            onChange={(event) =>
-              setSort(event.currentTarget.value as typeof sort)
-            }
-          >
-            <option value="DEFAULT">조직 · 학년 · 이름순</option>
-            <option value="ORGANIZATION">조직순</option>
-            <option value="GRADE">학년순</option>
-            <option value="NAME">이름순</option>
-          </select>
-        </label>
-        <label className="er-field">
-          <span>상태 필터</span>
-          <select
-            value={status}
-            onChange={(event) =>
-              setStatus(event.currentTarget.value as typeof status)
-            }
-          >
-            <option value="ALL">전체 상태</option>
-            <option value="ACTIVE">참석</option>
-            <option value="CANCELLED">취소</option>
-          </select>
-        </label>
-        <label className="er-field">
-          <span>참가자 구분 필터</span>
-          <select
-            value={role}
-            onChange={(event) =>
-              setRole(event.currentTarget.value as typeof role)
-            }
-          >
-            <option value="ALL">전체 구분</option>
-            <option value="STUDENT">{ROLE_LABEL.STUDENT}</option>
-            <option value="TEACHER">{ROLE_LABEL.TEACHER}</option>
-            <option value="UNSPECIFIED">미지정</option>
-          </select>
-        </label>
-        <label className="er-field">
-          <span>학년 필터</span>
-          <select
-            value={grade}
-            onChange={(event) =>
-              setGrade(event.currentTarget.value as typeof grade)
-            }
-          >
-            <option value="ALL">전체 학년</option>
-            {Object.entries(GRADE_LABEL).map(([value, label]) => (
-              <option key={value} value={value}>
-                {label}
-              </option>
-            ))}
-            <option value="UNSPECIFIED">미지정</option>
-          </select>
-        </label>
+        {activeFilter === "organization" ? (
+          <label className="er-field">
+            <span>조직 필터</span>
+            <select
+              value={organization}
+              onChange={(event) => setOrganization(event.currentTarget.value)}
+            >
+              <option value="ALL">전체 조직</option>
+              {organizations.map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
+        {activeFilter === "gender" ? (
+          <label className="er-field">
+            <span>성별 필터</span>
+            <select
+              value={gender}
+              onChange={(event) =>
+                setGender(event.currentTarget.value as typeof gender)
+              }
+            >
+              <option value="ALL">전체 성별</option>
+              <option value="MALE">남성</option>
+              <option value="FEMALE">여성</option>
+              <option value="UNSPECIFIED">미지정</option>
+            </select>
+          </label>
+        ) : null}
+        {activeFilter === "status" ? (
+          <label className="er-field">
+            <span>상태 필터</span>
+            <select
+              value={status}
+              onChange={(event) =>
+                setStatus(event.currentTarget.value as typeof status)
+              }
+            >
+              <option value="ALL">전체 상태</option>
+              <option value="ACTIVE">참석</option>
+              <option value="CANCELLED">취소</option>
+            </select>
+          </label>
+        ) : null}
+        {activeFilter === "role" ? (
+          <label className="er-field">
+            <span>참가자 구분 필터</span>
+            <select
+              value={role}
+              onChange={(event) =>
+                setRole(event.currentTarget.value as typeof role)
+              }
+            >
+              <option value="ALL">전체 구분</option>
+              <option value="STUDENT">{ROLE_LABEL.STUDENT}</option>
+              <option value="TEACHER">{ROLE_LABEL.TEACHER}</option>
+              <option value="UNSPECIFIED">미지정</option>
+            </select>
+          </label>
+        ) : null}
+        {activeFilter === "grade" ? (
+          <label className="er-field">
+            <span>학년 필터</span>
+            <select
+              value={grade}
+              onChange={(event) =>
+                setGrade(event.currentTarget.value as typeof grade)
+              }
+            >
+              <option value="ALL">전체 학년</option>
+              {Object.entries(GRADE_LABEL).map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+              <option value="UNSPECIFIED">미지정</option>
+            </select>
+          </label>
+        ) : null}
+        {false ? (
+          <label className="er-field">
+            <span>학년 필터</span>
+            <select
+              value={grade}
+              onChange={(event) =>
+                setGrade(event.currentTarget.value as typeof grade)
+              }
+            >
+              <option value="ALL">전체 학년</option>
+              {Object.entries(GRADE_LABEL).map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+              <option value="UNSPECIFIED">미지정</option>
+            </select>
+          </label>
+        ) : null}
       </div>
       {rows.length > 130 ? (
         <p className="er-status er-status--error" role="alert">
@@ -207,13 +225,75 @@ export function RosterTable({
         <table>
           <thead>
             <tr>
-              <th>이름</th>
-              <th>조직</th>
-              <th>참가자 구분</th>
-              <th>학년</th>
-              <th>성별</th>
+              <th>
+                <button
+                  type="button"
+                  aria-label="이름 정렬"
+                  onClick={() => setSort("NAME")}
+                >
+                  이름
+                </button>
+              </th>
+              <th>
+                <button
+                  type="button"
+                  aria-label="조직 정렬"
+                  onClick={() => setSort("ORGANIZATION")}
+                >
+                  조직
+                </button>
+                <button
+                  type="button"
+                  aria-label="조직 필터"
+                  onClick={() => setActiveFilter("organization")}
+                >
+                  필터
+                </button>
+              </th>
+              <th>
+                <button
+                  type="button"
+                  aria-label="참가자 구분 필터"
+                  onClick={() => setActiveFilter("role")}
+                >
+                  참가자 구분
+                </button>
+              </th>
+              <th>
+                <button
+                  type="button"
+                  aria-label="학년 정렬"
+                  onClick={() => setSort("GRADE")}
+                >
+                  학년
+                </button>
+                <button
+                  type="button"
+                  aria-label="학년 필터"
+                  onClick={() => setActiveFilter("grade")}
+                >
+                  필터
+                </button>
+              </th>
+              <th>
+                <button
+                  type="button"
+                  aria-label="성별 필터"
+                  onClick={() => setActiveFilter("gender")}
+                >
+                  성별
+                </button>
+              </th>
               <th>등록 시점</th>
-              <th>상태</th>
+              <th>
+                <button
+                  type="button"
+                  aria-label="상태 필터"
+                  onClick={() => setActiveFilter("status")}
+                >
+                  상태
+                </button>
+              </th>
               <th>작업</th>
             </tr>
           </thead>

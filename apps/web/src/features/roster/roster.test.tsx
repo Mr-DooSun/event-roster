@@ -1136,12 +1136,8 @@ it("uses dedicated responsive spacing for roster actions and filters", async () 
   const filterGrid =
     screen.getByLabelText("명단 검색").parentElement?.parentElement;
   expect(filterGrid).toHaveClass("er-roster-filters");
-  expect(
-    within(filterGrid as HTMLElement).getByLabelText("조직 필터"),
-  ).toBeVisible();
-  expect(
-    within(filterGrid as HTMLElement).getByLabelText("상태 필터"),
-  ).toBeVisible();
+  expect(screen.getByRole("button", { name: "조직 필터" })).toBeVisible();
+  expect(screen.getByRole("button", { name: "상태 필터" })).toBeVisible();
 });
 
 it("clears a selected organization when its search text changes", () => {
@@ -1393,7 +1389,11 @@ it("shows participant profiles and combines role and grade filters with existing
 
   expect(screen.getByRole("columnheader", { name: "등록 시점" })).toBeVisible();
   expect(screen.getByRole("columnheader", { name: "성별" })).toBeVisible();
-  expect(screen.getByRole("combobox", { name: "성별 필터" })).toBeVisible();
+  expect(
+    screen.queryByRole("combobox", { name: "성별 필터" }),
+  ).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "조직 정렬" })).toBeVisible();
+  expect(screen.getByRole("button", { name: "조직 필터" })).toBeVisible();
   const studentRow = screen.getByText("중2 학생").closest("tr");
   const teacherRow = screen.getByText("담당 교사").closest("tr");
   const legacyRow = screen.getByText("기존 참가자").closest("tr");
@@ -1411,15 +1411,23 @@ it("shows participant profiles and combines role and grade filters with existing
   fireEvent.change(screen.getByRole("textbox", { name: "명단 검색" }), {
     target: { value: "학생" },
   });
+  fireEvent.click(screen.getByRole("button", { name: "조직 필터" }));
   fireEvent.change(screen.getByRole("combobox", { name: "조직 필터" }), {
     target: { value: "1팀" },
   });
+  fireEvent.click(screen.getByRole("button", { name: "상태 필터" }));
   fireEvent.change(screen.getByRole("combobox", { name: "상태 필터" }), {
     target: { value: "ACTIVE" },
   });
+  fireEvent.click(screen.getByRole("button", { name: "참가자 구분 필터" }));
   fireEvent.change(screen.getByRole("combobox", { name: "참가자 구분 필터" }), {
     target: { value: "STUDENT" },
   });
+  fireEvent.click(screen.getByRole("button", { name: "학년 필터" }));
+  fireEvent.click(screen.getByRole("button", { name: "학년 필터" }));
+  fireEvent.click(screen.getByRole("button", { name: "학년 필터" }));
+  fireEvent.click(screen.getByRole("button", { name: "학년 필터" }));
+  fireEvent.click(screen.getByRole("button", { name: "학년 필터" }));
   fireEvent.change(screen.getByRole("combobox", { name: "학년 필터" }), {
     target: { value: "M2" },
   });
@@ -1579,6 +1587,7 @@ it("excludes teachers with stale grades from exact grade filters", () => {
     />,
   );
 
+  fireEvent.click(screen.getByRole("button", { name: "학년 필터" }));
   fireEvent.change(screen.getByRole("combobox", { name: "학년 필터" }), {
     target: { value: "M2" },
   });
