@@ -677,6 +677,70 @@ a {
   display: grid;
   gap: var(--er-space-2);
 }
+.er-project-organization-bulk-picker {
+  display: grid;
+  gap: var(--er-space-4);
+}
+.er-project-organization-candidate-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--er-space-3);
+}
+.er-project-organization-candidate {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--er-space-3);
+  align-items: start;
+  border: 1px solid var(--er-color-border);
+  border-radius: var(--er-radius-md);
+  padding: var(--er-space-4);
+  cursor: pointer;
+}
+.er-project-organization-candidate:has(input:checked) {
+  border-width: 2px;
+  border-color: var(--er-color-primary);
+}
+.er-project-organization-candidate:has(input:focus-visible) {
+  outline: 3px solid rgb(37 87 214 / 15%);
+  outline-offset: 2px;
+}
+.er-project-organization-candidate[data-linked] {
+  border-style: dashed;
+  background: var(--er-color-canvas);
+  cursor: not-allowed;
+}
+.er-project-organization-candidate input {
+  margin-top: 0.2rem;
+}
+.er-project-organization-candidate__name {
+  min-width: 0;
+  font-weight: var(--er-font-weight-bold);
+  overflow-wrap: anywhere;
+}
+.er-project-organization-candidate__facts {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--er-space-2);
+  margin: 0;
+}
+.er-project-organization-candidate__facts div {
+  display: grid;
+  gap: var(--er-space-1);
+}
+.er-project-organization-candidate__facts dt {
+  color: var(--er-color-muted);
+  font-size: 0.8rem;
+}
+.er-project-organization-candidate__facts dd {
+  margin: 0;
+  font-weight: var(--er-font-weight-medium);
+  overflow-wrap: anywhere;
+}
+.er-project-organization-candidate > .er-muted {
+  grid-column: 1 / -1;
+  font-size: 0.875rem;
+}
 .er-membership-meta {
   display: flex;
   flex-wrap: wrap;
@@ -1117,6 +1181,9 @@ th {
     grid-template-columns: 1fr;
   }
   .er-roster-filters {
+    grid-template-columns: 1fr;
+  }
+  .er-project-organization-candidate-grid {
     grid-template-columns: 1fr;
   }
 }
