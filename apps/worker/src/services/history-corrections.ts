@@ -2,6 +2,7 @@ import {
   type AddProjectOrganization,
   type AddProjectOrganizationsBulk,
   type BulkParticipantDuplicate,
+  type Gender,
   type BulkRosterCreateRequest,
   type BulkRosterCreateResponse,
   type ClosedProjectCorrectionCandidateOrganization,
@@ -62,6 +63,7 @@ type ClosedRosterSnapshot = {
   organizationId: string;
   role: ParticipantRole | null;
   grade: StudentGrade | null;
+  gender: Gender | null;
   status: RosterStatus;
 };
 
@@ -73,6 +75,7 @@ type ClosedRosterCreateInput =
         organizationId: string;
         role: ParticipantRole;
         grade: StudentGrade | null;
+        gender?: Gender | null | undefined;
       };
       expectedParticipantRevision: number;
       expectedRevision: number;
@@ -83,6 +86,7 @@ type ClosedRosterCreateInput =
         organizationId: string;
         role: ParticipantRole;
         grade: StudentGrade | null;
+        gender?: Gender | null | undefined;
       };
       expectedRevision: number;
     };
@@ -92,6 +96,7 @@ type ClosedRosterPatchInput = {
   organizationId?: string | undefined;
   role?: ParticipantRole | undefined;
   grade?: StudentGrade | null | undefined;
+  gender?: Gender | null | undefined;
   status?: RosterStatus | undefined;
   expectedProjectRevision: number;
   expectedEntryRevision: number;
@@ -301,6 +306,7 @@ async function addExistingParticipantToClosedProject(
   const entryId = existing?.id ?? crypto.randomUUID();
   const after: ClosedRosterSnapshot = {
     ...input.confirmedParticipant,
+    gender: input.confirmedParticipant.gender ?? null,
     status: "ACTIVE",
   };
   const before = existing ? closedRosterSnapshot(existing) : null;
@@ -325,7 +331,7 @@ async function addExistingParticipantToClosedProject(
           `UPDATE project_roster_entries
            SET participant_name_snapshot = ?, organization_id = ?,
                organization_name_snapshot = ?,
-               participant_role_snapshot = ?, student_grade_snapshot = ?,
+               participant_role_snapshot = ?, student_grade_snapshot = ?, gender_snapshot = ?,
                status = 'ACTIVE', revision = revision + 1,
                updated_by = ?, updated_at = ?
            WHERE id = ? AND project_id = ? AND revision = ?`,
@@ -335,6 +341,7 @@ async function addExistingParticipantToClosedProject(
           organization.name,
           after.role,
           after.grade,
+          after.gender ?? null,
           actor.session.user.id,
           timestamp,
           existing.id,
@@ -347,10 +354,10 @@ async function addExistingParticipantToClosedProject(
           `INSERT INTO project_roster_entries
            (id, project_id, participant_id, organization_id,
             participant_name_snapshot, organization_name_snapshot,
-            participant_role_snapshot, student_grade_snapshot, source, status,
+            participant_role_snapshot, student_grade_snapshot, gender_snapshot, source, status,
             was_expected_at_start, revision, created_by, updated_by,
             created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'IN_PROGRESS', 'ACTIVE',
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'IN_PROGRESS', 'ACTIVE',
                    0, 0, ?, ?, ?, ?)`,
         ).bind(
           entryId,
@@ -361,6 +368,7 @@ async function addExistingParticipantToClosedProject(
           organization.name,
           after.role,
           after.grade,
+          after.gender ?? null,
           actor.session.user.id,
           actor.session.user.id,
           timestamp,
@@ -441,7 +449,7 @@ async function addExistingParticipantToClosedProject(
       status: "ACTIVE",
       role: after.role,
       grade: after.grade,
-      gender: null,
+      gender: after.gender ?? null,
       wasExpectedAtStart: existing?.wasExpectedAtStart ?? false,
       revision: existing ? existing.revision + 1 : 0,
       updatedAt: timestamp,
@@ -459,6 +467,7 @@ async function createClosedProjectParticipantAndRoster(
     organizationId: string;
     role: ParticipantRole;
     grade: StudentGrade | null;
+    gender?: Gender | null | undefined;
   },
   expectedRevision: number,
   now: Date,
@@ -485,6 +494,7 @@ async function createClosedProjectParticipantAndRoster(
   const timestamp = now.toISOString();
   const after: ClosedRosterSnapshot = {
     ...participantInput,
+    gender: participantInput.gender ?? null,
     status: "ACTIVE",
   };
   const guardId = crypto.randomUUID();
@@ -528,10 +538,10 @@ async function createClosedProjectParticipantAndRoster(
           `INSERT INTO project_roster_entries
            (id, project_id, participant_id, organization_id,
             participant_name_snapshot, organization_name_snapshot,
-            participant_role_snapshot, student_grade_snapshot, source, status,
+            participant_role_snapshot, student_grade_snapshot, gender_snapshot, source, status,
             was_expected_at_start, revision, created_by, updated_by,
             created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'IN_PROGRESS', 'ACTIVE',
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'IN_PROGRESS', 'ACTIVE',
                    0, 0, ?, ?, ?, ?)`,
         ).bind(
           entryId,
@@ -542,6 +552,7 @@ async function createClosedProjectParticipantAndRoster(
           organization.name,
           participantInput.role,
           participantInput.grade,
+          participantInput.gender ?? null,
           actor.session.user.id,
           actor.session.user.id,
           timestamp,
@@ -630,6 +641,7 @@ export async function patchClosedProjectRoster(
     organizationId: input.organizationId ?? current.organizationId,
     role: input.role ?? current.role,
     grade: input.grade !== undefined ? input.grade : current.grade,
+    gender: input.gender !== undefined ? input.gender : current.gender,
     status: input.status ?? current.status,
   };
   if (input.role !== undefined || input.grade !== undefined) {
@@ -697,7 +709,7 @@ export async function patchClosedProjectRoster(
           `UPDATE project_roster_entries
            SET participant_name_snapshot = ?, organization_id = ?,
                organization_name_snapshot = ?,
-               participant_role_snapshot = ?, student_grade_snapshot = ?,
+               participant_role_snapshot = ?, student_grade_snapshot = ?, gender_snapshot = ?,
                status = ?, revision = revision + 1,
                updated_by = ?, updated_at = ?
            WHERE id = ? AND project_id = ? AND revision = ?`,
@@ -707,6 +719,7 @@ export async function patchClosedProjectRoster(
           organization.name,
           after.role,
           after.grade,
+          after.gender,
           after.status,
           actor.session.user.id,
           timestamp,
@@ -751,6 +764,7 @@ export async function patchClosedProjectRoster(
     status: after.status,
     role: after.role,
     grade: after.grade,
+    gender: after.gender,
     revision: input.expectedEntryRevision + 1,
     updatedAt: timestamp,
     projectRevision: input.expectedProjectRevision + 1,
@@ -1328,6 +1342,7 @@ function closedRosterSnapshot(entry: RosterRecord): ClosedRosterSnapshot {
     organizationId: entry.organizationId,
     role: entry.role,
     grade: entry.grade,
+    gender: entry.gender,
     status: entry.status,
   };
 }
@@ -1341,6 +1356,7 @@ function sameClosedRosterSnapshot(
     left.organizationId === right.organizationId &&
     left.role === right.role &&
     left.grade === right.grade &&
+    left.gender === right.gender &&
     left.status === right.status
   );
 }
