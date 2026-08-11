@@ -226,72 +226,86 @@ export function RosterTable({
           <thead>
             <tr>
               <th>
+                <span>이름</span>
                 <button
                   type="button"
                   aria-label="이름 정렬"
+                  className="er-roster-header-icon"
                   onClick={() => setSort("NAME")}
                 >
-                  이름
+                  ↕
                 </button>
               </th>
               <th>
+                <span>조직</span>
                 <button
                   type="button"
                   aria-label="조직 정렬"
+                  className="er-roster-header-icon"
                   onClick={() => setSort("ORGANIZATION")}
                 >
-                  조직
+                  ↕
                 </button>
                 <button
                   type="button"
                   aria-label="조직 필터"
+                  className="er-roster-header-icon"
                   onClick={() => setActiveFilter("organization")}
                 >
-                  필터
+                  ⏷
                 </button>
               </th>
               <th>
+                <span>참가자 구분</span>
                 <button
                   type="button"
                   aria-label="참가자 구분 필터"
+                  className="er-roster-header-icon"
                   onClick={() => setActiveFilter("role")}
                 >
-                  참가자 구분
+                  ⏷
                 </button>
               </th>
               <th>
+                <span>학년</span>
                 <button
                   type="button"
                   aria-label="학년 정렬"
+                  className="er-roster-header-icon"
                   onClick={() => setSort("GRADE")}
                 >
-                  학년
+                  ↕
                 </button>
                 <button
                   type="button"
                   aria-label="학년 필터"
+                  className="er-roster-header-icon"
                   onClick={() => setActiveFilter("grade")}
                 >
-                  필터
+                  ⏷
                 </button>
               </th>
               <th>
+                <span>성별</span>
                 <button
                   type="button"
                   aria-label="성별 필터"
+                  className="er-roster-header-icon"
                   onClick={() => setActiveFilter("gender")}
                 >
-                  성별
+                  ⏷
                 </button>
               </th>
               <th>등록 시점</th>
               <th>
+                <span>상태</span>
                 <button
                   type="button"
                   aria-label="상태 필터"
+                  className="er-roster-header-icon"
                   onClick={() => setActiveFilter("status")}
                 >
-                  상태
+                  ⏷
                 </button>
               </th>
               <th>작업</th>

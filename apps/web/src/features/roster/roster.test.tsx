@@ -1388,7 +1388,7 @@ it("shows participant profiles and combines role and grade filters with existing
   );
 
   expect(screen.getByRole("columnheader", { name: "등록 시점" })).toBeVisible();
-  expect(screen.getByRole("columnheader", { name: "성별" })).toBeVisible();
+  expect(screen.getByRole("columnheader", { name: /^성별/ })).toBeVisible();
   expect(
     screen.queryByRole("combobox", { name: "성별 필터" }),
   ).not.toBeInTheDocument();

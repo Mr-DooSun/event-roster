@@ -425,6 +425,19 @@ a {
   align-items: end;
   gap: var(--er-space-4);
 }
+.er-roster-header-icon {
+  border: 0;
+  padding: 0 var(--er-space-1);
+  color: var(--er-color-muted);
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  line-height: 1;
+}
+.er-roster-header-icon:hover,
+.er-roster-header-icon:focus-visible {
+  color: var(--er-color-primary);
+}
 .er-field select {
   min-height: 2.75rem;
   border: 1px solid var(--er-color-border);
