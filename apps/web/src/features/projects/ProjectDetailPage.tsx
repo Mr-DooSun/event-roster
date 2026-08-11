@@ -1,7 +1,7 @@
 import type {
   ClosedProjectCorrectionCandidateOrganization,
   ClosedProjectCorrectionCandidateParticipant,
-  Organization,
+  OrganizationSummary,
   Project,
   ProjectOrganization,
   ProjectStatus,
@@ -147,7 +147,9 @@ export function ProjectDetailPage({
     EMPTY_SUMMARY(projectId),
   );
   const [memberships, setMemberships] = useState<ProjectOrganization[]>([]);
-  const [allOrganizations, setAllOrganizations] = useState<Organization[]>([]);
+  const [allOrganizations, setAllOrganizations] = useState<
+    OrganizationSummary[]
+  >([]);
   const [rows, setRows] = useState<RosterView[]>([]);
   const [participants, setParticipants] = useState<ParticipantView[]>([]);
   const [audit, setAudit] = useState<AuditView[]>([]);
@@ -283,7 +285,7 @@ export function ProjectDetailPage({
           return loadResource(
             context,
             resource,
-            () => api.get<Organization[]>("/organizations"),
+            () => api.get<OrganizationSummary[]>("/organizations"),
             setAllOrganizations,
           );
         case "roster":

@@ -1,6 +1,8 @@
 import type {
-  Organization,
+  ClosedProjectCorrectionCandidateOrganization,
+  OrganizationSummary,
   ProjectOrganization,
+  ProjectOrganizationBulkMutationResult,
   ProjectOrganizationMutationResult,
 } from "@event-roster/contracts";
 import { type FormEvent, useEffect, useMemo, useState } from "react";
@@ -10,18 +12,22 @@ import { Dialog } from "../../components/ui/Dialog";
 import { StatusMessage } from "../../components/ui/StatusMessage";
 import { ApiError } from "../../lib/api";
 import { getReservedOrganizationId } from "../../lib/organization-errors";
+import { canonicalizeOrganizationInput } from "../../lib/organization-name";
 import { getTotalOrganizationManagerCount } from "../../lib/organization-summary";
 import { useAuth } from "../auth/AuthProvider";
 import {
   OrganizationCombobox,
   type OrganizationComboboxSelection,
 } from "./OrganizationCombobox";
+import { ProjectOrganizationBulkPicker } from "./ProjectOrganizationBulkPicker";
 
 export interface ProjectOrganizationsPanelProps {
   projectId: string;
   projectRevision: number;
   memberships: ProjectOrganization[];
-  allOrganizations: Array<Organization & { isDeleted?: boolean }>;
+  allOrganizations:
+    | OrganizationSummary[]
+    | ClosedProjectCorrectionCandidateOrganization[];
   organizationCandidatesAvailable?: boolean;
   canMutateMemberships: boolean;
   canManageOrganizations: boolean;
@@ -92,6 +98,10 @@ export function ProjectOrganizationsPanel({
   } | null>(null);
   const [pendingExclusion, setPendingExclusion] =
     useState<ProjectOrganization | null>(null);
+  const [selectedOrganizationIds, setSelectedOrganizationIds] = useState<
+    string[]
+  >([]);
+  const [newOrganizationName, setNewOrganizationName] = useState("");
   const [busy, setBusy] = useState(false);
   const [busyAction, setBusyAction] = useState<OrganizationAction>(null);
   const [message, setMessage] = useState<PanelMessage | null>(null);
@@ -114,6 +124,9 @@ export function ProjectOrganizationsPanel({
             (correctionMode || !membership.masterIsDeleted),
         )
       : undefined;
+  const ordinaryOrganizations = correctionMode
+    ? []
+    : (allOrganizations as OrganizationSummary[]);
 
   function selectOrganization(selection: OrganizationComboboxSelection) {
     setMessage(null);
@@ -129,7 +142,10 @@ export function ProjectOrganizationsPanel({
 
   async function mutate(
     action: Exclude<OrganizationAction, null>,
-    operation: () => Promise<ProjectOrganizationMutationResult>,
+    operation: () => Promise<
+      ProjectOrganizationMutationResult | ProjectOrganizationBulkMutationResult
+    >,
+    onSuccess?: () => void,
   ) {
     if (busy) return false;
     setBusy(true);
@@ -142,6 +158,7 @@ export function ProjectOrganizationsPanel({
       setPendingSelection(null);
       setNewConfirmation(null);
       setReservedOrganizationId(null);
+      onSuccess?.();
       try {
         await onChanged();
       } catch {
@@ -158,6 +175,7 @@ export function ProjectOrganizationsPanel({
             setPendingSelection(null);
             setNewConfirmation(null);
             setPendingExclusion(null);
+            setSelectedOrganizationIds([]);
           }
           await onChanged();
           setMessage({
@@ -236,6 +254,29 @@ export function ProjectOrganizationsPanel({
     );
   }
 
+  async function addSelectedOrganizations() {
+    if (selectedOrganizationIds.length === 0) return;
+    await mutate(
+      "ADD_EXISTING",
+      () =>
+        api.post<ProjectOrganizationBulkMutationResult>(
+          `${organizationPath}/bulk`,
+          {
+            organizationIds: selectedOrganizationIds,
+            expectedProjectRevision: observedProjectRevision,
+          },
+        ),
+      () => setSelectedOrganizationIds([]),
+    );
+  }
+
+  function requestNewOrganization(event: FormEvent) {
+    event.preventDefault();
+    const name = newOrganizationName.trim();
+    if (!name) return;
+    setNewConfirmation({ kind: "NEW", name });
+  }
+
   async function confirmCreate() {
     if (!newConfirmation) return;
     await mutate("CREATE_AND_ADD", () =>
@@ -272,40 +313,89 @@ export function ProjectOrganizationsPanel({
       {canManageOrganizations && canMutateMemberships ? (
         <Card className="er-panel">
           <h2>조직 추가</h2>
-          <form className="er-inline-form" onSubmit={addExisting}>
-            <OrganizationCombobox
-              organizations={allOrganizations}
-              linkedOrganizationIds={linkedOrganizationIds}
-              includeInactive={correctionMode}
-              disabled={
-                busy ||
-                !canMutateMemberships ||
-                !organizationCandidatesAvailable
-              }
-              onSelect={selectOrganization}
-              onQueryChange={() => setPendingSelection(null)}
-            />
-            {selectedInactiveMembership ? (
-              <StatusMessage tone="info">
-                기존 명단과 집계 이력이 있으면 그대로 다시 연결됩니다.
-              </StatusMessage>
-            ) : null}
-            <Button
-              type="submit"
-              variant="primary"
-              loading={busyAction === "ADD_EXISTING"}
-              loadingText="프로젝트에 추가 중…"
-              disabled={
-                busy ||
-                !canMutateMemberships ||
-                !organizationCandidatesAvailable ||
-                !pendingSelection ||
-                pendingSelection.kind !== "EXISTING"
-              }
-            >
-              프로젝트에 추가
-            </Button>
-          </form>
+          {correctionMode ? (
+            <form className="er-inline-form" onSubmit={addExisting}>
+              <OrganizationCombobox
+                organizations={allOrganizations}
+                linkedOrganizationIds={linkedOrganizationIds}
+                includeInactive
+                disabled={
+                  busy ||
+                  !canMutateMemberships ||
+                  !organizationCandidatesAvailable
+                }
+                onSelect={selectOrganization}
+                onQueryChange={() => setPendingSelection(null)}
+              />
+              {selectedInactiveMembership ? (
+                <StatusMessage tone="info">
+                  기존 명단과 집계 이력이 있으면 그대로 다시 연결됩니다.
+                </StatusMessage>
+              ) : null}
+              <Button
+                type="submit"
+                variant="primary"
+                loading={busyAction === "ADD_EXISTING"}
+                loadingText="프로젝트에 추가 중…"
+                disabled={
+                  busy ||
+                  !canMutateMemberships ||
+                  !organizationCandidatesAvailable ||
+                  !pendingSelection ||
+                  pendingSelection.kind !== "EXISTING"
+                }
+              >
+                프로젝트에 추가
+              </Button>
+            </form>
+          ) : (
+            <>
+              <ProjectOrganizationBulkPicker
+                organizations={ordinaryOrganizations}
+                linkedOrganizationIds={linkedOrganizationIds}
+                selectedOrganizationIds={new Set(selectedOrganizationIds)}
+                disabled={busy || !organizationCandidatesAvailable}
+                onSelectionChange={setSelectedOrganizationIds}
+              />
+              <Button
+                type="button"
+                variant="primary"
+                loading={busyAction === "ADD_EXISTING"}
+                loadingText="선택한 조직 추가 중…"
+                disabled={
+                  busy ||
+                  !organizationCandidatesAvailable ||
+                  selectedOrganizationIds.length === 0
+                }
+                onClick={() => void addSelectedOrganizations()}
+              >
+                선택한 {selectedOrganizationIds.length}개 조직 추가
+              </Button>
+              <form
+                className="er-inline-form"
+                onSubmit={requestNewOrganization}
+              >
+                <label className="er-field">
+                  <span>새 조직 이름</span>
+                  <input
+                    disabled={busy}
+                    value={newOrganizationName}
+                    onChange={(event) =>
+                      setNewOrganizationName(event.currentTarget.value)
+                    }
+                  />
+                </label>
+                <Button
+                  type="submit"
+                  disabled={
+                    busy || !canonicalizeOrganizationInput(newOrganizationName)
+                  }
+                >
+                  새 조직 생성 후 추가
+                </Button>
+              </form>
+            </>
+          )}
         </Card>
       ) : null}
       <Card className="er-panel">
