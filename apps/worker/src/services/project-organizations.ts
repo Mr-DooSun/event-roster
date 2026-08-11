@@ -231,11 +231,6 @@ export async function addProjectOrganizationsBulk(
 
   const timestamp = now.toISOString();
   const today = toKstDate(now);
-  const priorMemberships = await Promise.all(
-    input.organizationIds.map((organizationId) =>
-      findProjectOrganization(env.DB, projectId, organizationId),
-    ),
-  );
   const guardId = crypto.randomUUID();
   const organizationPredicates = input.organizationIds.map(
     () => `EXISTS (
@@ -266,7 +261,16 @@ export async function addProjectOrganizationsBulk(
     ]),
   ];
   const statements: D1PreparedStatement[] = input.organizationIds.flatMap(
-    (organizationId, index) => [
+    (organizationId) => [
+      membershipAuditStatement(
+        env.DB,
+        actor.session.user.id,
+        "PROJECT_ORGANIZATION_ADDED",
+        projectId,
+        organizationId,
+        timestamp,
+        { reactivatedWhenMembershipExists: true },
+      ),
       env.DB.prepare(
         `INSERT INTO project_organizations
          (project_id, organization_id, is_active, added_at, deactivated_at,
@@ -280,16 +284,6 @@ export async function addProjectOrganizationsBulk(
         timestamp,
         actor.session.user.id,
         actor.session.user.id,
-      ),
-      membershipAuditStatement(
-        env.DB,
-        actor.session.user.id,
-        priorMemberships[index]
-          ? "PROJECT_ORGANIZATION_REACTIVATED"
-          : "PROJECT_ORGANIZATION_ADDED",
-        projectId,
-        organizationId,
-        timestamp,
       ),
     ],
   );
@@ -556,7 +550,32 @@ function membershipAuditStatement(
   projectId: string,
   organizationId: string,
   timestamp: string,
+  options?: { reactivatedWhenMembershipExists?: boolean },
 ): D1PreparedStatement {
+  if (options?.reactivatedWhenMembershipExists) {
+    return db
+      .prepare(
+        `INSERT INTO audit_logs
+         (id, actor_user_id, action, entity_type, entity_id, occurred_at, details_json)
+         SELECT ?, ?,
+           CASE WHEN EXISTS (
+             SELECT 1 FROM project_organizations
+             WHERE project_id = ? AND organization_id = ?
+           ) THEN 'PROJECT_ORGANIZATION_REACTIVATED'
+           ELSE 'PROJECT_ORGANIZATION_ADDED'
+           END,
+           'PROJECT_ORGANIZATION', ?, ?, ?`,
+      )
+      .bind(
+        crypto.randomUUID(),
+        actorId,
+        projectId,
+        organizationId,
+        membershipEntityId(projectId, organizationId),
+        timestamp,
+        JSON.stringify({ projectId, organizationId }),
+      );
+  }
   return db
     .prepare(
       `INSERT INTO audit_logs

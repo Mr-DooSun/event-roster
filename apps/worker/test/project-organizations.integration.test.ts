@@ -2,7 +2,10 @@ import { env } from "cloudflare:workers";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { Env } from "../src/env";
 import { requireActor } from "../src/middleware/authentication";
-import { setProjectOrganizationActive } from "../src/services/project-organizations";
+import {
+  addProjectOrganizationsBulk,
+  setProjectOrganizationActive,
+} from "../src/services/project-organizations";
 import {
   authedRequest,
   seedManager,
@@ -657,6 +660,62 @@ it("requeries the active project count after deleting an audit-free membership",
     isActive: false,
     activeProjectCount: 0,
   });
+});
+
+it("records a bulk reactivation when an inactive membership appears before its atomic batch", async () => {
+  const operator = await seedOperator();
+  const organization = await seedOrganization();
+  const project = await seedProject(operator);
+  const actor = await requireActor(
+    new Request("https://event-roster.test", {
+      headers: { Authorization: `Bearer ${operator.body.accessToken}` },
+    }),
+    env as Env,
+  );
+  let pending = true;
+  const raceDb = {
+    prepare: (query: string) => env.DB.prepare(query),
+    batch: async (statements: D1PreparedStatement[]) => {
+      if (pending) {
+        pending = false;
+        await env.DB.prepare(
+          `INSERT INTO project_organizations
+           (project_id, organization_id, is_active, added_at, deactivated_at,
+            added_by, updated_by)
+           VALUES (?, ?, 0, ?, ?, ?, ?)`,
+        )
+          .bind(
+            project.id,
+            organization.id,
+            "2026-08-11T00:00:00.000Z",
+            "2026-08-11T00:00:00.000Z",
+            operator.userId,
+            operator.userId,
+          )
+          .run();
+      }
+      return env.DB.batch(statements);
+    },
+  } as D1Database;
+
+  await addProjectOrganizationsBulk(
+    { ...(env as Env), DB: raceDb },
+    actor,
+    project.id,
+    {
+      organizationIds: [organization.id],
+      expectedProjectRevision: project.revision,
+    },
+  );
+
+  expect(
+    await env.DB.prepare(
+      `SELECT action FROM audit_logs
+       WHERE entity_id = ? ORDER BY rowid DESC LIMIT 1`,
+    )
+      .bind(`${project.id}:${organization.id}`)
+      .first<{ action: string }>(),
+  ).toEqual({ action: "PROJECT_ORGANIZATION_REACTIVATED" });
 });
 
 it("does not treat LIKE-wildcard lookalike audit actions as membership history", async () => {
