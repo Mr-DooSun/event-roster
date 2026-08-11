@@ -101,6 +101,7 @@ export function ProjectOrganizationsPanel({
   const [selectedOrganizationIds, setSelectedOrganizationIds] = useState<
     string[]
   >([]);
+  const [organizationPickerOpen, setOrganizationPickerOpen] = useState(false);
   const [newOrganizationName, setNewOrganizationName] = useState("");
   const [busy, setBusy] = useState(false);
   const [busyAction, setBusyAction] = useState<OrganizationAction>(null);
@@ -265,7 +266,10 @@ export function ProjectOrganizationsPanel({
             expectedProjectRevision: observedProjectRevision,
           },
         ),
-      () => setSelectedOrganizationIds([]),
+      () => {
+        setSelectedOrganizationIds([]);
+        setOrganizationPickerOpen(false);
+      },
     );
   }
 
@@ -323,32 +327,13 @@ export function ProjectOrganizationsPanel({
       {canManageOrganizations && canMutateMemberships ? (
         <Card className="er-panel">
           <h2>조직 추가</h2>
-          <ProjectOrganizationBulkPicker
-            organizations={pickerOrganizations}
-            linkedOrganizationIds={linkedOrganizationIds}
-            selectedOrganizationIds={new Set(selectedOrganizationIds)}
-            disabled={busy || !organizationCandidatesAvailable}
-            includeInactive={correctionMode}
-            onSelectionChange={setSelectedOrganizationIds}
-          />
-          {selectedInactiveBulkMembership ? (
-            <StatusMessage tone="info">
-              기존 명단과 집계 이력이 있으면 그대로 다시 연결됩니다.
-            </StatusMessage>
-          ) : null}
           <Button
             type="button"
             variant="primary"
-            loading={busyAction === "ADD_EXISTING"}
-            loadingText="선택한 조직 추가 중…"
-            disabled={
-              busy ||
-              !organizationCandidatesAvailable ||
-              selectedOrganizationIds.length === 0
-            }
-            onClick={() => void addSelectedOrganizations()}
+            disabled={busy || !organizationCandidatesAvailable}
+            onClick={() => setOrganizationPickerOpen(true)}
           >
-            선택한 {selectedOrganizationIds.length}개 조직 추가
+            조직 선택 추가
           </Button>
           {correctionMode ? (
             <form className="er-inline-form" onSubmit={addExisting}>
@@ -457,6 +442,43 @@ export function ProjectOrganizationsPanel({
             onClick={() => void confirmCreate()}
           >
             생성 후 추가
+          </Button>
+        </Dialog>
+      ) : null}
+      {canManageOrganizations &&
+      canMutateMemberships &&
+      organizationPickerOpen ? (
+        <Dialog
+          title="조직 선택 추가"
+          size="wide"
+          onClose={() => setOrganizationPickerOpen(false)}
+        >
+          <ProjectOrganizationBulkPicker
+            organizations={pickerOrganizations}
+            linkedOrganizationIds={linkedOrganizationIds}
+            selectedOrganizationIds={new Set(selectedOrganizationIds)}
+            disabled={busy || !organizationCandidatesAvailable}
+            includeInactive={correctionMode}
+            onSelectionChange={setSelectedOrganizationIds}
+          />
+          {selectedInactiveBulkMembership ? (
+            <StatusMessage tone="info">
+              기존 명단과 집계 이력이 있으면 그대로 다시 연결됩니다.
+            </StatusMessage>
+          ) : null}
+          <Button
+            type="button"
+            variant="primary"
+            loading={busyAction === "ADD_EXISTING"}
+            loadingText="선택한 조직 추가 중…"
+            disabled={
+              busy ||
+              !organizationCandidatesAvailable ||
+              selectedOrganizationIds.length === 0
+            }
+            onClick={() => void addSelectedOrganizations()}
+          >
+            선택한 {selectedOrganizationIds.length}개 조직 추가
           </Button>
         </Dialog>
       ) : null}

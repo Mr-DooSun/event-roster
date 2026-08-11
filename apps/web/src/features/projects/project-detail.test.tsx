@@ -523,9 +523,13 @@ it("adds selected organizations in bulk and clears the selection after refresh",
     />,
   );
 
-  fireEvent.click(screen.getByRole("checkbox", { name: "1팀" }));
-  fireEvent.click(screen.getByRole("checkbox", { name: "2팀" }));
-  fireEvent.click(screen.getByRole("button", { name: "선택한 2개 조직 추가" }));
+  fireEvent.click(screen.getByRole("button", { name: "조직 선택 추가" }));
+  const dialog = screen.getByRole("dialog", { name: "조직 선택 추가" });
+  fireEvent.click(within(dialog).getByRole("checkbox", { name: "1팀" }));
+  fireEvent.click(within(dialog).getByRole("checkbox", { name: "2팀" }));
+  fireEvent.click(
+    within(dialog).getByRole("button", { name: "선택한 2개 조직 추가" }),
+  );
 
   await waitFor(() =>
     expect(mockApi.post).toHaveBeenCalledWith(
@@ -534,9 +538,7 @@ it("adds selected organizations in bulk and clears the selection after refresh",
     ),
   );
   await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1));
-  expect(
-    screen.getByRole("button", { name: "선택한 0개 조직 추가" }),
-  ).toBeDisabled();
+  expect(screen.getByRole("button", { name: "조직 선택 추가" })).toBeEnabled();
 });
 
 it("adds selected organizations in bulk while correcting closed-project history", async () => {
@@ -561,9 +563,13 @@ it("adds selected organizations in bulk while correcting closed-project history"
     />,
   );
 
-  fireEvent.click(screen.getByRole("checkbox", { name: "1팀" }));
-  fireEvent.click(screen.getByRole("checkbox", { name: "2팀" }));
-  fireEvent.click(screen.getByRole("button", { name: "선택한 2개 조직 추가" }));
+  fireEvent.click(screen.getByRole("button", { name: "조직 선택 추가" }));
+  const dialog = screen.getByRole("dialog", { name: "조직 선택 추가" });
+  fireEvent.click(within(dialog).getByRole("checkbox", { name: "1팀" }));
+  fireEvent.click(within(dialog).getByRole("checkbox", { name: "2팀" }));
+  fireEvent.click(
+    within(dialog).getByRole("button", { name: "선택한 2개 조직 추가" }),
+  );
 
   await waitFor(() =>
     expect(mockApi.post).toHaveBeenCalledWith(
@@ -572,6 +578,28 @@ it("adds selected organizations in bulk while correcting closed-project history"
     ),
   );
   await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1));
+});
+
+it("closes the organization search list when focus moves outside", () => {
+  render(
+    <ProjectOrganizationsPanel
+      projectId="project-1"
+      projectRevision={7}
+      memberships={[]}
+      allOrganizations={[organizationSummary({ id: "org-1", name: "1팀" })]}
+      canMutateMemberships
+      canManageOrganizations
+      mutationMode="CLOSED_CORRECTION"
+      onChanged={vi.fn().mockResolvedValue(undefined)}
+    />,
+  );
+
+  fireEvent.focus(
+    screen.getByRole("combobox", { name: "조직 이름 검색 또는 입력" }),
+  );
+  expect(screen.getByRole("listbox")).toBeVisible();
+  fireEvent.pointerDown(document.body);
+  expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
 });
 
 it("disables new organization creation while bulk candidates are selected", () => {
@@ -595,11 +623,13 @@ it("disables new organization creation while bulk candidates are selected", () =
   expect(nameInput).toBeEnabled();
   expect(createButton).toBeEnabled();
 
-  fireEvent.click(screen.getByRole("checkbox", { name: "기획팀" }));
+  fireEvent.click(screen.getByRole("button", { name: "조직 선택 추가" }));
+  const dialog = screen.getByRole("dialog", { name: "조직 선택 추가" });
+  fireEvent.click(within(dialog).getByRole("checkbox", { name: "기획팀" }));
   expect(nameInput).toBeDisabled();
   expect(createButton).toBeDisabled();
 
-  fireEvent.click(screen.getByRole("checkbox", { name: "기획팀" }));
+  fireEvent.click(within(dialog).getByRole("checkbox", { name: "기획팀" }));
   expect(nameInput).toBeEnabled();
   expect(createButton).toBeEnabled();
 });
@@ -630,7 +660,13 @@ it("warns when a selected bulk candidate reactivates an inactive membership", ()
       "기존 명단과 집계 이력이 있으면 그대로 다시 연결됩니다.",
     ),
   ).not.toBeInTheDocument();
-  fireEvent.click(screen.getByRole("checkbox", { name: "기존 조직" }));
+  fireEvent.click(screen.getByRole("button", { name: "조직 선택 추가" }));
+  fireEvent.click(
+    within(screen.getByRole("dialog", { name: "조직 선택 추가" })).getByRole(
+      "checkbox",
+      { name: "기존 조직" },
+    ),
+  );
   expect(
     screen.getByText("기존 명단과 집계 이력이 있으면 그대로 다시 연결됩니다."),
   ).toBeVisible();
@@ -1137,9 +1173,13 @@ it("reloads a stale project revision and clears the bulk selection", async () =>
     />,
   );
 
-  fireEvent.click(screen.getByRole("checkbox", { name: "기획팀" }));
-  fireEvent.click(screen.getByRole("checkbox", { name: "운영팀" }));
-  fireEvent.click(screen.getByRole("button", { name: "선택한 2개 조직 추가" }));
+  fireEvent.click(screen.getByRole("button", { name: "조직 선택 추가" }));
+  const dialog = screen.getByRole("dialog", { name: "조직 선택 추가" });
+  fireEvent.click(within(dialog).getByRole("checkbox", { name: "기획팀" }));
+  fireEvent.click(within(dialog).getByRole("checkbox", { name: "운영팀" }));
+  fireEvent.click(
+    within(dialog).getByRole("button", { name: "선택한 2개 조직 추가" }),
+  );
 
   expect(
     await screen.findByText(
@@ -1281,9 +1321,15 @@ it("hides excluded organizations and reactivates them through the add flow", asy
     />,
   );
 
-  expect(screen.getByRole("checkbox", { name: "활성 조직" })).toBeDisabled();
-  fireEvent.click(screen.getByRole("checkbox", { name: "제외 조직" }));
-  fireEvent.click(screen.getByRole("button", { name: "선택한 1개 조직 추가" }));
+  fireEvent.click(screen.getByRole("button", { name: "조직 선택 추가" }));
+  const dialog = screen.getByRole("dialog", { name: "조직 선택 추가" });
+  expect(
+    within(dialog).getByRole("checkbox", { name: "활성 조직" }),
+  ).toBeDisabled();
+  fireEvent.click(within(dialog).getByRole("checkbox", { name: "제외 조직" }));
+  fireEvent.click(
+    within(dialog).getByRole("button", { name: "선택한 1개 조직 추가" }),
+  );
   await waitFor(() =>
     expect(mockApi.post).toHaveBeenCalledWith(
       "/projects/project-1/organizations/bulk",
@@ -2017,9 +2063,7 @@ it("keeps project memberships visible while organization candidates fail", async
 
   expect(await screen.findByText("Ｅ２Ｅ 1팀")).toBeVisible();
   expect(screen.getByText("전체 조직을 불러오지 못했습니다.")).toBeVisible();
-  expect(
-    screen.getByRole("textbox", { name: "조직 이름 검색" }),
-  ).toBeDisabled();
+  expect(screen.getByRole("button", { name: "조직 선택 추가" })).toBeDisabled();
 });
 
 it("keeps project memberships visible while organization candidates are pending", async () => {
@@ -2037,9 +2081,7 @@ it("keeps project memberships visible while organization candidates are pending"
 
   expect(await screen.findByText("Ｅ２Ｅ 1팀")).toBeVisible();
   expect(screen.getByRole("tabpanel")).toHaveAttribute("aria-busy", "true");
-  expect(
-    screen.getByRole("textbox", { name: "조직 이름 검색" }),
-  ).toBeDisabled();
+  expect(screen.getByRole("button", { name: "조직 선택 추가" })).toBeDisabled();
 
   await act(async () => organizationCandidates.resolve([]));
 });

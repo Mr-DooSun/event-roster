@@ -38,6 +38,7 @@ export function OrganizationCombobox({
   onQueryChange,
 }: OrganizationComboboxProps) {
   const listboxId = useId();
+  const rootRef = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);
@@ -72,6 +73,22 @@ export function OrganizationCombobox({
     if (activeIndex < 0) return;
     optionRefs.current[activeIndex]?.scrollIntoView?.({ block: "nearest" });
   }, [activeIndex]);
+
+  useEffect(() => {
+    if (!open) return;
+    function closeWhenClickingOutside(event: PointerEvent) {
+      if (
+        event.target instanceof Node &&
+        !rootRef.current?.contains(event.target)
+      ) {
+        setOpen(false);
+        setActiveIndex(-1);
+      }
+    }
+    document.addEventListener("pointerdown", closeWhenClickingOutside);
+    return () =>
+      document.removeEventListener("pointerdown", closeWhenClickingOutside);
+  }, [open]);
 
   function optionId(index: number) {
     return `${listboxId}-option-${index}`;
@@ -110,7 +127,7 @@ export function OrganizationCombobox({
   const activeOption = activeIndex >= 0 ? options[activeIndex] : undefined;
 
   return (
-    <div className="er-organization-combobox">
+    <div className="er-organization-combobox" ref={rootRef}>
       <label className="er-field">
         <span>조직 이름 검색 또는 입력</span>
         <input
