@@ -1118,6 +1118,48 @@ it("links active, inactive, deleted, and newly created organizations to a closed
   ]);
 });
 
+it("adds closed-project correction organizations in one atomic bulk mutation", async () => {
+  const fixture = await seedCorrectionCandidates();
+  await seedOrganization("org-later-active", "나중 가동 조직");
+  const before = await closedProjectState(fixture.closedProjectId);
+
+  const response = await authedRequest(
+    fixture.operator,
+    `/api/v1/projects/${fixture.closedProjectId}/history-corrections/organizations/bulk`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        organizationIds: ["org-later-active", "org-inactive", "org-deleted"],
+        expectedProjectRevision: before.revision,
+      }),
+    },
+  );
+
+  expect(response.status).toBe(200);
+  expect(await response.json()).toEqual({
+    organizationIds: ["org-later-active", "org-inactive", "org-deleted"],
+    projectRevision: before.revision + 1,
+  });
+  expect(await closedProjectState(fixture.closedProjectId)).toEqual({
+    ...before,
+    revision: before.revision + 1,
+  });
+  expect(await correctionAudits(fixture.closedProjectId)).toEqual([
+    expect.objectContaining({
+      organizationId: "org-later-active",
+      operation: "ADDED",
+    }),
+    expect.objectContaining({
+      organizationId: "org-inactive",
+      operation: "ADDED",
+    }),
+    expect.objectContaining({
+      organizationId: "org-deleted",
+      operation: "ADDED",
+    }),
+  ]);
+});
+
 it("soft-excludes an empty closed-project membership and reactivates its composite-key row", async () => {
   const fixture = await seedCorrectionCandidates();
   await seedOrganization("org-empty", "빈 조직");

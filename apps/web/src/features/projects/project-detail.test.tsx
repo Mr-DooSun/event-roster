@@ -539,6 +539,41 @@ it("adds selected organizations in bulk and clears the selection after refresh",
   ).toBeDisabled();
 });
 
+it("adds selected organizations in bulk while correcting closed-project history", async () => {
+  const onChanged = vi.fn().mockResolvedValue(undefined);
+  mockApi.post.mockResolvedValueOnce({
+    organizationIds: ["org-1", "org-2"],
+    projectRevision: 8,
+  });
+  render(
+    <ProjectOrganizationsPanel
+      projectId="project-1"
+      projectRevision={7}
+      memberships={[]}
+      allOrganizations={[
+        organizationSummary({ id: "org-1", name: "1팀" }),
+        organizationSummary({ id: "org-2", name: "2팀", isActive: false }),
+      ]}
+      canMutateMemberships
+      canManageOrganizations
+      mutationMode="CLOSED_CORRECTION"
+      onChanged={onChanged}
+    />,
+  );
+
+  fireEvent.click(screen.getByRole("checkbox", { name: "1팀" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "2팀" }));
+  fireEvent.click(screen.getByRole("button", { name: "선택한 2개 조직 추가" }));
+
+  await waitFor(() =>
+    expect(mockApi.post).toHaveBeenCalledWith(
+      "/projects/project-1/history-corrections/organizations/bulk",
+      { organizationIds: ["org-1", "org-2"], expectedProjectRevision: 7 },
+    ),
+  );
+  await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1));
+});
+
 it("disables new organization creation while bulk candidates are selected", () => {
   render(
     <ProjectOrganizationsPanel
@@ -3014,7 +3049,7 @@ it("loads inactive and deleted correction candidates and routes organization mut
   );
   fireEvent.click(screen.getByRole("tab", { name: "조직" }));
 
-  expect(await screen.findByText("삭제 조직")).toBeVisible();
+  expect((await screen.findAllByText("삭제 조직")).at(-1)).toBeVisible();
   expect(screen.getByText("삭제됨", { exact: true })).toHaveClass(
     "er-badge--deleted",
   );

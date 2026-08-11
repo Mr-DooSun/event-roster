@@ -1,5 +1,6 @@
 import {
   AddProjectOrganizationSchema,
+  AddProjectOrganizationsBulkSchema,
   BulkRosterCreateRequestSchema,
   ClosedProjectRosterPatchRequestSchema,
   ImportCommitRequestSchema,
@@ -19,6 +20,7 @@ import { requireAdministrativeOperator } from "../services/admin";
 import {
   commitClosedProjectImport,
   correctClosedProjectOrganization,
+  correctClosedProjectOrganizationsBulk,
   correctClosedProjectRoster,
   correctClosedProjectRosterBulk,
   getClosedCorrectionCandidates,
@@ -102,6 +104,25 @@ historyCorrectionRoutes.post(
     );
     const { created, ...mutation } = result;
     return c.json(mutation, created ? 201 : 200);
+  },
+);
+
+historyCorrectionRoutes.post(
+  "/projects/:projectId/history-corrections/organizations/bulk",
+  async (c) => {
+    assertExactOrigin(c.req.raw, c.env.APP_ORIGIN);
+    const actor = await requireActor(c.req.raw, c.env);
+    await requireCsrf(c.req.raw, actor);
+    requireAdministrativeOperator(actor);
+    const input = AddProjectOrganizationsBulkSchema.parse(await c.req.json());
+    return c.json(
+      await correctClosedProjectOrganizationsBulk(
+        c.env,
+        actor,
+        c.req.param("projectId"),
+        input,
+      ),
+    );
   },
 );
 

@@ -1,5 +1,6 @@
 import {
   type AddProjectOrganization,
+  type AddProjectOrganizationsBulk,
   type BulkParticipantDuplicate,
   type BulkRosterCreateRequest,
   type BulkRosterCreateResponse,
@@ -9,6 +10,7 @@ import {
   type NormalizedImportRow,
   type ParticipantRole,
   ParticipantRoleSchema,
+  type ProjectOrganizationBulkMutationResult,
   type ProjectOrganizationMutationResult,
   type ProjectOrganizationPatch,
   RosterParticipantProfileSchema,
@@ -1084,6 +1086,126 @@ export async function correctClosedProjectOrganization(
     organization,
     projectRevision: input.expectedProjectRevision + 1,
     created,
+  };
+}
+
+export async function correctClosedProjectOrganizationsBulk(
+  env: Env,
+  actor: Actor,
+  projectId: string,
+  input: AddProjectOrganizationsBulk,
+  now = new Date(),
+): Promise<ProjectOrganizationBulkMutationResult> {
+  const project = await requireClosedCorrectionProject(env, actor, projectId);
+  if (project.revision !== input.expectedProjectRevision) {
+    throw new DomainError("STALE_REVISION");
+  }
+
+  const timestamp = now.toISOString();
+  const guardId = crypto.randomUUID();
+  const operationPredicate = input.organizationIds
+    .map(
+      () => `EXISTS (SELECT 1 FROM organizations WHERE id = ?)
+        AND NOT EXISTS (
+          SELECT 1 FROM project_organizations
+          WHERE project_id = ? AND organization_id = ? AND is_active = 1
+        )`,
+    )
+    .join(" AND ");
+  const operationBindings = input.organizationIds.flatMap((organizationId) => [
+    organizationId,
+    projectId,
+    organizationId,
+  ]);
+  const statements: D1PreparedStatement[] = input.organizationIds.flatMap(
+    (organizationId) => [
+      env.DB.prepare(
+        `INSERT INTO project_organizations
+         (project_id, organization_id, is_active, added_at, deactivated_at,
+          added_by, updated_by)
+         VALUES (?, ?, 1, ?, NULL, ?, ?)
+         ON CONFLICT(project_id, organization_id) DO UPDATE SET
+           is_active = 1,
+           deactivated_at = CASE
+             WHEN project_organizations.is_active = 0 THEN excluded.added_at
+             ELSE NULL
+           END,
+           updated_by = excluded.updated_by`,
+      ).bind(
+        projectId,
+        organizationId,
+        timestamp,
+        actor.session.user.id,
+        actor.session.user.id,
+      ),
+      env.DB.prepare(
+        `INSERT INTO audit_logs
+         (id, actor_user_id, action, entity_type, entity_id, occurred_at, details_json)
+         SELECT ?, ?, 'CLOSED_PROJECT_ORGANIZATION_CORRECTED',
+                'PROJECT_ORGANIZATION', ?, ?,
+                json_object(
+                  'projectId', ?,
+                  'organizationId', ?,
+                  'operation', CASE WHEN deactivated_at = ? THEN 'REACTIVATED' ELSE 'ADDED' END,
+                  'before', CASE WHEN deactivated_at = ? THEN json_object('isActive', 0) ELSE NULL END,
+                  'after', json_object('isActive', 1)
+                )
+         FROM project_organizations
+         WHERE project_id = ? AND organization_id = ? AND is_active = 1`,
+      ).bind(
+        crypto.randomUUID(),
+        actor.session.user.id,
+        `${projectId}:${organizationId}`,
+        timestamp,
+        projectId,
+        organizationId,
+        timestamp,
+        timestamp,
+        projectId,
+        organizationId,
+      ),
+      env.DB.prepare(
+        `UPDATE project_organizations SET deactivated_at = NULL
+         WHERE project_id = ? AND organization_id = ? AND deactivated_at = ?`,
+      ).bind(projectId, organizationId, timestamp),
+    ],
+  );
+  statements.push(
+    projectRevisionStatement(
+      env.DB,
+      projectId,
+      input.expectedProjectRevision,
+      timestamp,
+    ),
+  );
+
+  try {
+    await runGuardedAtomic(env.DB, {
+      guardId,
+      guardStatement: createClosedCorrectionGuard(
+        env.DB,
+        guardId,
+        actor,
+        projectId,
+        input.expectedProjectRevision,
+        operationPredicate,
+        operationBindings,
+      ),
+      statements,
+      failureCode: "CONFLICT",
+    });
+  } catch (error) {
+    await translateClosedCorrectionFailure(
+      env,
+      projectId,
+      input.expectedProjectRevision,
+      error,
+    );
+  }
+
+  return {
+    organizationIds: input.organizationIds,
+    projectRevision: input.expectedProjectRevision + 1,
   };
 }
 

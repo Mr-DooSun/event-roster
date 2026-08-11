@@ -1,12 +1,19 @@
-import type { OrganizationSummary } from "@event-roster/contracts";
+import type {
+  ClosedProjectCorrectionCandidateOrganization,
+  OrganizationSummary,
+} from "@event-roster/contracts";
 import { useMemo, useState } from "react";
 import { canonicalizeOrganizationInput } from "../../lib/organization-name";
 
 export interface ProjectOrganizationBulkPickerProps {
-  organizations: OrganizationSummary[];
+  organizations: (
+    | OrganizationSummary
+    | ClosedProjectCorrectionCandidateOrganization
+  )[];
   linkedOrganizationIds: ReadonlySet<string>;
   selectedOrganizationIds: ReadonlySet<string>;
   disabled: boolean;
+  includeInactive?: boolean;
   onSelectionChange(next: string[]): void;
 }
 
@@ -15,6 +22,7 @@ export function ProjectOrganizationBulkPicker({
   linkedOrganizationIds,
   selectedOrganizationIds,
   disabled,
+  includeInactive = false,
   onSelectionChange,
 }: ProjectOrganizationBulkPickerProps) {
   const [query, setQuery] = useState("");
@@ -22,14 +30,14 @@ export function ProjectOrganizationBulkPicker({
     const canonicalQuery = canonicalizeOrganizationInput(query);
     return organizations.filter(
       (organization) =>
-        organization.isActive &&
-        !organization.isDeleted &&
+        (includeInactive ||
+          (organization.isActive && !organization.isDeleted)) &&
         (!canonicalQuery ||
           canonicalizeOrganizationInput(organization.name).includes(
             canonicalQuery,
           )),
     );
-  }, [organizations, query]);
+  }, [includeInactive, organizations, query]);
 
   const selectedIds = [...selectedOrganizationIds];
 
@@ -69,18 +77,28 @@ export function ProjectOrganizationBulkPicker({
               <span className="er-project-organization-candidate__name">
                 {organization.name}
               </span>
-              <dl className="er-project-organization-candidate__facts">
-                <div>
-                  <dt>대표 담당자</dt>
-                  <dd>
-                    {organization.primaryLeader?.displayName ?? "대표 미지정"}
-                  </dd>
-                </div>
-                <div>
-                  <dt>연결 프로젝트</dt>
-                  <dd>{organization.projectCount}개</dd>
-                </div>
-              </dl>
+              {"primaryLeader" in organization ? (
+                <dl className="er-project-organization-candidate__facts">
+                  <div>
+                    <dt>대표 담당자</dt>
+                    <dd>
+                      {organization.primaryLeader?.displayName ?? "대표 미지정"}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>연결 프로젝트</dt>
+                    <dd>{organization.projectCount}개</dd>
+                  </div>
+                </dl>
+              ) : (
+                <span className="er-muted">
+                  {organization.isDeleted
+                    ? "삭제된 조직 이력"
+                    : organization.isActive
+                      ? "사용 중"
+                      : "사용 중지"}
+                </span>
+              )}
               {linked ? <span className="er-muted">이미 추가됨</span> : null}
             </label>
           );

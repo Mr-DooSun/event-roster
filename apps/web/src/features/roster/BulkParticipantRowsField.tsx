@@ -221,6 +221,7 @@ export function BulkParticipantRowsField({
               <Button
                 type="button"
                 variant="danger"
+                className="er-bulk-participant-row__remove"
                 disabled={disabled}
                 aria-label={`${rowNumber}번 참가자 삭제`}
                 onClick={() => removeRow(row.clientId)}

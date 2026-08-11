@@ -787,11 +787,15 @@ a {
     minmax(12rem, 2fr) minmax(8rem, 1fr)
     minmax(8rem, 1fr) auto;
   gap: var(--er-space-3);
-  align-items: end;
+  align-items: start;
   margin: 0;
   padding: var(--er-space-4);
   border: 1px solid var(--er-color-border);
   border-radius: var(--er-radius-md);
+}
+.er-bulk-participant-row__remove {
+  align-self: start;
+  margin-top: calc(var(--er-space-5) + 0.125rem);
 }
 .er-bulk-participant-duplicate,
 .er-bulk-participant-invalid {
@@ -1091,7 +1095,7 @@ th {
   .er-bulk-participant-row {
     grid-template-columns: 1fr;
   }
-  .er-bulk-participant-row > .er-button {
+  .er-bulk-participant-row > .er-bulk-participant-row__remove {
     justify-self: start;
     margin-top: var(--er-space-2);
   }
