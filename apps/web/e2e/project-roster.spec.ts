@@ -1,6 +1,66 @@
 import { expect, request, test } from "@playwright/test";
 import { fixture, login } from "./support";
 
+test("operator adds two selected organization candidates to a project at once", async ({
+  page,
+}) => {
+  const data = fixture();
+  const candidateNames = ["E2E 일괄 추가 후보 알파", "E2E 일괄 추가 후보 베타"];
+  const api = await request.newContext({
+    baseURL: data.baseUrl,
+    ignoreHTTPSErrors: true,
+    extraHTTPHeaders: { Origin: data.baseUrl },
+  });
+  const loginResponse = await api.post("/api/v1/auth/login", {
+    data: {
+      loginId: data.operator.loginId,
+      password: data.operator.password,
+    },
+  });
+  expect(loginResponse.ok()).toBe(true);
+  const auth = (await loginResponse.json()) as {
+    accessToken: string;
+    csrfToken: string;
+  };
+  const headers = {
+    Authorization: `Bearer ${auth.accessToken}`,
+    "X-ER-CSRF": auth.csrfToken,
+  };
+  for (const name of candidateNames) {
+    const created = await api.post("/api/v1/organizations", {
+      headers,
+      data: { name },
+    });
+    expect(created.ok()).toBe(true);
+  }
+  await api.dispose();
+
+  await login(page, data.operator.loginId, data.operator.password);
+  await page.goto(`/projects/${data.rosterProjectId}`);
+  await page.getByRole("tab", { name: "조직" }).click();
+  for (const name of candidateNames) {
+    await page.getByRole("checkbox", { name }).check();
+  }
+
+  const bulkAddResponse = page.waitForResponse(
+    (response) =>
+      response.url() ===
+        `${data.baseUrl}/api/v1/projects/${data.rosterProjectId}/organizations/bulk` &&
+      response.request().method() === "POST",
+  );
+  await page.getByRole("button", { name: "선택한 2개 조직 추가" }).click();
+  expect((await bulkAddResponse).ok()).toBe(true);
+
+  const projectOrganizations = page
+    .locator(".er-panel")
+    .filter({ has: page.getByRole("heading", { name: "프로젝트 조직" }) });
+  for (const name of candidateNames) {
+    await expect(
+      projectOrganizations.getByText(name, { exact: true }),
+    ).toBeVisible();
+  }
+});
+
 test("participant profile rows support exact editing and filtering", async ({
   page,
 }) => {
@@ -146,14 +206,12 @@ test("operator moves a pre-registration project in progress and updates its rost
   await expect(page.getByText("예상 0명")).toBeVisible();
 
   await page.getByRole("tab", { name: "조직" }).click();
-  const organizationSearch = page.getByRole("combobox", {
-    name: "조직 이름 검색 또는 입력",
-  });
-  await organizationSearch.fill("황룡사");
+  await page.getByRole("textbox", { name: "새 조직 이름" }).fill("황룡사");
+  await page.getByRole("button", { name: "새 조직 생성 후 추가" }).click();
   await page
-    .getByRole("option", { name: "“황룡사” 새 조직 생성 후 추가" })
+    .getByRole("dialog", { name: "새 조직 생성 후 추가" })
+    .getByRole("button", { name: "생성 후 추가" })
     .click();
-  await page.getByRole("button", { name: "생성 후 추가" }).click();
   await expect(page.getByText("황룡사", { exact: true })).toBeVisible();
 
   await page.getByRole("tab", { name: "참가 명단" }).click();

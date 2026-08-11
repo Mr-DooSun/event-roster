@@ -134,11 +134,8 @@ test("operator delegates pre-registration roster entry to an organization leader
   await page.getByRole("link", { name: "프로젝트" }).click();
   await page.getByRole("link", { name: "E2E 상반기 프로젝트" }).click();
   await page.getByRole("tab", { name: "조직" }).click();
-  await page
-    .getByRole("combobox", { name: "조직 이름 검색 또는 입력" })
-    .fill("E2E 2팀");
-  await page.getByRole("option", { name: /E2E 2팀/ }).click();
-  await page.getByRole("button", { name: "프로젝트에 추가" }).click();
+  await page.getByRole("checkbox", { name: "E2E 2팀" }).check();
+  await page.getByRole("button", { name: "선택한 1개 조직 추가" }).click();
 
   await page.getByRole("button", { name: "로그아웃" }).click();
   await login(page, "e2e-org-leader", temporaryPassword);

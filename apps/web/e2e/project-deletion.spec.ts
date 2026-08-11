@@ -90,18 +90,21 @@ test("operator excludes and re-adds an organization, then deletes and restores a
 
     await page.goto(`/projects/${exclusionProject.id}`);
     await page.getByRole("tab", { name: "조직" }).click();
+    const projectOrganizations = page
+      .locator(".er-panel")
+      .filter({ has: page.getByRole("heading", { name: "프로젝트 조직" }) });
     await page.getByRole("button", { name: "프로젝트에서 제외" }).click();
     await page.getByRole("button", { name: "제외하기" }).click();
-    await expect(page.getByText("E2E 1팀", { exact: true })).toBeHidden();
+    await expect(
+      projectOrganizations.getByText("E2E 1팀", { exact: true }),
+    ).toHaveCount(0);
     await expect(page.getByText("연결된 조직이 없습니다.")).toBeVisible();
 
-    const organizationSearch = page.getByRole("combobox", {
-      name: "조직 이름 검색 또는 입력",
-    });
-    await organizationSearch.fill("E2E 1팀");
-    await page.getByRole("option", { name: "E2E 1팀" }).click();
-    await page.getByRole("button", { name: "프로젝트에 추가" }).click();
-    await expect(page.getByText("E2E 1팀", { exact: true })).toBeVisible();
+    await page.getByRole("checkbox", { name: "E2E 1팀" }).check();
+    await page.getByRole("button", { name: "선택한 1개 조직 추가" }).click();
+    await expect(
+      projectOrganizations.getByText("E2E 1팀", { exact: true }),
+    ).toBeVisible();
 
     await page.goto(`/projects/${closedProject.id}`);
     await page.getByRole("button", { name: "프로젝트 삭제" }).click();
