@@ -1,6 +1,12 @@
 import "@testing-library/jest-dom/vitest";
 import type { OrganizationSummary } from "@event-roster/contracts";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { ProjectOrganizationBulkPicker } from "./ProjectOrganizationBulkPicker";
 
@@ -52,7 +58,14 @@ it("활성인 조직의 정보와 연결 상태를 표시하고 선택을 전달
   expect(screen.getByRole("checkbox", { name: "관문사" })).toBeEnabled();
   expect(screen.getByRole("checkbox", { name: "금룡사" })).toBeDisabled();
   expect(screen.getByText("대표 미지정")).toBeVisible();
-  expect(screen.getByText("연결 프로젝트 3개")).toBeVisible();
+  const candidate = screen
+    .getByRole("checkbox", { name: "관문사" })
+    .closest("label");
+  if (!candidate) throw new Error("관문사 카드가 없습니다.");
+  const projectFact =
+    within(candidate).getByText("연결 프로젝트").parentElement;
+  if (!projectFact) throw new Error("연결 프로젝트 정보가 없습니다.");
+  expect(within(projectFact).getByText("3개")).toBeVisible();
   expect(
     screen.queryByRole("checkbox", { name: "비활성 사찰" }),
   ).not.toBeInTheDocument();
@@ -61,7 +74,7 @@ it("활성인 조직의 정보와 연결 상태를 표시하고 선택을 전달
   ).not.toBeInTheDocument();
 
   fireEvent.change(screen.getByRole("textbox", { name: "조직 이름 검색" }), {
-    target: { value: " 관문사 " },
+    target: { value: "관문" },
   });
   expect(screen.getByRole("checkbox", { name: "관문사" })).toBeVisible();
   expect(

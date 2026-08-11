@@ -78,7 +78,7 @@ export function ProjectOrganizationBulkPicker({
                 </div>
                 <div>
                   <dt>연결 프로젝트</dt>
-                  <dd>연결 프로젝트 {organization.projectCount}개</dd>
+                  <dd>{organization.projectCount}개</dd>
                 </div>
               </dl>
               {linked ? <span className="er-muted">이미 추가됨</span> : null}
