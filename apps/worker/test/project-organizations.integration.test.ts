@@ -55,6 +55,27 @@ async function countActiveProjectLinks(projectId: string) {
   )?.count;
 }
 
+async function countMembershipAudits(
+  projectId: string,
+  organizationIds: string[],
+) {
+  if (organizationIds.length === 0) return 0;
+  const placeholders = organizationIds.map(() => "?").join(", ");
+  return (
+    await env.DB.prepare(
+      `SELECT COUNT(*) AS count FROM audit_logs
+       WHERE entity_type = 'PROJECT_ORGANIZATION'
+         AND entity_id IN (${placeholders})`,
+    )
+      .bind(
+        ...organizationIds.map(
+          (organizationId) => `${projectId}:${organizationId}`,
+        ),
+      )
+      .first<{ count: number }>()
+  )?.count;
+}
+
 it("adds multiple organizations in request order with one project revision and audits", async () => {
   const operator = await seedOperator();
   const first = await seedOrganization("bulk-first", "일괄 첫 조직");
@@ -119,6 +140,47 @@ it("rolls back every bulk addition when one requested organization is inactive",
   expect(response.status).toBe(409);
   expect(await countProjectLinks(project.id)).toBe(0);
   expect(await projectRevision(project.id)).toBe(project.revision);
+  expect(
+    await countMembershipAudits(project.id, [active.id, inactive.id]),
+  ).toBe(0);
+});
+
+it("rolls back every bulk addition when one requested organization is deleted", async () => {
+  const operator = await seedOperator();
+  const active = await seedOrganization("bulk-active-deleted", "활성 조직");
+  const deleted = await seedOrganization("bulk-deleted", "삭제 조직");
+  const project = await seedProject(operator);
+  await env.DB.prepare(
+    `UPDATE organizations
+     SET is_active = 0, deleted_at = ?, deleted_by = ?, updated_at = ?
+     WHERE id = ?`,
+  )
+    .bind(
+      "2026-08-11T00:00:00.000Z",
+      operator.userId,
+      "2026-08-11T00:00:00.000Z",
+      deleted.id,
+    )
+    .run();
+
+  const response = await authedRequest(
+    operator,
+    `/api/v1/projects/${project.id}/organizations/bulk`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        organizationIds: [active.id, deleted.id],
+        expectedProjectRevision: project.revision,
+      }),
+    },
+  );
+
+  expect(response.status).toBe(409);
+  expect(await countProjectLinks(project.id)).toBe(0);
+  expect(await projectRevision(project.id)).toBe(project.revision);
+  expect(await countMembershipAudits(project.id, [active.id, deleted.id])).toBe(
+    0,
+  );
 });
 
 it("reactivates an inactive membership and adds a new membership with distinct audits", async () => {
@@ -232,6 +294,9 @@ it("rolls back a bulk request when one membership is already active", async () =
   expect(response.status).toBe(409);
   expect(await countProjectLinks(project.id)).toBe(1);
   expect(await projectRevision(project.id)).toBe(linked.projectRevision);
+  expect(
+    await countMembershipAudits(project.id, [newOrganization.id, active.id]),
+  ).toBe(1);
 });
 
 it("returns STALE_REVISION without adding bulk memberships", async () => {

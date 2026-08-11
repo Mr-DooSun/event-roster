@@ -124,6 +124,16 @@ export function ProjectOrganizationsPanel({
             (correctionMode || !membership.masterIsDeleted),
         )
       : undefined;
+  const selectedInactiveBulkMembership =
+    !correctionMode &&
+    selectedOrganizationIds.some((organizationId) =>
+      memberships.some(
+        (membership) =>
+          membership.organizationId === organizationId &&
+          !membership.isActive &&
+          !membership.masterIsDeleted,
+      ),
+    );
   const ordinaryOrganizations = correctionMode
     ? []
     : (allOrganizations as OrganizationSummary[]);
@@ -357,6 +367,11 @@ export function ProjectOrganizationsPanel({
                 disabled={busy || !organizationCandidatesAvailable}
                 onSelectionChange={setSelectedOrganizationIds}
               />
+              {selectedInactiveBulkMembership ? (
+                <StatusMessage tone="info">
+                  기존 명단과 집계 이력이 있으면 그대로 다시 연결됩니다.
+                </StatusMessage>
+              ) : null}
               <Button
                 type="button"
                 variant="primary"
@@ -378,7 +393,7 @@ export function ProjectOrganizationsPanel({
                 <label className="er-field">
                   <span>새 조직 이름</span>
                   <input
-                    disabled={busy}
+                    disabled={busy || selectedOrganizationIds.length > 0}
                     value={newOrganizationName}
                     onChange={(event) =>
                       setNewOrganizationName(event.currentTarget.value)
@@ -388,7 +403,9 @@ export function ProjectOrganizationsPanel({
                 <Button
                   type="submit"
                   disabled={
-                    busy || !canonicalizeOrganizationInput(newOrganizationName)
+                    busy ||
+                    selectedOrganizationIds.length > 0 ||
+                    !canonicalizeOrganizationInput(newOrganizationName)
                   }
                 >
                   새 조직 생성 후 추가

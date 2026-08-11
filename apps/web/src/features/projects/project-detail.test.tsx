@@ -539,6 +539,68 @@ it("adds selected organizations in bulk and clears the selection after refresh",
   ).toBeDisabled();
 });
 
+it("disables new organization creation while bulk candidates are selected", () => {
+  render(
+    <ProjectOrganizationsPanel
+      projectId="project-1"
+      projectRevision={7}
+      memberships={[]}
+      allOrganizations={[organizationSummary({ id: "org-1", name: "기획팀" })]}
+      canMutateMemberships
+      canManageOrganizations
+      onChanged={vi.fn().mockResolvedValue(undefined)}
+    />,
+  );
+
+  const nameInput = screen.getByRole("textbox", { name: "새 조직 이름" });
+  const createButton = screen.getByRole("button", {
+    name: "새 조직 생성 후 추가",
+  });
+  fireEvent.change(nameInput, { target: { value: "새 기획팀" } });
+  expect(nameInput).toBeEnabled();
+  expect(createButton).toBeEnabled();
+
+  fireEvent.click(screen.getByRole("checkbox", { name: "기획팀" }));
+  expect(nameInput).toBeDisabled();
+  expect(createButton).toBeDisabled();
+
+  fireEvent.click(screen.getByRole("checkbox", { name: "기획팀" }));
+  expect(nameInput).toBeEnabled();
+  expect(createButton).toBeEnabled();
+});
+
+it("warns when a selected bulk candidate reactivates an inactive membership", () => {
+  render(
+    <ProjectOrganizationsPanel
+      projectId="project-1"
+      projectRevision={7}
+      memberships={[
+        organizationMembership({
+          organizationId: "org-1",
+          name: "기존 조직",
+          isActive: false,
+        }),
+      ]}
+      allOrganizations={[
+        organizationSummary({ id: "org-1", name: "기존 조직" }),
+      ]}
+      canMutateMemberships
+      canManageOrganizations
+      onChanged={vi.fn().mockResolvedValue(undefined)}
+    />,
+  );
+
+  expect(
+    screen.queryByText(
+      "기존 명단과 집계 이력이 있으면 그대로 다시 연결됩니다.",
+    ),
+  ).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("checkbox", { name: "기존 조직" }));
+  expect(
+    screen.getByText("기존 명단과 집계 이력이 있으면 그대로 다시 연결됩니다."),
+  ).toBeVisible();
+});
+
 it("shows progress while adding an existing organization", async () => {
   const pendingMutation = deferred<{
     organization: ProjectOrganization;
