@@ -44,6 +44,17 @@ async function countProjectLinks(projectId: string) {
   )?.count;
 }
 
+async function countActiveProjectLinks(projectId: string) {
+  return (
+    await env.DB.prepare(
+      `SELECT COUNT(*) AS count FROM project_organizations
+       WHERE project_id = ? AND is_active = 1`,
+    )
+      .bind(projectId)
+      .first<{ count: number }>()
+  )?.count;
+}
+
 it("adds multiple organizations in request order with one project revision and audits", async () => {
   const operator = await seedOperator();
   const first = await seedOrganization("bulk-first", "일괄 첫 조직");
@@ -68,6 +79,7 @@ it("adds multiple organizations in request order with one project revision and a
     projectRevision: project.revision + 1,
   });
   expect(await countProjectLinks(project.id)).toBe(2);
+  expect(await countActiveProjectLinks(project.id)).toBe(2);
   expect(await projectRevision(project.id)).toBe(project.revision + 1);
   expect(
     (
