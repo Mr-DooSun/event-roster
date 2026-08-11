@@ -3,7 +3,8 @@ import type {
   ParticipantRole,
   StudentGrade,
 } from "@event-roster/contracts";
-import { useMemo, useState } from "react";
+import type { ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "../../components/ui/Button";
 import { TextInput } from "../../components/ui/TextInput";
 import { GRADE_LABEL, ROLE_LABEL } from "./participant-profile-labels";
@@ -25,6 +26,8 @@ export interface RosterView {
   revision: number;
   updatedAt: string;
 }
+
+type RosterFilter = "organization" | "gender" | "status" | "role" | "grade";
 
 export function RosterTable({
   rows,
@@ -58,9 +61,8 @@ export function RosterTable({
     "ALL",
   );
   const [gender, setGender] = useState<"ALL" | Gender | "UNSPECIFIED">("ALL");
-  const [activeFilter, setActiveFilter] = useState<
-    "organization" | "gender" | "status" | "role" | "grade" | null
-  >(null);
+  const [activeFilter, setActiveFilter] = useState<RosterFilter | null>(null);
+  const filterMenuRef = useRef<HTMLDivElement>(null);
   const [sort, setSort] = useState<
     "DEFAULT" | "ORGANIZATION" | "GRADE" | "NAME"
   >("DEFAULT");
@@ -105,6 +107,136 @@ export function RosterTable({
       })
       .sort((left, right) => compareRoster(left, right, sort));
   }, [gender, grade, organization, query, role, rows, sort, status]);
+
+  useEffect(() => {
+    if (activeFilter === null) return;
+
+    const closeOutside = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (filterMenuRef.current?.contains(target)) return;
+      if (
+        target instanceof Element &&
+        target.closest("[data-roster-filter-trigger]")
+      ) {
+        return;
+      }
+      setActiveFilter(null);
+    };
+    const closeWithEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setActiveFilter(null);
+    };
+
+    document.addEventListener("pointerdown", closeOutside);
+    document.addEventListener("keydown", closeWithEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOutside);
+      document.removeEventListener("keydown", closeWithEscape);
+    };
+  }, [activeFilter]);
+
+  const toggleFilter = (filter: RosterFilter) => {
+    setActiveFilter((current) => (current === filter ? null : filter));
+  };
+
+  const renderFilterMenu = (filter: RosterFilter, label: string) => {
+    if (activeFilter !== filter) return null;
+
+    let control: ReactNode;
+    if (filter === "organization") {
+      control = (
+        <select
+          aria-label="조직 필터"
+          value={organization}
+          onChange={(event) => setOrganization(event.currentTarget.value)}
+        >
+          <option value="ALL">전체 조직</option>
+          {organizations.map((name) => (
+            <option key={name} value={name}>
+              {name}
+            </option>
+          ))}
+        </select>
+      );
+    } else if (filter === "gender") {
+      control = (
+        <select
+          aria-label="성별 필터"
+          value={gender}
+          onChange={(event) =>
+            setGender(event.currentTarget.value as typeof gender)
+          }
+        >
+          <option value="ALL">전체 성별</option>
+          <option value="MALE">남성</option>
+          <option value="FEMALE">여성</option>
+          <option value="UNSPECIFIED">미지정</option>
+        </select>
+      );
+    } else if (filter === "status") {
+      control = (
+        <select
+          aria-label="상태 필터"
+          value={status}
+          onChange={(event) =>
+            setStatus(event.currentTarget.value as typeof status)
+          }
+        >
+          <option value="ALL">전체 상태</option>
+          <option value="ACTIVE">참석</option>
+          <option value="CANCELLED">취소</option>
+        </select>
+      );
+    } else if (filter === "role") {
+      control = (
+        <select
+          aria-label="참가자 구분 필터"
+          value={role}
+          onChange={(event) =>
+            setRole(event.currentTarget.value as typeof role)
+          }
+        >
+          <option value="ALL">전체 구분</option>
+          <option value="STUDENT">{ROLE_LABEL.STUDENT}</option>
+          <option value="TEACHER">{ROLE_LABEL.TEACHER}</option>
+          <option value="UNSPECIFIED">미지정</option>
+        </select>
+      );
+    } else {
+      control = (
+        <select
+          aria-label="학년 필터"
+          value={grade}
+          onChange={(event) =>
+            setGrade(event.currentTarget.value as typeof grade)
+          }
+        >
+          <option value="ALL">전체 학년</option>
+          {Object.entries(GRADE_LABEL).map(([value, gradeLabel]) => (
+            <option key={value} value={value}>
+              {gradeLabel}
+            </option>
+          ))}
+          <option value="UNSPECIFIED">미지정</option>
+        </select>
+      );
+    }
+
+    return (
+      <div
+        ref={filterMenuRef}
+        className="er-roster-filter-popover"
+        role="dialog"
+        aria-label={`${label} 필터 메뉴`}
+      >
+        <div className="er-field">
+          <span>{label} 필터</span>
+          {control}
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="er-page-stack">
       <div className="er-roster-filters">
@@ -114,107 +246,6 @@ export function RosterTable({
           value={query}
           onChange={(event) => setQuery(event.currentTarget.value)}
         />
-        {activeFilter === "organization" ? (
-          <label className="er-field">
-            <span>조직 필터</span>
-            <select
-              value={organization}
-              onChange={(event) => setOrganization(event.currentTarget.value)}
-            >
-              <option value="ALL">전체 조직</option>
-              {organizations.map((name) => (
-                <option key={name} value={name}>
-                  {name}
-                </option>
-              ))}
-            </select>
-          </label>
-        ) : null}
-        {activeFilter === "gender" ? (
-          <label className="er-field">
-            <span>성별 필터</span>
-            <select
-              value={gender}
-              onChange={(event) =>
-                setGender(event.currentTarget.value as typeof gender)
-              }
-            >
-              <option value="ALL">전체 성별</option>
-              <option value="MALE">남성</option>
-              <option value="FEMALE">여성</option>
-              <option value="UNSPECIFIED">미지정</option>
-            </select>
-          </label>
-        ) : null}
-        {activeFilter === "status" ? (
-          <label className="er-field">
-            <span>상태 필터</span>
-            <select
-              value={status}
-              onChange={(event) =>
-                setStatus(event.currentTarget.value as typeof status)
-              }
-            >
-              <option value="ALL">전체 상태</option>
-              <option value="ACTIVE">참석</option>
-              <option value="CANCELLED">취소</option>
-            </select>
-          </label>
-        ) : null}
-        {activeFilter === "role" ? (
-          <label className="er-field">
-            <span>참가자 구분 필터</span>
-            <select
-              value={role}
-              onChange={(event) =>
-                setRole(event.currentTarget.value as typeof role)
-              }
-            >
-              <option value="ALL">전체 구분</option>
-              <option value="STUDENT">{ROLE_LABEL.STUDENT}</option>
-              <option value="TEACHER">{ROLE_LABEL.TEACHER}</option>
-              <option value="UNSPECIFIED">미지정</option>
-            </select>
-          </label>
-        ) : null}
-        {activeFilter === "grade" ? (
-          <label className="er-field">
-            <span>학년 필터</span>
-            <select
-              value={grade}
-              onChange={(event) =>
-                setGrade(event.currentTarget.value as typeof grade)
-              }
-            >
-              <option value="ALL">전체 학년</option>
-              {Object.entries(GRADE_LABEL).map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
-              <option value="UNSPECIFIED">미지정</option>
-            </select>
-          </label>
-        ) : null}
-        {false ? (
-          <label className="er-field">
-            <span>학년 필터</span>
-            <select
-              value={grade}
-              onChange={(event) =>
-                setGrade(event.currentTarget.value as typeof grade)
-              }
-            >
-              <option value="ALL">전체 학년</option>
-              {Object.entries(GRADE_LABEL).map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
-              <option value="UNSPECIFIED">미지정</option>
-            </select>
-          </label>
-        ) : null}
       </div>
       {rows.length > 130 ? (
         <p className="er-status er-status--error" role="alert">
@@ -225,7 +256,7 @@ export function RosterTable({
         <table>
           <thead>
             <tr>
-              <th>
+              <th className="er-roster-header-cell">
                 <span>이름</span>
                 <button
                   type="button"
@@ -236,7 +267,7 @@ export function RosterTable({
                   ↕
                 </button>
               </th>
-              <th>
+              <th className="er-roster-header-cell">
                 <span>조직</span>
                 <button
                   type="button"
@@ -250,23 +281,31 @@ export function RosterTable({
                   type="button"
                   aria-label="조직 필터"
                   className="er-roster-header-icon"
-                  onClick={() => setActiveFilter("organization")}
+                  aria-haspopup="dialog"
+                  aria-expanded={activeFilter === "organization"}
+                  data-roster-filter-trigger
+                  onClick={() => toggleFilter("organization")}
                 >
                   ⏷
                 </button>
+                {renderFilterMenu("organization", "조직")}
               </th>
-              <th>
+              <th className="er-roster-header-cell">
                 <span>참가자 구분</span>
                 <button
                   type="button"
                   aria-label="참가자 구분 필터"
                   className="er-roster-header-icon"
-                  onClick={() => setActiveFilter("role")}
+                  aria-haspopup="dialog"
+                  aria-expanded={activeFilter === "role"}
+                  data-roster-filter-trigger
+                  onClick={() => toggleFilter("role")}
                 >
                   ⏷
                 </button>
+                {renderFilterMenu("role", "참가자 구분")}
               </th>
-              <th>
+              <th className="er-roster-header-cell">
                 <span>학년</span>
                 <button
                   type="button"
@@ -280,33 +319,45 @@ export function RosterTable({
                   type="button"
                   aria-label="학년 필터"
                   className="er-roster-header-icon"
-                  onClick={() => setActiveFilter("grade")}
+                  aria-haspopup="dialog"
+                  aria-expanded={activeFilter === "grade"}
+                  data-roster-filter-trigger
+                  onClick={() => toggleFilter("grade")}
                 >
                   ⏷
                 </button>
+                {renderFilterMenu("grade", "학년")}
               </th>
-              <th>
+              <th className="er-roster-header-cell">
                 <span>성별</span>
                 <button
                   type="button"
                   aria-label="성별 필터"
                   className="er-roster-header-icon"
-                  onClick={() => setActiveFilter("gender")}
+                  aria-haspopup="dialog"
+                  aria-expanded={activeFilter === "gender"}
+                  data-roster-filter-trigger
+                  onClick={() => toggleFilter("gender")}
                 >
                   ⏷
                 </button>
+                {renderFilterMenu("gender", "성별")}
               </th>
               <th>등록 시점</th>
-              <th>
+              <th className="er-roster-header-cell">
                 <span>상태</span>
                 <button
                   type="button"
                   aria-label="상태 필터"
                   className="er-roster-header-icon"
-                  onClick={() => setActiveFilter("status")}
+                  aria-haspopup="dialog"
+                  aria-expanded={activeFilter === "status"}
+                  data-roster-filter-trigger
+                  onClick={() => toggleFilter("status")}
                 >
                   ⏷
                 </button>
+                {renderFilterMenu("status", "상태")}
               </th>
               <th>작업</th>
             </tr>

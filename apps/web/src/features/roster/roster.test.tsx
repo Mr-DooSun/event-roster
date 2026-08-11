@@ -1438,6 +1438,45 @@ it("shows participant profiles and combines role and grade filters with existing
   expect(screen.queryByText("기존 참가자")).not.toBeInTheDocument();
 });
 
+it("opens roster filters from table headers and closes the menu outside or with Escape", () => {
+  render(
+    <RosterTable
+      rows={[entry("ACTIVE")]}
+      canMutate={false}
+      onStatusChange={vi.fn().mockResolvedValue(undefined)}
+      onEdit={vi.fn()}
+    />,
+  );
+
+  const organizationHeader = screen.getByRole("columnheader", {
+    name: /^조직/,
+  });
+  const organizationFilter = screen.getByRole("button", {
+    name: "조직 필터",
+  });
+
+  fireEvent.click(organizationFilter);
+
+  const menu = screen.getByRole("dialog", { name: "조직 필터 메뉴" });
+  expect(organizationHeader).toContainElement(menu);
+  expect(
+    within(menu).getByRole("combobox", { name: "조직 필터" }),
+  ).toBeVisible();
+  expect(organizationFilter).toHaveAttribute("aria-expanded", "true");
+
+  fireEvent.pointerDown(document.body);
+  expect(
+    screen.queryByRole("dialog", { name: "조직 필터 메뉴" }),
+  ).not.toBeInTheDocument();
+
+  fireEvent.click(organizationFilter);
+  expect(screen.getByRole("dialog", { name: "조직 필터 메뉴" })).toBeVisible();
+  fireEvent.keyDown(document, { key: "Escape" });
+  expect(
+    screen.queryByRole("dialog", { name: "조직 필터 메뉴" }),
+  ).not.toBeInTheDocument();
+});
+
 it("keeps the roster snapshot name and labels rows from deleted organizations", () => {
   render(
     <AuthProvider restoreOnMount={false}>
