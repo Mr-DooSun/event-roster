@@ -1,4 +1,5 @@
 import {
+  type Gender,
   type ParticipantRole,
   ParticipantRoleSchema,
   type ProjectStatus,
@@ -85,6 +86,7 @@ export async function createParticipantAndAddToProject(
     organizationId: string;
     role: ParticipantRole;
     grade: StudentGrade | null;
+    gender?: Gender | null | undefined;
     expectedRevision: number;
   },
   now = new Date(),
@@ -149,9 +151,9 @@ export async function createParticipantAndAddToProject(
           `INSERT INTO project_roster_entries
          (id, project_id, participant_id, organization_id,
           participant_name_snapshot, organization_name_snapshot,
-          participant_role_snapshot, student_grade_snapshot, source, status,
+          participant_role_snapshot, student_grade_snapshot, gender_snapshot, source, status,
           was_expected_at_start, revision, created_by, updated_by, created_at, updated_at)
-         SELECT ?, ?, ?, o.id, ?, o.name, ?, ?, ?, 'ACTIVE', 0, 0, ?, ?, ?, ?
+         SELECT ?, ?, ?, o.id, ?, o.name, ?, ?, ?, ?, 'ACTIVE', 0, 0, ?, ?, ?, ?
          FROM organizations o WHERE o.id = ?`,
         ).bind(
           entryId,
@@ -160,6 +162,7 @@ export async function createParticipantAndAddToProject(
           input.name,
           input.role,
           input.grade,
+          input.gender ?? null,
           source,
           actor.session.user.id,
           actor.session.user.id,
@@ -220,6 +223,7 @@ export async function createParticipantAndAddToProject(
       status: "ACTIVE",
       role: input.role,
       grade: input.grade,
+      gender: input.gender ?? null,
       wasExpectedAtStart: false,
       revision: 0,
       updatedAt: timestamp,
@@ -238,6 +242,7 @@ export async function updateProjectParticipant(
     organizationId?: string | undefined;
     role?: ParticipantRole | undefined;
     grade?: StudentGrade | null | undefined;
+    gender?: Gender | null | undefined;
     expectedRevision: number;
     expectedProjectRevision: number;
   },
@@ -299,6 +304,7 @@ export async function updateProjectParticipant(
   const guardId = crypto.randomUUID();
   const nextRole = input.role ?? entry.role;
   const nextGrade = input.grade !== undefined ? input.grade : entry.grade;
+  const nextGender = input.gender !== undefined ? input.gender : entry.gender;
   const membershipPredicate =
     nextOrganizationId === current.organizationId
       ? "1 = 1"
@@ -406,6 +412,7 @@ export async function updateProjectParticipant(
                ),
                participant_role_snapshot = ?,
                student_grade_snapshot = ?,
+               gender_snapshot = ?,
                revision = revision + 1,
                updated_by = ?,
                updated_at = ?
@@ -416,6 +423,7 @@ export async function updateProjectParticipant(
           nextOrganizationId,
           nextRole,
           nextGrade,
+          nextGender,
           actor.session.user.id,
           timestamp,
           projectId,

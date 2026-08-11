@@ -3,6 +3,7 @@ import { OrganizationIdSchema } from "./organizations";
 import {
   type ParticipantRole,
   ParticipantRoleSchema,
+  GenderSchema,
   RosterParticipantProfileSchema,
   RosterStatusSchema,
   type StudentGrade,
@@ -32,6 +33,7 @@ export const ClosedProjectRosterPatchRequestSchema = z
     organizationId: OrganizationIdSchema.optional(),
     role: ParticipantRoleSchema.optional(),
     grade: StudentGradeSchema.nullable().optional(),
+    gender: GenderSchema.nullable().optional(),
     status: RosterStatusSchema.optional(),
     expectedProjectRevision: z.number().int().nonnegative(),
     expectedEntryRevision: z.number().int().nonnegative(),
@@ -43,6 +45,7 @@ export const ClosedProjectRosterPatchRequestSchema = z
       value.organizationId !== undefined ||
       value.role !== undefined ||
       value.grade !== undefined ||
+      value.gender !== undefined ||
       value.status !== undefined,
   )
   .superRefine((value, context) => {

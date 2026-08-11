@@ -324,6 +324,7 @@ it("edits the selected roster profile and includes it in the save payload", asyn
       organizationId: "org-1",
       role: "STUDENT",
       grade: "M3",
+      gender: null,
       expectedRevision: 4,
     }),
   );
@@ -1384,6 +1385,8 @@ it("shows participant profiles and combines role and grade filters with existing
   );
 
   expect(screen.getByRole("columnheader", { name: "등록 시점" })).toBeVisible();
+  expect(screen.getByRole("columnheader", { name: "성별" })).toBeVisible();
+  expect(screen.getByRole("combobox", { name: "성별 필터" })).toBeVisible();
   const studentRow = screen.getByText("중2 학생").closest("tr");
   const teacherRow = screen.getByText("담당 교사").closest("tr");
   const legacyRow = screen.getByText("기존 참가자").closest("tr");
@@ -1395,7 +1398,7 @@ it("shows participant profiles and combines role and grade filters with existing
   expect(within(teacherRow as HTMLElement).getByText("담당교사")).toBeVisible();
   expect(within(teacherRow as HTMLElement).getByText("-")).toBeVisible();
   expect(within(legacyRow as HTMLElement).getAllByText("미지정")).toHaveLength(
-    2,
+    3,
   );
 
   fireEvent.change(screen.getByRole("textbox", { name: "명단 검색" }), {
@@ -2838,6 +2841,7 @@ it("keeps the participant profile draft after a stale revision reload", async ()
     organizationId: "org-2",
     role: "STUDENT",
     grade: "H3",
+    gender: null,
     expectedRevision: 1,
     expectedProjectRevision: 2,
   });

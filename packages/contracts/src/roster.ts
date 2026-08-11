@@ -4,6 +4,8 @@ import { normalizeParticipantName } from "./participant-names";
 import {
   type ParticipantRole,
   ParticipantRoleSchema,
+  type Gender,
+  GenderSchema,
   type StudentGrade,
   StudentGradeSchema,
 } from "./participant-profile";
@@ -13,6 +15,8 @@ import { ProjectIdSchema } from "./projects";
 export {
   type ParticipantRole,
   ParticipantRoleSchema,
+  type Gender,
+  GenderSchema,
   type StudentGrade,
   StudentGradeSchema,
 } from "./participant-profile";
@@ -31,6 +35,7 @@ const BulkParticipantNameSchema = z
 const rosterParticipantProfileFields = {
   role: ParticipantRoleSchema,
   grade: StudentGradeSchema.nullable(),
+  gender: GenderSchema.nullable().optional(),
 };
 
 function validateRosterParticipantProfile(
@@ -196,6 +201,7 @@ export const ProjectParticipantPatchRequestSchema = z
     organizationId: OrganizationIdSchema.optional(),
     role: ParticipantRoleSchema.optional(),
     grade: StudentGradeSchema.nullable().optional(),
+    gender: GenderSchema.nullable().optional(),
     expectedRevision: z.number().int().nonnegative(),
     expectedProjectRevision: z.number().int().nonnegative(),
   })
@@ -243,12 +249,14 @@ export const RosterEntrySchema = z.object({
   status: RosterStatusSchema,
   role: ParticipantRoleSchema.nullable(),
   grade: StudentGradeSchema.nullable(),
+  gender: GenderSchema.nullable(),
   revision: z.number().int().nonnegative(),
 });
 
 export type RosterRecordProfile = {
   role: ParticipantRole | null;
   grade: StudentGrade | null;
+  gender: Gender | null;
 };
 
 export type RosterEntry = z.infer<typeof RosterEntrySchema>;

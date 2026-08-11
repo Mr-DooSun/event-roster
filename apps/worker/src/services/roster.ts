@@ -843,6 +843,7 @@ function mapReturnedRoster(
       row.student_grade_snapshot === null
         ? null
         : StudentGradeSchema.parse(row.student_grade_snapshot),
+    gender: null,
     wasExpectedAtStart: row.was_expected_at_start === 1,
     revision: row.revision,
     updatedAt,

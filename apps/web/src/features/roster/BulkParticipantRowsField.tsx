@@ -1,5 +1,6 @@
 import {
   type BulkParticipantDuplicate,
+  type Gender,
   canonicalizeParticipantName,
   normalizeParticipantName,
   type ParticipantRole,
@@ -24,6 +25,7 @@ export interface BulkParticipantDraft {
   name: string;
   role: ParticipantRole;
   grade: StudentGrade | null;
+  gender?: Gender | null;
 }
 
 export interface BulkParticipantRowsFieldProps {
@@ -41,6 +43,7 @@ export function createBulkParticipantDraft(): BulkParticipantDraft {
     name: "",
     role: "STUDENT",
     grade: null,
+    gender: null,
   };
 }
 
@@ -166,6 +169,24 @@ export function BulkParticipantRowsField({
                     이 조직에 같은 이름의 참가자가 있습니다.
                   </small>
                 ) : null}
+              </label>
+              <label className="er-field">
+                <span>{rowNumber}번 성별</span>
+                <select
+                  value={row.gender ?? ""}
+                  disabled={disabled}
+                  onChange={(event) =>
+                    changeRow(row.clientId, (current) => ({
+                      ...current,
+                      gender: (event.currentTarget.value ||
+                        null) as Gender | null,
+                    }))
+                  }
+                >
+                  <option value="">미지정</option>
+                  <option value="MALE">남성</option>
+                  <option value="FEMALE">여성</option>
+                </select>
               </label>
               <label className="er-field">
                 <span>{rowNumber}번 참가자 구분</span>

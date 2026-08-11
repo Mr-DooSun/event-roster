@@ -1,4 +1,8 @@
-import type { ParticipantRole, StudentGrade } from "@event-roster/contracts";
+import type {
+  Gender,
+  ParticipantRole,
+  StudentGrade,
+} from "@event-roster/contracts";
 import { useState } from "react";
 import { Button } from "../../components/ui/Button";
 import { Dialog } from "../../components/ui/Dialog";
@@ -28,6 +32,7 @@ export function ParticipantEditDialog({
     organizationId: string;
     role: ParticipantRole;
     grade: StudentGrade | null;
+    gender: Gender | null;
     expectedRevision: number;
   }) => Promise<void>;
   onClose: () => void;
@@ -44,6 +49,7 @@ export function ParticipantEditDialog({
   const [grade, setGrade] = useState<StudentGrade | null>(
     roster.role === "STUDENT" ? roster.grade : null,
   );
+  const [gender, setGender] = useState<Gender | null>(roster.gender ?? null);
   const [busy, setBusy] = useState(false);
   const selectableOrganizations = organizations.filter(
     (organization) =>
@@ -66,6 +72,7 @@ export function ParticipantEditDialog({
         organizationId,
         role,
         grade,
+        gender,
         expectedRevision: snapshotMode ? roster.revision : participant.revision,
       });
     } catch {
@@ -101,6 +108,20 @@ export function ParticipantEditDialog({
                   : ""}
             </option>
           ))}
+        </select>
+      </label>
+      <label className="er-field">
+        <span>성별</span>
+        <select
+          disabled={busy}
+          value={gender ?? ""}
+          onChange={(event) =>
+            setGender((event.currentTarget.value || null) as Gender | null)
+          }
+        >
+          <option value="">미지정</option>
+          <option value="MALE">남성</option>
+          <option value="FEMALE">여성</option>
         </select>
       </label>
       {!allowOrganizationChange ? (

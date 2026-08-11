@@ -444,10 +444,25 @@ describe("roster contracts", () => {
       ProjectParticipantPatchRequestSchema.safeParse({
         role: "TEACHER",
         grade: null,
+        gender: "FEMALE",
         expectedRevision: 1,
         expectedProjectRevision: 2,
       }).success,
     ).toBe(true);
+    expect(
+      RosterParticipantProfileSchema.safeParse({
+        role: "STUDENT",
+        grade: "M1",
+        gender: "MALE",
+      }).success,
+    ).toBe(true);
+    expect(
+      RosterParticipantProfileSchema.safeParse({
+        role: "STUDENT",
+        grade: "M1",
+        gender: "OTHER",
+      }).success,
+    ).toBe(false);
   });
 });
 

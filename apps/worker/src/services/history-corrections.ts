@@ -441,6 +441,7 @@ async function addExistingParticipantToClosedProject(
       status: "ACTIVE",
       role: after.role,
       grade: after.grade,
+      gender: null,
       wasExpectedAtStart: existing?.wasExpectedAtStart ?? false,
       revision: existing ? existing.revision + 1 : 0,
       updatedAt: timestamp,

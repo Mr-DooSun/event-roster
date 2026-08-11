@@ -299,6 +299,7 @@ export function ProjectRosterPage({
     organizationId: string;
     role: ParticipantRole;
     grade: StudentGrade | null;
+    gender: import("@event-roster/contracts").Gender | null;
     expectedRevision: number;
   }) {
     if (!editingParticipant) return;

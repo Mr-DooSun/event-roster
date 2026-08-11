@@ -1,6 +1,8 @@
 import {
   type ParticipantRole,
   ParticipantRoleSchema,
+  type Gender,
+  GenderSchema,
   type RosterSource,
   type RosterStatus,
   type StudentGrade,
@@ -19,6 +21,7 @@ export interface RosterRecord {
   status: RosterStatus;
   role: ParticipantRole | null;
   grade: StudentGrade | null;
+  gender: Gender | null;
   wasExpectedAtStart: boolean;
   revision: number;
   updatedAt: string;
@@ -36,6 +39,7 @@ interface RosterRow {
   status: RosterStatus;
   participant_role_snapshot: string | null;
   student_grade_snapshot: string | null;
+  gender_snapshot: string | null;
   was_expected_at_start: number;
   revision: number;
   updated_at: string;
@@ -44,7 +48,7 @@ interface RosterRow {
 const SELECT_ROSTER = `SELECT r.id, r.project_id, r.participant_id,
   p.participant_id AS participant_number, r.organization_id,
   r.participant_name_snapshot, r.organization_name_snapshot, r.source,
-  r.status, r.participant_role_snapshot, r.student_grade_snapshot,
+  r.status, r.participant_role_snapshot, r.student_grade_snapshot, r.gender_snapshot,
   r.was_expected_at_start, r.revision, r.updated_at
   FROM project_roster_entries r
   JOIN participants p ON p.id = r.participant_id`;
@@ -114,6 +118,10 @@ function mapRoster(row: RosterRow): RosterRecord {
       row.student_grade_snapshot === null
         ? null
         : StudentGradeSchema.parse(row.student_grade_snapshot),
+    gender:
+      row.gender_snapshot === null
+        ? null
+        : GenderSchema.parse(row.gender_snapshot),
     wasExpectedAtStart: row.was_expected_at_start === 1,
     revision: row.revision,
     updatedAt: row.updated_at,

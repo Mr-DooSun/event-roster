@@ -2,6 +2,7 @@ import type {
   BulkParticipantDuplicate,
   BulkRosterCreateRequest,
   BulkRosterCreateResponse,
+  Gender,
   ParticipantRole,
   RosterSource,
   StudentGrade,
@@ -74,6 +75,7 @@ export async function createBulkParticipantsAndAddToProject(
     participantNumber: `P-${crypto.randomUUID().toUpperCase()}`,
     rosterEntryId: crypto.randomUUID(),
     ...participant,
+    gender: participant.gender ?? null,
   }));
   const guardId = crypto.randomUUID();
   const participantRevisionSum = existingParticipants.reduce(
@@ -108,6 +110,7 @@ export async function createBulkParticipantsAndAddToProject(
         participantName: participant.name,
         participantRole: participant.role,
         studentGrade: participant.grade,
+        gender: participant.gender,
       }),
     },
     {
@@ -122,6 +125,7 @@ export async function createBulkParticipantsAndAddToProject(
         participantName: participant.name,
         participantRole: participant.role,
         studentGrade: participant.grade,
+        gender: participant.gender,
       }),
     },
   ]);
@@ -199,6 +203,7 @@ export async function createBulkParticipantsAndAddToProject(
         status: "ACTIVE",
         role: participant.role,
         grade: participant.grade,
+        gender: participant.gender,
         wasExpectedAtStart: false,
         revision: 0,
         updatedAt: timestamp,
@@ -237,6 +242,7 @@ interface PreparedParticipant {
   name: string;
   role: ParticipantRole;
   grade: StudentGrade | null;
+  gender: Gender | null;
 }
 
 interface PreparedAudit {
@@ -282,19 +288,19 @@ function rosterInsert(
   actorUserId: string,
   timestamp: string,
 ) {
-  const values = rows.map(() => "(?, ?, ?, ?, ?)").join(", ");
+  const values = rows.map(() => "(?, ?, ?, ?, ?, ?)").join(", ");
   return db
     .prepare(
-      `WITH input(id, participant_id, participant_name, participant_role, student_grade)
+      `WITH input(id, participant_id, participant_name, participant_role, student_grade, gender)
        AS (VALUES ${values})
        INSERT INTO project_roster_entries
        (id, project_id, participant_id, organization_id,
         participant_name_snapshot, organization_name_snapshot,
-        participant_role_snapshot, student_grade_snapshot, source, status,
+        participant_role_snapshot, student_grade_snapshot, gender_snapshot, source, status,
         was_expected_at_start, revision, created_by, updated_by, created_at, updated_at)
        SELECT input.id, ?, input.participant_id, o.id,
               input.participant_name, o.name, input.participant_role,
-              input.student_grade, ?, 'ACTIVE',
+              input.student_grade, input.gender, ?, 'ACTIVE',
               0, 0, ?, ?, ?, ?
        FROM input JOIN organizations o ON o.id = ?`,
     )
@@ -305,6 +311,7 @@ function rosterInsert(
         row.name,
         row.role,
         row.grade,
+        row.gender,
       ]),
       projectId,
       source,

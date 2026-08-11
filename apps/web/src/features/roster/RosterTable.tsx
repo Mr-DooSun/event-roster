@@ -1,4 +1,8 @@
-import type { ParticipantRole, StudentGrade } from "@event-roster/contracts";
+import type {
+  Gender,
+  ParticipantRole,
+  StudentGrade,
+} from "@event-roster/contracts";
 import { useMemo, useState } from "react";
 import { Button } from "../../components/ui/Button";
 import { TextInput } from "../../components/ui/TextInput";
@@ -14,6 +18,7 @@ export interface RosterView {
   organizationName: string;
   role: ParticipantRole | null;
   grade: StudentGrade | null;
+  gender?: Gender | null;
   source: "PRE_REGISTRATION" | "IN_PROGRESS";
   status: "ACTIVE" | "CANCELLED";
   wasExpectedAtStart: boolean;
@@ -52,44 +57,57 @@ export function RosterTable({
   const [grade, setGrade] = useState<"ALL" | StudentGrade | "UNSPECIFIED">(
     "ALL",
   );
+  const [gender, setGender] = useState<"ALL" | Gender | "UNSPECIFIED">("ALL");
+  const [sort, setSort] = useState<
+    "DEFAULT" | "ORGANIZATION" | "GRADE" | "NAME"
+  >("DEFAULT");
   const organizations = useMemo(
     () => [...new Set(rows.slice(0, 130).map((row) => row.organizationName))],
     [rows],
   );
   const filtered = useMemo(() => {
     const key = query.trim().toLocaleLowerCase();
-    return rows.slice(0, 130).filter((row) => {
-      const matchesQuery =
-        !key ||
-        `${row.participantName} ${row.organizationName} ${row.participantNumber}`
-          .toLocaleLowerCase()
-          .includes(key);
-      const matchesOrganization =
-        organization === "ALL" || row.organizationName === organization;
-      const matchesStatus = status === "ALL" || row.status === status;
-      const matchesRole =
-        role === "ALL" ||
-        (role === "UNSPECIFIED" ? row.role === null : row.role === role);
-      const matchesGrade =
-        grade === "ALL" ||
-        (grade === "UNSPECIFIED"
-          ? row.grade === null
-          : row.role !== "TEACHER" && row.grade === grade);
-      return (
-        matchesQuery &&
-        matchesOrganization &&
-        matchesStatus &&
-        matchesRole &&
-        matchesGrade
-      );
-    });
-  }, [grade, organization, query, role, rows, status]);
+    return rows
+      .slice(0, 130)
+      .filter((row) => {
+        const matchesQuery =
+          !key ||
+          `${row.participantName} ${row.organizationName}`
+            .toLocaleLowerCase()
+            .includes(key);
+        const matchesOrganization =
+          organization === "ALL" || row.organizationName === organization;
+        const matchesStatus = status === "ALL" || row.status === status;
+        const matchesRole =
+          role === "ALL" ||
+          (role === "UNSPECIFIED" ? row.role === null : row.role === role);
+        const matchesGrade =
+          grade === "ALL" ||
+          (grade === "UNSPECIFIED"
+            ? row.grade === null
+            : row.role !== "TEACHER" && row.grade === grade);
+        const matchesGender =
+          gender === "ALL" ||
+          (gender === "UNSPECIFIED"
+            ? row.gender === null
+            : row.gender === gender);
+        return (
+          matchesQuery &&
+          matchesOrganization &&
+          matchesStatus &&
+          matchesRole &&
+          matchesGrade &&
+          matchesGender
+        );
+      })
+      .sort((left, right) => compareRoster(left, right, sort));
+  }, [gender, grade, organization, query, role, rows, sort, status]);
   return (
     <div className="er-page-stack">
       <div className="er-roster-filters">
         <TextInput
           label="명단 검색"
-          placeholder="이름, 조직, 고유 ID"
+          placeholder="이름, 조직"
           value={query}
           onChange={(event) => setQuery(event.currentTarget.value)}
         />
@@ -105,6 +123,34 @@ export function RosterTable({
                 {name}
               </option>
             ))}
+          </select>
+        </label>
+        <label className="er-field">
+          <span>성별 필터</span>
+          <select
+            value={gender}
+            onChange={(event) =>
+              setGender(event.currentTarget.value as typeof gender)
+            }
+          >
+            <option value="ALL">전체 성별</option>
+            <option value="MALE">남성</option>
+            <option value="FEMALE">여성</option>
+            <option value="UNSPECIFIED">미지정</option>
+          </select>
+        </label>
+        <label className="er-field">
+          <span>정렬</span>
+          <select
+            value={sort}
+            onChange={(event) =>
+              setSort(event.currentTarget.value as typeof sort)
+            }
+          >
+            <option value="DEFAULT">조직 · 학년 · 이름순</option>
+            <option value="ORGANIZATION">조직순</option>
+            <option value="GRADE">학년순</option>
+            <option value="NAME">이름순</option>
           </select>
         </label>
         <label className="er-field">
@@ -161,11 +207,11 @@ export function RosterTable({
         <table>
           <thead>
             <tr>
-              <th>고유 ID</th>
               <th>이름</th>
               <th>조직</th>
               <th>참가자 구분</th>
               <th>학년</th>
+              <th>성별</th>
               <th>등록 시점</th>
               <th>상태</th>
               <th>작업</th>
@@ -174,7 +220,6 @@ export function RosterTable({
           <tbody>
             {filtered.map((row) => (
               <tr key={row.id}>
-                <td>{row.participantNumber}</td>
                 <td>{row.participantName}</td>
                 <td>
                   <span className="er-table-organization">
@@ -190,6 +235,13 @@ export function RosterTable({
                     ? "-"
                     : row.grade
                       ? GRADE_LABEL[row.grade]
+                      : "미지정"}
+                </td>
+                <td>
+                  {row.gender === "MALE"
+                    ? "남성"
+                    : row.gender === "FEMALE"
+                      ? "여성"
                       : "미지정"}
                 </td>
                 <td>
@@ -219,8 +271,12 @@ export function RosterTable({
                             row.status === "ACTIVE" ? "CANCELLED" : "ACTIVE",
                           )
                         }
+                        aria-label={
+                          busyRowIds?.has(row.id)
+                            ? undefined
+                            : `${row.participantName} ${row.status === "ACTIVE" ? "취소" : "복원"}`
+                        }
                       >
-                        {row.participantName}{" "}
                         {row.status === "ACTIVE" ? "취소" : "복원"}
                       </Button>
                     </div>
@@ -235,4 +291,33 @@ export function RosterTable({
       </div>
     </div>
   );
+}
+
+const GRADE_ORDER: Record<StudentGrade, number> = {
+  M1: 0,
+  M2: 1,
+  M3: 2,
+  H1: 3,
+  H2: 4,
+  H3: 5,
+};
+
+function compareRoster(
+  left: RosterView,
+  right: RosterView,
+  sort: "DEFAULT" | "ORGANIZATION" | "GRADE" | "NAME",
+) {
+  const organization = left.organizationName.localeCompare(
+    right.organizationName,
+    "ko",
+  );
+  const grade =
+    (left.grade === null ? 6 : GRADE_ORDER[left.grade]) -
+    (right.grade === null ? 6 : GRADE_ORDER[right.grade]);
+  const name = left.participantName.localeCompare(right.participantName, "ko");
+  const defaultOrder = organization || grade || name;
+  if (sort === "ORGANIZATION") return organization || grade || name;
+  if (sort === "GRADE") return grade || organization || name;
+  if (sort === "NAME") return name || organization || grade;
+  return defaultOrder;
 }
