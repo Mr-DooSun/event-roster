@@ -451,6 +451,7 @@ export function ProjectOrganizationsPanel({
         <Dialog
           title="조직 선택 추가"
           size="wide"
+          hideDefaultCloseAction
           onClose={() => setOrganizationPickerOpen(false)}
         >
           <ProjectOrganizationBulkPicker
@@ -466,20 +467,29 @@ export function ProjectOrganizationsPanel({
               기존 명단과 집계 이력이 있으면 그대로 다시 연결됩니다.
             </StatusMessage>
           ) : null}
-          <Button
-            type="button"
-            variant="primary"
-            loading={busyAction === "ADD_EXISTING"}
-            loadingText="선택한 조직 추가 중…"
-            disabled={
-              busy ||
-              !organizationCandidatesAvailable ||
-              selectedOrganizationIds.length === 0
-            }
-            onClick={() => void addSelectedOrganizations()}
-          >
-            선택한 {selectedOrganizationIds.length}개 조직 추가
-          </Button>
+          <div className="er-dialog-actions er-project-organization-picker-actions">
+            <Button
+              type="button"
+              variant="primary"
+              loading={busyAction === "ADD_EXISTING"}
+              loadingText="선택한 조직 추가 중…"
+              disabled={
+                busy ||
+                !organizationCandidatesAvailable ||
+                selectedOrganizationIds.length === 0
+              }
+              onClick={() => void addSelectedOrganizations()}
+            >
+              선택한 {selectedOrganizationIds.length}개 조직 추가
+            </Button>
+            <Button
+              type="button"
+              disabled={busy}
+              onClick={() => setOrganizationPickerOpen(false)}
+            >
+              닫기
+            </Button>
+          </div>
         </Dialog>
       ) : null}
       {canMutateMemberships && pendingExclusion ? (

@@ -403,6 +403,10 @@ a {
   gap: var(--er-space-3);
   margin-top: var(--er-space-2);
 }
+
+.er-project-organization-picker-actions {
+  margin-top: var(--er-space-5);
+}
 .er-field input[type="date"]:not(:disabled) {
   cursor: pointer;
 }

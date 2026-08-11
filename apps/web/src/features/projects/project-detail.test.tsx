@@ -525,6 +525,10 @@ it("adds selected organizations in bulk and clears the selection after refresh",
 
   fireEvent.click(screen.getByRole("button", { name: "조직 선택 추가" }));
   const dialog = screen.getByRole("dialog", { name: "조직 선택 추가" });
+  expect(
+    within(dialog).getByRole("button", { name: "선택한 0개 조직 추가" })
+      .parentElement,
+  ).toHaveClass("er-project-organization-picker-actions");
   fireEvent.click(within(dialog).getByRole("checkbox", { name: "1팀" }));
   fireEvent.click(within(dialog).getByRole("checkbox", { name: "2팀" }));
   fireEvent.click(
