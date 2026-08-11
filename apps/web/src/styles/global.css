@@ -382,6 +382,9 @@ a {
   gap: var(--er-space-4);
   margin-top: var(--er-space-4);
 }
+.er-dialog > .er-field {
+  margin-top: var(--er-space-4);
+}
 .er-participant-mode-actions {
   margin-top: var(--er-space-4);
 }
@@ -401,7 +404,7 @@ a {
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: var(--er-space-3);
-  margin-top: var(--er-space-2);
+  margin-top: var(--er-space-6);
 }
 
 .er-project-organization-picker-actions {

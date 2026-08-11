@@ -308,6 +308,13 @@ it("edits the selected roster profile and includes it in the save payload", asyn
       onClose={vi.fn()}
     />,
   );
+  const dialog = screen.getByRole("dialog", { name: "참가자 정보 수정" });
+  expect(
+    screen.getByLabelText("이름").closest(".er-dialog-form"),
+  ).not.toBeNull();
+  expect(
+    within(dialog).getByRole("button", { name: "정보 저장" }).parentElement,
+  ).toHaveClass("er-dialog-actions");
 
   expect(screen.getByRole("combobox", { name: "참가자 구분" })).toHaveValue(
     "STUDENT",

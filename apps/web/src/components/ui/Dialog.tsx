@@ -102,9 +102,11 @@ export function Dialog({
         <h2>{title}</h2>
         {children}
         {hideDefaultCloseAction ? null : (
-          <Button type="button" onClick={onClose}>
-            {closeLabel}
-          </Button>
+          <div className="er-dialog-actions">
+            <Button type="button" onClick={onClose}>
+              {closeLabel}
+            </Button>
+          </div>
         )}
       </section>
     </div>

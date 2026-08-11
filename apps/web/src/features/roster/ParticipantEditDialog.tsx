@@ -83,100 +83,112 @@ export function ParticipantEditDialog({
   }
 
   return (
-    <Dialog title="참가자 정보 수정" onClose={onClose}>
-      <TextInput
-        label="이름"
-        required
-        value={name}
-        disabled={busy}
-        onChange={(event) => setName(event.currentTarget.value)}
-      />
-      <label className="er-field">
-        <span>소속 조직</span>
-        <select
-          disabled={busy || !allowOrganizationChange}
-          value={organizationId}
-          onChange={(event) => setOrganizationId(event.currentTarget.value)}
-        >
-          {selectableOrganizations.map((organization) => (
-            <option key={organization.id} value={organization.id}>
-              {organization.name}
-              {organization.isDeleted
-                ? " · 삭제됨"
-                : organization.masterIsActive === false
-                  ? " · 사용 중지"
-                  : ""}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label className="er-field">
-        <span>성별</span>
-        <select
-          disabled={busy}
-          value={gender ?? ""}
-          onChange={(event) =>
-            setGender((event.currentTarget.value || null) as Gender | null)
-          }
-        >
-          <option value="">미지정</option>
-          <option value="MALE">남성</option>
-          <option value="FEMALE">여성</option>
-        </select>
-      </label>
-      {!allowOrganizationChange ? (
-        <p className="er-muted">진행 중에는 조직을 이동할 수 없습니다.</p>
-      ) : null}
-      <label className="er-field">
-        <span>참가자 구분</span>
-        <select
-          disabled={busy}
-          value={role}
-          onChange={(event) => {
-            const nextRole = event.currentTarget.value as ParticipantRole;
-            setRole(nextRole);
-            if (nextRole === "TEACHER") setGrade(null);
-          }}
-        >
-          <option value="STUDENT">학생</option>
-          <option value="TEACHER">담당교사</option>
-        </select>
-      </label>
-      <label className="er-field">
-        <span>학년</span>
-        <select
-          disabled={busy || role === "TEACHER"}
-          value={grade ?? ""}
-          required={role === "STUDENT"}
-          aria-invalid={role === "STUDENT" && grade === null}
-          onChange={(event) =>
-            setGrade((event.currentTarget.value || null) as StudentGrade | null)
-          }
-        >
-          <option value="">학년 선택</option>
-          <option value="M1">중1</option>
-          <option value="M2">중2</option>
-          <option value="M3">중3</option>
-          <option value="H1">고1</option>
-          <option value="H2">고2</option>
-          <option value="H3">고3</option>
-        </select>
-      </label>
-      <Button
-        type="button"
-        variant="primary"
-        loading={busy}
-        loadingText="정보 저장 중…"
-        disabled={
-          busy ||
-          !name.trim() ||
-          !organizationId ||
-          (role === "STUDENT" && grade === null)
-        }
-        onClick={() => void save()}
+    <Dialog title="참가자 정보 수정" hideDefaultCloseAction onClose={onClose}>
+      <form
+        className="er-dialog-form"
+        onSubmit={(event) => event.preventDefault()}
       >
-        정보 저장
-      </Button>
+        <TextInput
+          label="이름"
+          required
+          value={name}
+          disabled={busy}
+          onChange={(event) => setName(event.currentTarget.value)}
+        />
+        <label className="er-field">
+          <span>소속 조직</span>
+          <select
+            disabled={busy || !allowOrganizationChange}
+            value={organizationId}
+            onChange={(event) => setOrganizationId(event.currentTarget.value)}
+          >
+            {selectableOrganizations.map((organization) => (
+              <option key={organization.id} value={organization.id}>
+                {organization.name}
+                {organization.isDeleted
+                  ? " · 삭제됨"
+                  : organization.masterIsActive === false
+                    ? " · 사용 중지"
+                    : ""}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="er-field">
+          <span>성별</span>
+          <select
+            disabled={busy}
+            value={gender ?? ""}
+            onChange={(event) =>
+              setGender((event.currentTarget.value || null) as Gender | null)
+            }
+          >
+            <option value="">미지정</option>
+            <option value="MALE">남성</option>
+            <option value="FEMALE">여성</option>
+          </select>
+        </label>
+        {!allowOrganizationChange ? (
+          <p className="er-muted">진행 중에는 조직을 이동할 수 없습니다.</p>
+        ) : null}
+        <label className="er-field">
+          <span>참가자 구분</span>
+          <select
+            disabled={busy}
+            value={role}
+            onChange={(event) => {
+              const nextRole = event.currentTarget.value as ParticipantRole;
+              setRole(nextRole);
+              if (nextRole === "TEACHER") setGrade(null);
+            }}
+          >
+            <option value="STUDENT">학생</option>
+            <option value="TEACHER">담당교사</option>
+          </select>
+        </label>
+        <label className="er-field">
+          <span>학년</span>
+          <select
+            disabled={busy || role === "TEACHER"}
+            value={grade ?? ""}
+            required={role === "STUDENT"}
+            aria-invalid={role === "STUDENT" && grade === null}
+            onChange={(event) =>
+              setGrade(
+                (event.currentTarget.value || null) as StudentGrade | null,
+              )
+            }
+          >
+            <option value="">학년 선택</option>
+            <option value="M1">중1</option>
+            <option value="M2">중2</option>
+            <option value="M3">중3</option>
+            <option value="H1">고1</option>
+            <option value="H2">고2</option>
+            <option value="H3">고3</option>
+          </select>
+        </label>
+        <div className="er-dialog-actions">
+          <Button
+            type="button"
+            variant="primary"
+            loading={busy}
+            loadingText="정보 저장 중…"
+            disabled={
+              busy ||
+              !name.trim() ||
+              !organizationId ||
+              (role === "STUDENT" && grade === null)
+            }
+            onClick={() => void save()}
+          >
+            정보 저장
+          </Button>
+          <Button type="button" disabled={busy} onClick={onClose}>
+            닫기
+          </Button>
+        </div>
+      </form>
     </Dialog>
   );
 }
