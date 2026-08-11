@@ -262,22 +262,14 @@ export async function addProjectOrganizationsBulk(
   ];
   const statements: D1PreparedStatement[] = input.organizationIds.flatMap(
     (organizationId) => [
-      membershipAuditStatement(
-        env.DB,
-        actor.session.user.id,
-        "PROJECT_ORGANIZATION_ADDED",
-        projectId,
-        organizationId,
-        timestamp,
-        { reactivatedWhenMembershipExists: true },
-      ),
       env.DB.prepare(
         `INSERT INTO project_organizations
          (project_id, organization_id, is_active, added_at, deactivated_at,
           added_by, updated_by)
          VALUES (?, ?, 1, ?, NULL, ?, ?)
          ON CONFLICT(project_id, organization_id) DO UPDATE SET
-           is_active = 1, deactivated_at = NULL, updated_by = excluded.updated_by`,
+           is_active = 1, deactivated_at = excluded.added_at,
+           updated_by = excluded.updated_by`,
       ).bind(
         projectId,
         organizationId,
@@ -285,6 +277,19 @@ export async function addProjectOrganizationsBulk(
         actor.session.user.id,
         actor.session.user.id,
       ),
+      membershipAuditStatement(
+        env.DB,
+        actor.session.user.id,
+        "PROJECT_ORGANIZATION_ADDED",
+        projectId,
+        organizationId,
+        timestamp,
+        { reactivatedAfterBulkUpsert: true },
+      ),
+      env.DB.prepare(
+        `UPDATE project_organizations SET deactivated_at = NULL
+         WHERE project_id = ? AND organization_id = ? AND deactivated_at = ?`,
+      ).bind(projectId, organizationId, timestamp),
     ],
   );
   statements.push(
@@ -550,30 +555,30 @@ function membershipAuditStatement(
   projectId: string,
   organizationId: string,
   timestamp: string,
-  options?: { reactivatedWhenMembershipExists?: boolean },
+  options?: { reactivatedAfterBulkUpsert?: boolean },
 ): D1PreparedStatement {
-  if (options?.reactivatedWhenMembershipExists) {
+  if (options?.reactivatedAfterBulkUpsert) {
     return db
       .prepare(
         `INSERT INTO audit_logs
          (id, actor_user_id, action, entity_type, entity_id, occurred_at, details_json)
          SELECT ?, ?,
-           CASE WHEN EXISTS (
-             SELECT 1 FROM project_organizations
-             WHERE project_id = ? AND organization_id = ?
-           ) THEN 'PROJECT_ORGANIZATION_REACTIVATED'
-           ELSE 'PROJECT_ORGANIZATION_ADDED'
+           CASE WHEN deactivated_at IS NULL
+             THEN 'PROJECT_ORGANIZATION_ADDED'
+             ELSE 'PROJECT_ORGANIZATION_REACTIVATED'
            END,
-           'PROJECT_ORGANIZATION', ?, ?, ?`,
+           'PROJECT_ORGANIZATION', ?, ?, ?
+         FROM project_organizations
+         WHERE project_id = ? AND organization_id = ?`,
       )
       .bind(
         crypto.randomUUID(),
         actorId,
-        projectId,
-        organizationId,
         membershipEntityId(projectId, organizationId),
         timestamp,
         JSON.stringify({ projectId, organizationId }),
+        projectId,
+        organizationId,
       );
   }
   return db

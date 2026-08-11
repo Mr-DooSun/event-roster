@@ -26,6 +26,256 @@ afterEach(async () => {
   ).run();
 });
 
+async function projectRevision(projectId: string) {
+  return (
+    await env.DB.prepare("SELECT revision FROM projects WHERE id = ?")
+      .bind(projectId)
+      .first<{ revision: number }>()
+  )?.revision;
+}
+
+async function countProjectLinks(projectId: string) {
+  return (
+    await env.DB.prepare(
+      "SELECT COUNT(*) AS count FROM project_organizations WHERE project_id = ?",
+    )
+      .bind(projectId)
+      .first<{ count: number }>()
+  )?.count;
+}
+
+it("adds multiple organizations in request order with one project revision and audits", async () => {
+  const operator = await seedOperator();
+  const first = await seedOrganization("bulk-first", "일괄 첫 조직");
+  const second = await seedOrganization("bulk-second", "일괄 둘째 조직");
+  const project = await seedProject(operator);
+
+  const response = await authedRequest(
+    operator,
+    `/api/v1/projects/${project.id}/organizations/bulk`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        organizationIds: [second.id, first.id],
+        expectedProjectRevision: project.revision,
+      }),
+    },
+  );
+
+  expect(response.status).toBe(200);
+  expect(await response.json()).toEqual({
+    organizationIds: [second.id, first.id],
+    projectRevision: project.revision + 1,
+  });
+  expect(await countProjectLinks(project.id)).toBe(2);
+  expect(await projectRevision(project.id)).toBe(project.revision + 1);
+  expect(
+    (
+      await env.DB.prepare(
+        `SELECT action FROM audit_logs
+         WHERE entity_type = 'PROJECT_ORGANIZATION'
+           AND entity_id IN (?, ?)
+         ORDER BY rowid`,
+      )
+        .bind(`${project.id}:${second.id}`, `${project.id}:${first.id}`)
+        .all<{ action: string }>()
+    ).results.map((audit) => audit.action),
+  ).toEqual(["PROJECT_ORGANIZATION_ADDED", "PROJECT_ORGANIZATION_ADDED"]);
+});
+
+it("rolls back every bulk addition when one requested organization is inactive", async () => {
+  const operator = await seedOperator();
+  const active = await seedOrganization("bulk-active", "활성 조직");
+  const inactive = await seedOrganization("bulk-inactive", "비활성 조직");
+  const project = await seedProject(operator);
+  await env.DB.prepare("UPDATE organizations SET is_active = 0 WHERE id = ?")
+    .bind(inactive.id)
+    .run();
+
+  const response = await authedRequest(
+    operator,
+    `/api/v1/projects/${project.id}/organizations/bulk`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        organizationIds: [active.id, inactive.id],
+        expectedProjectRevision: project.revision,
+      }),
+    },
+  );
+
+  expect(response.status).toBe(409);
+  expect(await countProjectLinks(project.id)).toBe(0);
+  expect(await projectRevision(project.id)).toBe(project.revision);
+});
+
+it("reactivates an inactive membership and adds a new membership with distinct audits", async () => {
+  const operator = await seedOperator();
+  const reactivated = await seedOrganization("bulk-reactivated", "재활성 조직");
+  const added = await seedOrganization("bulk-added", "신규 조직");
+  const project = await seedProject(operator);
+  const existing = await linkProjectOrganization(
+    operator,
+    project.id,
+    reactivated.id,
+    project.revision,
+  );
+  await env.DB.prepare(
+    `INSERT INTO project_expected_snapshots
+     (project_id, organization_id, expected_count, captured_at)
+     VALUES (?, ?, 0, ?)`,
+  )
+    .bind(project.id, reactivated.id, "2026-08-11T00:00:00.000Z")
+    .run();
+  const deactivated = await authedRequest(
+    operator,
+    `/api/v1/projects/${project.id}/organizations/${reactivated.id}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        isActive: false,
+        expectedProjectRevision: existing.projectRevision,
+      }),
+    },
+  );
+  const deactivatedBody = await deactivated.json<{ projectRevision: number }>();
+  expect(deactivated.status).toBe(200);
+
+  const response = await authedRequest(
+    operator,
+    `/api/v1/projects/${project.id}/organizations/bulk`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        organizationIds: [reactivated.id, added.id],
+        expectedProjectRevision: deactivatedBody.projectRevision,
+      }),
+    },
+  );
+
+  expect(response.status).toBe(200);
+  expect(await countProjectLinks(project.id)).toBe(2);
+  expect(
+    (
+      await env.DB.prepare(
+        `SELECT action FROM audit_logs
+         WHERE entity_type = 'PROJECT_ORGANIZATION'
+           AND entity_id IN (?, ?)
+         ORDER BY rowid DESC LIMIT 2`,
+      )
+        .bind(`${project.id}:${reactivated.id}`, `${project.id}:${added.id}`)
+        .all<{ action: string }>()
+    ).results
+      .map((audit) => audit.action)
+      .sort(),
+  ).toEqual(["PROJECT_ORGANIZATION_ADDED", "PROJECT_ORGANIZATION_REACTIVATED"]);
+});
+
+it("rejects duplicate organization IDs in a bulk request", async () => {
+  const operator = await seedOperator();
+  const organization = await seedOrganization("bulk-duplicate", "중복 조직");
+  const project = await seedProject(operator);
+
+  const response = await authedRequest(
+    operator,
+    `/api/v1/projects/${project.id}/organizations/bulk`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        organizationIds: [organization.id, organization.id],
+        expectedProjectRevision: project.revision,
+      }),
+    },
+  );
+
+  expect(response.status).toBe(422);
+  expect(await countProjectLinks(project.id)).toBe(0);
+  expect(await projectRevision(project.id)).toBe(project.revision);
+});
+
+it("rolls back a bulk request when one membership is already active", async () => {
+  const operator = await seedOperator();
+  const active = await seedOrganization("bulk-existing", "기존 연결 조직");
+  const newOrganization = await seedOrganization("bulk-new", "미연결 조직");
+  const project = await seedProject(operator);
+  const linked = await linkProjectOrganization(
+    operator,
+    project.id,
+    active.id,
+    project.revision,
+  );
+
+  const response = await authedRequest(
+    operator,
+    `/api/v1/projects/${project.id}/organizations/bulk`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        organizationIds: [newOrganization.id, active.id],
+        expectedProjectRevision: linked.projectRevision,
+      }),
+    },
+  );
+
+  expect(response.status).toBe(409);
+  expect(await countProjectLinks(project.id)).toBe(1);
+  expect(await projectRevision(project.id)).toBe(linked.projectRevision);
+});
+
+it("returns STALE_REVISION without adding bulk memberships", async () => {
+  const operator = await seedOperator();
+  const organization = await seedOrganization("bulk-stale", "오래된 수정 조직");
+  const project = await seedProject(operator);
+  await env.DB.prepare(
+    "UPDATE projects SET revision = revision + 1 WHERE id = ?",
+  )
+    .bind(project.id)
+    .run();
+
+  const response = await authedRequest(
+    operator,
+    `/api/v1/projects/${project.id}/organizations/bulk`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        organizationIds: [organization.id],
+        expectedProjectRevision: project.revision,
+      }),
+    },
+  );
+
+  expect(response.status).toBe(409);
+  expect(await response.json()).toMatchObject({ code: "STALE_REVISION" });
+  expect(await countProjectLinks(project.id)).toBe(0);
+  expect(await projectRevision(project.id)).toBe(project.revision + 1);
+});
+
+it("keeps the existing operator-only authorization for bulk additions", async () => {
+  const operator = await seedOperator();
+  const organization = await seedOrganization(
+    "bulk-forbidden",
+    "권한 확인 조직",
+  );
+  const project = await seedProject(operator);
+  const manager = await seedManager(organization.id);
+
+  const response = await authedRequest(
+    manager,
+    `/api/v1/projects/${project.id}/organizations/bulk`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        organizationIds: [organization.id],
+        expectedProjectRevision: project.revision,
+      }),
+    },
+  );
+
+  expect(response.status).toBe(403);
+  expect(await countProjectLinks(project.id)).toBe(0);
+  expect(await projectRevision(project.id)).toBe(project.revision);
+});
+
 async function markProjectDeleted(
   projectId: string,
   actorId: string,
@@ -708,6 +958,81 @@ it("records a bulk reactivation when an inactive membership appears before its a
     },
   );
 
+  expect(
+    await env.DB.prepare(
+      `SELECT action FROM audit_logs
+       WHERE entity_id = ? ORDER BY rowid DESC LIMIT 1`,
+    )
+      .bind(`${project.id}:${organization.id}`)
+      .first<{ action: string }>(),
+  ).toEqual({ action: "PROJECT_ORGANIZATION_REACTIVATED" });
+});
+
+it("writes the bulk reactivation audit after restoring the membership", async () => {
+  const operator = await seedOperator();
+  const organization = await seedOrganization(
+    "bulk-audit-order",
+    "감사 순서 조직",
+  );
+  const project = await seedProject(operator);
+  const linked = await linkProjectOrganization(
+    operator,
+    project.id,
+    organization.id,
+    project.revision,
+  );
+  await env.DB.prepare(
+    `INSERT INTO project_expected_snapshots
+     (project_id, organization_id, expected_count, captured_at)
+     VALUES (?, ?, 0, ?)`,
+  )
+    .bind(project.id, organization.id, "2026-08-11T00:00:00.000Z")
+    .run();
+  const deactivated = await authedRequest(
+    operator,
+    `/api/v1/projects/${project.id}/organizations/${organization.id}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        isActive: false,
+        expectedProjectRevision: linked.projectRevision,
+      }),
+    },
+  );
+  const { projectRevision } = await deactivated.json<{
+    projectRevision: number;
+  }>();
+  expect(deactivated.status).toBe(200);
+  await env.DB.prepare(`CREATE TRIGGER require_active_bulk_membership_for_audit
+    BEFORE INSERT ON audit_logs
+    WHEN NEW.action = 'PROJECT_ORGANIZATION_REACTIVATED'
+      AND NOT EXISTS (
+        SELECT 1 FROM project_organizations
+        WHERE project_id || ':' || organization_id = NEW.entity_id
+          AND is_active = 1
+      )
+    BEGIN SELECT RAISE(ABORT, 'MEMBERSHIP_NOT_RESTORED'); END`).run();
+
+  let response: Response;
+  try {
+    response = await authedRequest(
+      operator,
+      `/api/v1/projects/${project.id}/organizations/bulk`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          organizationIds: [organization.id],
+          expectedProjectRevision: projectRevision,
+        }),
+      },
+    );
+  } finally {
+    await env.DB.prepare(
+      "DROP TRIGGER IF EXISTS require_active_bulk_membership_for_audit",
+    ).run();
+  }
+
+  expect(response.status).toBe(200);
   expect(
     await env.DB.prepare(
       `SELECT action FROM audit_logs
