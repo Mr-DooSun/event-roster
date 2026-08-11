@@ -1,5 +1,6 @@
 import {
   AddProjectOrganizationSchema,
+  AddProjectOrganizationsBulkSchema,
   ProjectOrganizationPatchSchema,
 } from "@event-roster/contracts";
 import { Hono } from "hono";
@@ -11,6 +12,7 @@ import { requireCsrf } from "../middleware/csrf";
 import { requireAdministrativeOperator } from "../services/admin";
 import {
   addProjectOrganization,
+  addProjectOrganizationsBulk,
   getProjectOrganizations,
   setProjectOrganizationActive,
 } from "../services/project-organizations";
@@ -44,6 +46,25 @@ projectOrganizationRoutes.post(
     );
     const { created, ...mutation } = result;
     return c.json(mutation, created ? 201 : 200);
+  },
+);
+
+projectOrganizationRoutes.post(
+  "/projects/:projectId/organizations/bulk",
+  async (c) => {
+    assertExactOrigin(c.req.raw, c.env.APP_ORIGIN);
+    const actor = await requireActor(c.req.raw, c.env);
+    await requireCsrf(c.req.raw, actor);
+    requireAdministrativeOperator(actor);
+    const input = AddProjectOrganizationsBulkSchema.parse(await c.req.json());
+    return c.json(
+      await addProjectOrganizationsBulk(
+        c.env,
+        actor,
+        c.req.param("projectId"),
+        input,
+      ),
+    );
   },
 );
 

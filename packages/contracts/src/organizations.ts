@@ -122,6 +122,25 @@ export type AddProjectOrganization = z.infer<
   typeof AddProjectOrganizationSchema
 >;
 
+export const AddProjectOrganizationsBulkSchema = z
+  .object({
+    organizationIds: z.array(OrganizationIdSchema).min(1).max(100),
+    expectedProjectRevision: ExpectedProjectRevisionSchema,
+  })
+  .strict()
+  .refine(
+    (value) =>
+      new Set(value.organizationIds).size === value.organizationIds.length,
+    { path: ["organizationIds"], message: "organizationIds must be unique" },
+  );
+export type AddProjectOrganizationsBulk = z.infer<
+  typeof AddProjectOrganizationsBulkSchema
+>;
+export interface ProjectOrganizationBulkMutationResult {
+  organizationIds: string[];
+  projectRevision: number;
+}
+
 export const ProjectOrganizationPatchSchema = z
   .object({
     isActive: z.boolean(),

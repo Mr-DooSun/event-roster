@@ -1,6 +1,8 @@
 import type {
   AddProjectOrganization,
+  AddProjectOrganizationsBulk,
   ProjectOrganization,
+  ProjectOrganizationBulkMutationResult,
   ProjectOrganizationMutationResult,
   ProjectOrganizationPatch,
 } from "@event-roster/contracts";
@@ -212,6 +214,118 @@ export async function addProjectOrganization(
     organization,
     projectRevision: input.expectedProjectRevision + 1,
     created,
+  };
+}
+
+export async function addProjectOrganizationsBulk(
+  env: Env,
+  actor: Actor,
+  projectId: string,
+  input: AddProjectOrganizationsBulk,
+  now = new Date(),
+): Promise<ProjectOrganizationBulkMutationResult> {
+  const project = await requireMutableProject(env, projectId, now);
+  if (project.revision !== input.expectedProjectRevision) {
+    throw new DomainError("STALE_REVISION");
+  }
+
+  const timestamp = now.toISOString();
+  const today = toKstDate(now);
+  const priorMemberships = await Promise.all(
+    input.organizationIds.map((organizationId) =>
+      findProjectOrganization(env.DB, projectId, organizationId),
+    ),
+  );
+  const guardId = crypto.randomUUID();
+  const organizationPredicates = input.organizationIds.map(
+    () => `EXISTS (
+      SELECT 1 FROM organizations
+      WHERE id = ? AND is_active = 1 AND deleted_at IS NULL
+    )`,
+  );
+  const membershipPredicates = input.organizationIds.map(
+    () => `NOT EXISTS (
+      SELECT 1 FROM project_organizations
+      WHERE project_id = ? AND organization_id = ? AND is_active = 1
+    )`,
+  );
+  const operationPredicate = `EXISTS (
+    SELECT 1 FROM projects WHERE id = ? AND revision = ?
+      AND deleted_at IS NULL
+      AND status <> 'CLOSED'
+      AND (end_date IS NULL OR end_date >= ?)
+  ) AND ${[...organizationPredicates, ...membershipPredicates].join(" AND ")}`;
+  const operationBindings = [
+    projectId,
+    input.expectedProjectRevision,
+    today,
+    ...input.organizationIds,
+    ...input.organizationIds.flatMap((organizationId) => [
+      projectId,
+      organizationId,
+    ]),
+  ];
+  const statements: D1PreparedStatement[] = input.organizationIds.flatMap(
+    (organizationId, index) => [
+      env.DB.prepare(
+        `INSERT INTO project_organizations
+         (project_id, organization_id, is_active, added_at, deactivated_at,
+          added_by, updated_by)
+         VALUES (?, ?, 1, ?, NULL, ?, ?)
+         ON CONFLICT(project_id, organization_id) DO UPDATE SET
+           is_active = 1, deactivated_at = NULL, updated_by = excluded.updated_by`,
+      ).bind(
+        projectId,
+        organizationId,
+        timestamp,
+        actor.session.user.id,
+        actor.session.user.id,
+      ),
+      membershipAuditStatement(
+        env.DB,
+        actor.session.user.id,
+        priorMemberships[index]
+          ? "PROJECT_ORGANIZATION_REACTIVATED"
+          : "PROJECT_ORGANIZATION_ADDED",
+        projectId,
+        organizationId,
+        timestamp,
+      ),
+    ],
+  );
+  statements.push(
+    env.DB.prepare(
+      `UPDATE projects SET revision = revision + 1, updated_at = ?
+       WHERE id = ? AND revision = ?`,
+    ).bind(timestamp, projectId, input.expectedProjectRevision),
+  );
+
+  try {
+    await runGuardedAtomic(env.DB, {
+      guardId,
+      guardStatement: createOperatorGuard(
+        env.DB,
+        guardId,
+        actor,
+        operationPredicate,
+        operationBindings,
+      ),
+      statements,
+      failureCode: "CONFLICT",
+    });
+  } catch (error) {
+    await translateMutationFailure(
+      env,
+      projectId,
+      input.expectedProjectRevision,
+      now,
+      error,
+    );
+  }
+
+  return {
+    organizationIds: input.organizationIds,
+    projectRevision: input.expectedProjectRevision + 1,
   };
 }
 

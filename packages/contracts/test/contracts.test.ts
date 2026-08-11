@@ -11,6 +11,7 @@ import type {
 } from "../src";
 import {
   AddProjectOrganizationSchema,
+  AddProjectOrganizationsBulkSchema,
   API_PROBLEM_CODES,
   BulkRosterCreateRequestSchema,
   ClosedProjectRosterPatchRequestSchema,
@@ -117,6 +118,27 @@ describe("organization contracts", () => {
     expect(
       ProjectOrganizationPatchSchema.safeParse({ isActive: false }).success,
     ).toBe(false);
+  });
+
+  it("rejects empty and duplicate bulk organization IDs", () => {
+    expect(
+      AddProjectOrganizationsBulkSchema.parse({
+        organizationIds: ["org-1"],
+        expectedProjectRevision: 3,
+      }),
+    ).toEqual({ organizationIds: ["org-1"], expectedProjectRevision: 3 });
+    expect(() =>
+      AddProjectOrganizationsBulkSchema.parse({
+        organizationIds: ["org-1", "org-1"],
+        expectedProjectRevision: 3,
+      }),
+    ).toThrow();
+    expect(() =>
+      AddProjectOrganizationsBulkSchema.parse({
+        organizationIds: [],
+        expectedProjectRevision: 3,
+      }),
+    ).toThrow();
   });
 
   it("distinguishes existing and newly provisioned organization managers", () => {
