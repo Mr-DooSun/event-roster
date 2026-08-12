@@ -1623,6 +1623,50 @@ it("keeps a roster filter menu outside the scroll container when filtering leave
   expect(menu.parentElement).toBe(document.body);
 });
 
+it("summarizes active roster filters and clears each condition independently", () => {
+  render(
+    <RosterTable
+      rows={[{ ...entry("ACTIVE"), gender: "MALE" }]}
+      canMutate={false}
+      onStatusChange={vi.fn().mockResolvedValue(undefined)}
+      onEdit={vi.fn()}
+    />,
+  );
+
+  fireEvent.change(screen.getByRole("textbox", { name: "명단 검색" }), {
+    target: { value: "박민수" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "성별 필터" }));
+  fireEvent.change(screen.getByRole("combobox", { name: "성별 필터" }), {
+    target: { value: "MALE" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "상태 필터" }));
+  fireEvent.change(screen.getByRole("combobox", { name: "상태 필터" }), {
+    target: { value: "ACTIVE" },
+  });
+
+  const summary = screen.getByLabelText("적용 중인 검색 및 필터");
+  expect(within(summary).getByText("검색: 박민수")).toBeVisible();
+  expect(within(summary).getByText("성별: 남성")).toBeVisible();
+  expect(within(summary).getByText("상태: 참석")).toBeVisible();
+  expect(screen.getByRole("button", { name: "성별 필터" })).toHaveAttribute(
+    "data-filtered",
+    "true",
+  );
+
+  fireEvent.click(screen.getByRole("button", { name: "성별 필터 해제" }));
+  expect(screen.queryByText("성별: 남성")).not.toBeInTheDocument();
+  expect(screen.getByText("검색: 박민수")).toBeVisible();
+  expect(screen.getByText("상태: 참석")).toBeVisible();
+
+  fireEvent.click(screen.getByRole("button", { name: "검색 필터 해제" }));
+  expect(screen.getByRole("textbox", { name: "명단 검색" })).toHaveValue("");
+  fireEvent.click(screen.getByRole("button", { name: "상태 필터 해제" }));
+  expect(
+    screen.queryByLabelText("적용 중인 검색 및 필터"),
+  ).not.toBeInTheDocument();
+});
+
 it("keeps the roster snapshot name and labels rows from deleted organizations", () => {
   render(
     <AuthProvider restoreOnMount={false}>

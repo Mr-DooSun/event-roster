@@ -30,6 +30,12 @@ export interface RosterView {
 
 type RosterFilter = "organization" | "gender" | "status" | "role" | "grade";
 type RosterSortKey = "ORGANIZATION" | "GRADE" | "NAME";
+type FilterSummary = {
+  key: string;
+  text: string;
+  clearLabel: string;
+  onClear: () => void;
+};
 
 const SORT_PRIORITY: RosterSortKey[] = ["ORGANIZATION", "GRADE", "NAME"];
 
@@ -183,6 +189,56 @@ export function RosterTable({
     return index < 0 ? null : index + 1;
   };
 
+  const activeFilterSummaries: FilterSummary[] = [];
+  if (query.trim()) {
+    activeFilterSummaries.push({
+      key: "query",
+      text: `검색: ${query.trim()}`,
+      clearLabel: "검색 필터 해제",
+      onClear: () => setQuery(""),
+    });
+  }
+  if (organization !== "ALL") {
+    activeFilterSummaries.push({
+      key: "organization",
+      text: `조직: ${organization}`,
+      clearLabel: "조직 필터 해제",
+      onClear: () => setOrganization("ALL"),
+    });
+  }
+  if (role !== "ALL") {
+    activeFilterSummaries.push({
+      key: "role",
+      text: `참가자 구분: ${role === "UNSPECIFIED" ? "미지정" : ROLE_LABEL[role]}`,
+      clearLabel: "참가자 구분 필터 해제",
+      onClear: () => setRole("ALL"),
+    });
+  }
+  if (grade !== "ALL") {
+    activeFilterSummaries.push({
+      key: "grade",
+      text: `학년: ${grade === "UNSPECIFIED" ? "미지정" : GRADE_LABEL[grade]}`,
+      clearLabel: "학년 필터 해제",
+      onClear: () => setGrade("ALL"),
+    });
+  }
+  if (gender !== "ALL") {
+    activeFilterSummaries.push({
+      key: "gender",
+      text: `성별: ${gender === "MALE" ? "남성" : gender === "FEMALE" ? "여성" : "미지정"}`,
+      clearLabel: "성별 필터 해제",
+      onClear: () => setGender("ALL"),
+    });
+  }
+  if (status !== "ALL") {
+    activeFilterSummaries.push({
+      key: "status",
+      text: `상태: ${status === "ACTIVE" ? "참석" : "취소"}`,
+      clearLabel: "상태 필터 해제",
+      onClear: () => setStatus("ALL"),
+    });
+  }
+
   const renderFilterMenu = (filter: RosterFilter, label: string) => {
     if (activeFilter !== filter) return null;
 
@@ -285,6 +341,26 @@ export function RosterTable({
 
   return (
     <div className="er-page-stack">
+      {activeFilterSummaries.length > 0 ? (
+        <section
+          className="er-roster-filter-summary"
+          aria-label="적용 중인 검색 및 필터"
+        >
+          <span className="er-roster-filter-summary-label">적용 중</span>
+          {activeFilterSummaries.map((item) => (
+            <span className="er-roster-filter-chip" key={item.key}>
+              {item.text}
+              <button
+                type="button"
+                aria-label={item.clearLabel}
+                onClick={item.onClear}
+              >
+                ×
+              </button>
+            </span>
+          ))}
+        </section>
+      ) : null}
       <div className="er-roster-filters">
         <TextInput
           label="명단 검색"
@@ -345,6 +421,7 @@ export function RosterTable({
                   className="er-roster-header-icon"
                   aria-haspopup="dialog"
                   aria-expanded={activeFilter === "organization"}
+                  data-filtered={organization !== "ALL" || undefined}
                   data-roster-filter-trigger
                   onClick={(event) =>
                     toggleFilter("organization", event.currentTarget)
@@ -362,6 +439,7 @@ export function RosterTable({
                   className="er-roster-header-icon"
                   aria-haspopup="dialog"
                   aria-expanded={activeFilter === "role"}
+                  data-filtered={role !== "ALL" || undefined}
                   data-roster-filter-trigger
                   onClick={(event) => toggleFilter("role", event.currentTarget)}
                 >
@@ -393,6 +471,7 @@ export function RosterTable({
                   className="er-roster-header-icon"
                   aria-haspopup="dialog"
                   aria-expanded={activeFilter === "grade"}
+                  data-filtered={grade !== "ALL" || undefined}
                   data-roster-filter-trigger
                   onClick={(event) =>
                     toggleFilter("grade", event.currentTarget)
@@ -410,6 +489,7 @@ export function RosterTable({
                   className="er-roster-header-icon"
                   aria-haspopup="dialog"
                   aria-expanded={activeFilter === "gender"}
+                  data-filtered={gender !== "ALL" || undefined}
                   data-roster-filter-trigger
                   onClick={(event) =>
                     toggleFilter("gender", event.currentTarget)
@@ -428,6 +508,7 @@ export function RosterTable({
                   className="er-roster-header-icon"
                   aria-haspopup="dialog"
                   aria-expanded={activeFilter === "status"}
+                  data-filtered={status !== "ALL" || undefined}
                   data-roster-filter-trigger
                   onClick={(event) =>
                     toggleFilter("status", event.currentTarget)
