@@ -208,7 +208,6 @@ test("operator preserves organization history through deletion, restoration, and
   const participantName = "E2E 보존 참가자";
   const api = await request.newContext({
     baseURL: data.baseUrl,
-    ignoreHTTPSErrors: true,
     extraHTTPHeaders: { Origin: data.baseUrl },
   });
 

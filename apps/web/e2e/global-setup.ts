@@ -19,7 +19,6 @@ export default async function globalSetup() {
   const fixture = JSON.parse(readFileSync(fixturePath, "utf8")) as Fixture;
   const api = await request.newContext({
     baseURL: fixture.baseUrl,
-    ignoreHTTPSErrors: true,
     extraHTTPHeaders: { Origin: fixture.baseUrl },
   });
   await ok(

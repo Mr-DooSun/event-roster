@@ -13,7 +13,6 @@ test("operator adds two selected organization candidates to a project at once", 
   const candidateNames = ["E2E 일괄 추가 후보 알파", "E2E 일괄 추가 후보 베타"];
   const api = await request.newContext({
     baseURL: data.baseUrl,
-    ignoreHTTPSErrors: true,
     extraHTTPHeaders: { Origin: data.baseUrl },
   });
   const loginResponse = await api.post("/api/v1/auth/login", {
@@ -68,7 +67,6 @@ test("participant profile rows support exact editing and filtering", async ({
   const data = fixture();
   const api = await request.newContext({
     baseURL: data.baseUrl,
-    ignoreHTTPSErrors: true,
     extraHTTPHeaders: { Origin: data.baseUrl },
   });
   const loginResponse = await api.post("/api/v1/auth/login", {

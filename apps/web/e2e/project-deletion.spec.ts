@@ -7,7 +7,6 @@ test("operator excludes and re-adds an organization, then deletes and restores a
   const data = fixture();
   const api = await request.newContext({
     baseURL: data.baseUrl,
-    ignoreHTTPSErrors: true,
     extraHTTPHeaders: { Origin: data.baseUrl },
   });
 

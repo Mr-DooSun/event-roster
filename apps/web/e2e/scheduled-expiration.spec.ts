@@ -5,7 +5,6 @@ test("scheduled handler closes an expired project", async () => {
   const data = fixture();
   const api = await request.newContext({
     baseURL: data.baseUrl,
-    ignoreHTTPSErrors: true,
     extraHTTPHeaders: { Origin: data.baseUrl },
   });
   const login = await api.post("/api/v1/auth/login", {

@@ -9,7 +9,6 @@ test("import and export profile preserves mixed and canceled roster rows", async
   const data = fixture();
   const api = await request.newContext({
     baseURL: data.baseUrl,
-    ignoreHTTPSErrors: true,
     extraHTTPHeaders: { Origin: data.baseUrl },
   });
   const loginResponse = await api.post("/api/v1/auth/login", {

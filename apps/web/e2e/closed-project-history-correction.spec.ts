@@ -45,7 +45,6 @@ test("operator corrects closed history while an organization manager stays read-
   const inactiveManagerLoginId = "e2e-inactive-correction-manager";
   const api = await request.newContext({
     baseURL: data.baseUrl,
-    ignoreHTTPSErrors: true,
     extraHTTPHeaders: { Origin: data.baseUrl },
   });
   let cleanupAuth: AuthTokens | null = null;
@@ -607,7 +606,6 @@ test("cleanup closes and deletes a pre-registration project before deleting ever
   const data = fixture();
   const api = await request.newContext({
     baseURL: data.baseUrl,
-    ignoreHTTPSErrors: true,
     extraHTTPHeaders: { Origin: data.baseUrl },
   });
   let headers: Record<string, string> | null = null;
@@ -689,7 +687,6 @@ test("cleanup records one organization failure and still deletes the next organi
   const data = fixture();
   const api = await request.newContext({
     baseURL: data.baseUrl,
-    ignoreHTTPSErrors: true,
     extraHTTPHeaders: { Origin: data.baseUrl },
   });
   let headers: Record<string, string> | null = null;
