@@ -107,7 +107,7 @@ export function BulkParticipantRowsField({
   return (
     <div className="er-bulk-participant-summary">
       <span className="er-bulk-participant-count">
-        {atLimit ? "최대 30명" : `등록 예정 ${rows.length}명 / 최대 30명`}
+        등록 예정 {rows.length}명 / 최대 30명
       </span>
       <div className="er-bulk-participant-rows">
         {rows.length === 0 ? (

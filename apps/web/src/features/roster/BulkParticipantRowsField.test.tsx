@@ -247,7 +247,7 @@ it("allows deleting the final row and resets duplicate confirmation", () => {
   expect(onConfirmedChange).toHaveBeenCalledWith(false);
 });
 
-it("disables adding at 30 rows and announces the limit", () => {
+it("disables adding at 30 rows while keeping the full count announcement", () => {
   render(
     <BulkParticipantRowsField
       rows={Array.from({ length: 30 }, (_, index) =>
@@ -261,7 +261,7 @@ it("disables adding at 30 rows and announces the limit", () => {
   );
 
   expect(screen.getByRole("button", { name: "참가자 추가" })).toBeDisabled();
-  expect(screen.getByText("최대 30명")).toBeVisible();
+  expect(screen.getByText("등록 예정 30명 / 최대 30명")).toBeVisible();
   expect(screen.getAllByRole("group", { name: /번 참가자/ })).toHaveLength(30);
 });
 

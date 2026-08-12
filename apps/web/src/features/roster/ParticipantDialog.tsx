@@ -375,7 +375,9 @@ export function ParticipantDialog({
         </Button>
       </div>
       <form
-        className="er-dialog-form"
+        className={`er-dialog-form${
+          mode === "NEW" ? " er-dialog-form--roster-compact" : ""
+        }`}
         onSubmit={(event) => {
           event.preventDefault();
           if (mode === "EXISTING") void addExisting();

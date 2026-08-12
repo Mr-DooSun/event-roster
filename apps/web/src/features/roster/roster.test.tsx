@@ -57,6 +57,16 @@ it("uses compact bulk participant layout for new mode", () => {
   expect(screen.getByRole("dialog", { name: "참가자 추가" })).toHaveClass(
     "er-dialog--roster-compact",
   );
+  const organization = screen.getByRole("combobox", { name: "소속 조직" });
+  const form = organization.closest("form");
+  expect(form).toHaveClass("er-dialog-form", "er-dialog-form--roster-compact");
+  const count = screen.getByText("등록 예정 0명 / 최대 30명");
+  const summary = count.closest(".er-bulk-participant-summary");
+  expect(summary).not.toBeNull();
+  expect(summary?.querySelector(".er-bulk-participant-rows")).not.toBeNull();
+  const finalAction = screen.getByRole("button", { name: "명단에 추가" });
+  expect(finalAction.closest(".er-dialog-actions")?.parentElement).toBe(form);
+  expect(summary?.parentElement).toBe(form);
   const addParticipant = screen.getByRole("button", { name: "참가자 추가" });
   expect(addParticipant).toHaveClass("er-bulk-participant-add");
   fireEvent.click(addParticipant);
@@ -1555,9 +1565,9 @@ it("places registration source at the end of each roster row", () => {
   );
 
   expect(
-    screen.getAllByRole("columnheader").map((header) =>
-      header.textContent?.replace(/[↕⏷123]/g, "").trim(),
-    ),
+    screen
+      .getAllByRole("columnheader")
+      .map((header) => header.textContent?.replace(/[↕⏷123]/g, "").trim()),
   ).toEqual([
     "이름",
     "조직",

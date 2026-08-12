@@ -858,6 +858,7 @@ a {
 .er-bulk-participant-summary {
   display: grid;
   min-height: 0;
+  grid-template-rows: auto minmax(0, 1fr) auto;
   gap: var(--er-space-3);
 }
 .er-bulk-participant-count {
@@ -866,9 +867,10 @@ a {
 }
 .er-bulk-participant-rows {
   display: grid;
+  min-height: 0;
   gap: var(--er-space-2);
-  max-height: min(42dvh, 20rem);
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding-right: var(--er-space-1);
 }
 .er-bulk-participant-empty {
@@ -905,8 +907,8 @@ a {
   position: absolute;
   top: var(--er-space-1);
   right: var(--er-space-1);
-  min-width: 2rem;
-  min-height: 2rem;
+  min-width: 2.75rem;
+  min-height: 2.75rem;
   padding: 0;
   border-color: transparent;
   color: var(--er-color-muted);
@@ -1145,8 +1147,20 @@ th {
   width: min(100%, 52rem);
 }
 .er-dialog--roster-compact {
+  display: grid;
   width: min(100%, 52rem);
   max-height: min(80dvh, 44rem);
+  min-height: 0;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  overflow: hidden;
+}
+.er-dialog-form--roster-compact {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+}
+.er-dialog-form--roster-compact > .er-bulk-participant-summary {
+  flex: 1 1 auto;
 }
 .er-danger-zone {
   display: grid;
