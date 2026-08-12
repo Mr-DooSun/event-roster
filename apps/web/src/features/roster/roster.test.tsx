@@ -1569,7 +1569,7 @@ it("renders active sort priorities as unobtrusive superscripts", () => {
   expect(within(nameSort).getByText("3").tagName).toBe("SUP");
 });
 
-it("places registration source at the end of each roster row", () => {
+it("orders roster columns by organization grade and name with registration source last", () => {
   render(
     <RosterTable
       rows={[entry("ACTIVE")]}
@@ -1584,10 +1584,10 @@ it("places registration source at the end of each roster row", () => {
       .getAllByRole("columnheader")
       .map((header) => header.textContent?.replace(/[↕⏷123]/g, "").trim()),
   ).toEqual([
-    "이름",
     "조직",
-    "참가자 구분",
     "학년",
+    "이름",
+    "참가자 구분",
     "성별",
     "상태",
     "작업",
@@ -1598,6 +1598,48 @@ it("places registration source at the end of each roster row", () => {
   expect(within(firstDataRow).getAllByRole("cell").at(-1)).toHaveTextContent(
     "사전",
   );
+});
+
+it("renders stable organization badges alongside deletion state", () => {
+  render(
+    <RosterTable
+      rows={[
+        entry("ACTIVE"),
+        {
+          ...entry("ACTIVE"),
+          id: "entry-2",
+          participantId: "person-2",
+          participantName: "같은 조직 참가자",
+        },
+        {
+          ...entry("ACTIVE"),
+          id: "entry-3",
+          participantId: "person-3",
+          participantName: "다른 조직 참가자",
+          organizationId: "org-2",
+          organizationName: "2팀",
+        },
+      ]}
+      deletedOrganizationIds={new Set(["org-1"])}
+      canMutate={false}
+      onStatusChange={vi.fn().mockResolvedValue(undefined)}
+      onEdit={vi.fn()}
+    />,
+  );
+
+  const firstBadge = screen.getAllByText("1팀")[0];
+  const secondBadge = screen.getAllByText("1팀")[1];
+  const otherBadge = screen.getByText("2팀");
+  expect(firstBadge).toHaveClass("er-organization-badge");
+  expect(firstBadge).toHaveAttribute("data-color-index");
+  expect(secondBadge).toHaveAttribute(
+    "data-color-index",
+    firstBadge.getAttribute("data-color-index"),
+  );
+  expect(otherBadge.getAttribute("data-color-index")).not.toBe(
+    firstBadge.getAttribute("data-color-index"),
+  );
+  expect(screen.getAllByText("삭제됨")).toHaveLength(2);
 });
 
 it("toggles roster sort keys while preserving their fixed priority", () => {

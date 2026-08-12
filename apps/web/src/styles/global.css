@@ -982,6 +982,39 @@ a {
   align-items: center;
   gap: var(--er-space-2);
 }
+.er-organization-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: var(--er-space-1) var(--er-space-3);
+  font-size: 0.85rem;
+  font-weight: var(--er-font-weight-medium);
+  white-space: nowrap;
+}
+.er-organization-badge[data-color-index="0"] {
+  color: #31518f;
+  background: #e8efff;
+}
+.er-organization-badge[data-color-index="1"] {
+  color: #326341;
+  background: #e9f6ec;
+}
+.er-organization-badge[data-color-index="2"] {
+  color: #77521e;
+  background: #fbf0dc;
+}
+.er-organization-badge[data-color-index="3"] {
+  color: #70437a;
+  background: #f4eaf8;
+}
+.er-organization-badge[data-color-index="4"] {
+  color: #34616c;
+  background: #e7f4f6;
+}
+.er-organization-badge[data-color-index="5"] {
+  color: #7c4449;
+  background: #faeaec;
+}
 .er-organization-filters {
   display: grid;
   grid-template-columns: minmax(14rem, 2fr) repeat(2, minmax(10rem, 1fr)) auto;

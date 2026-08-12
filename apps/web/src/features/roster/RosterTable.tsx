@@ -39,6 +39,14 @@ type FilterSummary = {
 
 const SORT_PRIORITY: RosterSortKey[] = ["ORGANIZATION", "GRADE", "NAME"];
 
+function organizationColorIndex(organizationId: string) {
+  let hash = 0;
+  for (const character of organizationId) {
+    hash = (hash * 31 + (character.codePointAt(0) ?? 0)) >>> 0;
+  }
+  return hash % 6;
+}
+
 export function RosterTable({
   rows,
   deletedOrganizationIds = new Set<string>(),
@@ -379,25 +387,6 @@ export function RosterTable({
           <thead>
             <tr>
               <th className="er-roster-header-cell">
-                <span>이름</span>
-                <button
-                  type="button"
-                  aria-label={
-                    sortPriority("NAME") === null
-                      ? "이름 정렬, 비활성"
-                      : `이름 정렬, 우선순위 ${sortPriority("NAME")}`
-                  }
-                  aria-pressed={sortPriority("NAME") !== null}
-                  className="er-roster-header-icon er-roster-sort-control"
-                  onClick={() => toggleSort("NAME")}
-                >
-                  ↕
-                  {sortPriority("NAME") === null ? null : (
-                    <sup aria-hidden="true">{sortPriority("NAME")}</sup>
-                  )}
-                </button>
-              </th>
-              <th className="er-roster-header-cell">
                 <span>조직</span>
                 <button
                   type="button"
@@ -412,9 +401,7 @@ export function RosterTable({
                 >
                   ↕
                   {sortPriority("ORGANIZATION") === null ? null : (
-                    <sup aria-hidden="true">
-                      {sortPriority("ORGANIZATION")}
-                    </sup>
+                    <sup aria-hidden="true">{sortPriority("ORGANIZATION")}</sup>
                   )}
                 </button>
                 <button
@@ -432,22 +419,6 @@ export function RosterTable({
                   ⏷
                 </button>
                 {renderFilterMenu("organization", "조직")}
-              </th>
-              <th className="er-roster-header-cell">
-                <span>참가자 구분</span>
-                <button
-                  type="button"
-                  aria-label="참가자 구분 필터"
-                  className="er-roster-header-icon"
-                  aria-haspopup="dialog"
-                  aria-expanded={activeFilter === "role"}
-                  data-filtered={role !== "ALL" || undefined}
-                  data-roster-filter-trigger
-                  onClick={(event) => toggleFilter("role", event.currentTarget)}
-                >
-                  ⏷
-                </button>
-                {renderFilterMenu("role", "참가자 구분")}
               </th>
               <th className="er-roster-header-cell">
                 <span>학년</span>
@@ -482,6 +453,41 @@ export function RosterTable({
                   ⏷
                 </button>
                 {renderFilterMenu("grade", "학년")}
+              </th>
+              <th className="er-roster-header-cell">
+                <span>이름</span>
+                <button
+                  type="button"
+                  aria-label={
+                    sortPriority("NAME") === null
+                      ? "이름 정렬, 비활성"
+                      : `이름 정렬, 우선순위 ${sortPriority("NAME")}`
+                  }
+                  aria-pressed={sortPriority("NAME") !== null}
+                  className="er-roster-header-icon er-roster-sort-control"
+                  onClick={() => toggleSort("NAME")}
+                >
+                  ↕
+                  {sortPriority("NAME") === null ? null : (
+                    <sup aria-hidden="true">{sortPriority("NAME")}</sup>
+                  )}
+                </button>
+              </th>
+              <th className="er-roster-header-cell">
+                <span>참가자 구분</span>
+                <button
+                  type="button"
+                  aria-label="참가자 구분 필터"
+                  className="er-roster-header-icon"
+                  aria-haspopup="dialog"
+                  aria-expanded={activeFilter === "role"}
+                  data-filtered={role !== "ALL" || undefined}
+                  data-roster-filter-trigger
+                  onClick={(event) => toggleFilter("role", event.currentTarget)}
+                >
+                  ⏷
+                </button>
+                {renderFilterMenu("role", "참가자 구분")}
               </th>
               <th className="er-roster-header-cell">
                 <span>성별</span>
@@ -526,16 +532,21 @@ export function RosterTable({
           <tbody>
             {filtered.map((row) => (
               <tr key={row.id}>
-                <td>{row.participantName}</td>
                 <td>
                   <span className="er-table-organization">
-                    <span>{row.organizationName}</span>
+                    <span
+                      className="er-organization-badge"
+                      data-color-index={organizationColorIndex(
+                        row.organizationId,
+                      )}
+                    >
+                      {row.organizationName}
+                    </span>
                     {deletedOrganizationIds.has(row.organizationId) ? (
                       <span className="er-badge er-badge--deleted">삭제됨</span>
                     ) : null}
                   </span>
                 </td>
-                <td>{row.role ? ROLE_LABEL[row.role] : "미지정"}</td>
                 <td>
                   {row.role === "TEACHER"
                     ? "-"
@@ -543,6 +554,8 @@ export function RosterTable({
                       ? GRADE_LABEL[row.grade]
                       : "미지정"}
                 </td>
+                <td>{row.participantName}</td>
+                <td>{row.role ? ROLE_LABEL[row.role] : "미지정"}</td>
                 <td>
                   {row.gender === "MALE"
                     ? "남성"
