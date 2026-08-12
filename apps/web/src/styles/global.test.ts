@@ -2,6 +2,28 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { expect, it } from "vitest";
 
+it("defines every spacing token used by the global stylesheet", () => {
+  const stylesheet = readFileSync(
+    resolve(process.cwd(), "src/styles/global.css"),
+    "utf8",
+  );
+  const tokens = readFileSync(
+    resolve(process.cwd(), "src/styles/tokens.css"),
+    "utf8",
+  );
+  const usedSpacingTokens = new Set(
+    [...stylesheet.matchAll(/var\((--er-space-\d+)\)/g)].map(
+      (match) => match[1],
+    ),
+  );
+
+  for (const token of usedSpacingTokens) {
+    expect(tokens, `${token} is not defined`).toMatch(
+      new RegExp(`${token}:\\s*[^;]+;`),
+    );
+  }
+});
+
 it("stacks roster filters at the existing medium-screen breakpoint", () => {
   const stylesheet = readFileSync(
     resolve(process.cwd(), "src/styles/global.css"),
