@@ -105,8 +105,8 @@ it("starts new mode empty and submits two structured participant profiles", asyn
   await waitFor(() =>
     expect(onCreateAndAdd).toHaveBeenCalledWith({
       participants: [
-        { name: "홍길동", role: "STUDENT", grade: "M2" },
-        { name: "김 민수", role: "TEACHER", grade: null },
+        { name: "홍길동", role: "STUDENT", grade: "M2", gender: null },
+        { name: "김 민수", role: "TEACHER", grade: null, gender: null },
       ],
       organizationId: "org-1",
       confirmDuplicateNames: false,
@@ -456,8 +456,8 @@ it("requires explicit confirmation after a duplicate response", async () => {
   await waitFor(() =>
     expect(onCreateAndAdd).toHaveBeenLastCalledWith({
       participants: [
-        { name: "홍길동", role: "STUDENT", grade: "M2" },
-        { name: "홍길동", role: "TEACHER", grade: null },
+        { name: "홍길동", role: "STUDENT", grade: "M2", gender: null },
+        { name: "홍길동", role: "TEACHER", grade: null, gender: null },
       ],
       organizationId: "org-1",
       confirmDuplicateNames: true,
@@ -489,7 +489,9 @@ it("clears duplicate confirmation when names change", async () => {
   fireEvent.click(screen.getByRole("button", { name: "1명 명단에 추가" }));
   await waitFor(() =>
     expect(onCreateAndAdd).toHaveBeenLastCalledWith({
-      participants: [{ name: "김민수", role: "STUDENT", grade: "M1" }],
+      participants: [
+        { name: "김민수", role: "STUDENT", grade: "M1", gender: null },
+      ],
       organizationId: "org-1",
       confirmDuplicateNames: false,
     }),
@@ -724,8 +726,8 @@ it("posts bulk names, reloads, and shows a success notice", async () => {
   expect(JSON.parse(String(write?.[1]?.body))).toEqual({
     organizationId: "org-2",
     participants: [
-      { name: "홍길동", role: "STUDENT", grade: "M1" },
-      { name: "김민수", role: "STUDENT", grade: "H1" },
+      { name: "홍길동", role: "STUDENT", grade: "M1", gender: null },
+      { name: "김민수", role: "STUDENT", grade: "H1", gender: null },
     ],
     confirmDuplicateNames: false,
     expectedRevision: project().revision,
@@ -1333,6 +1335,7 @@ it("synchronizes a manager confirmation to the participant's refreshed read-only
       organizationId: "org-2",
       role: "STUDENT",
       grade: "M1",
+      gender: null,
       expectedParticipantRevision: 4,
     }),
   );
@@ -1531,7 +1534,7 @@ it("uses organization grade and name as the default sort priority", () => {
     screen
       .getAllByRole("row")
       .slice(1)
-      .map((row) => within(row).getAllByRole("cell").at(0)?.textContent),
+      .map((row) => within(row).getAllByRole("cell").at(2)?.textContent),
   ).toEqual(["가 학생", "차 학생", "중2 학생", "나조직 학생"]);
   expect(
     screen.getByRole("button", { name: "조직 정렬, 우선순위 1" }),
@@ -1627,9 +1630,12 @@ it("renders stable organization badges alongside deletion state", () => {
     />,
   );
 
-  const firstBadge = screen.getAllByText("1팀")[0];
-  const secondBadge = screen.getAllByText("1팀")[1];
+  const [firstBadge, secondBadge] = screen.getAllByText("1팀");
   const otherBadge = screen.getByText("2팀");
+  expect(firstBadge).toBeDefined();
+  expect(secondBadge).toBeDefined();
+  if (!firstBadge || !secondBadge)
+    throw new Error("조직 배지가 누락되었습니다.");
   expect(firstBadge).toHaveClass("er-organization-badge");
   expect(firstBadge).toHaveAttribute("data-color-index");
   expect(secondBadge).toHaveAttribute(
@@ -1640,6 +1646,99 @@ it("renders stable organization badges alongside deletion state", () => {
     firstBadge.getAttribute("data-color-index"),
   );
   expect(screen.getAllByText("삭제됨")).toHaveLength(2);
+});
+
+it("paginates roster rows with thirty participants by default", () => {
+  const rows = Array.from({ length: 35 }, (_, index) => ({
+    ...entry("ACTIVE"),
+    id: `entry-${index + 1}`,
+    participantId: `person-${index + 1}`,
+    participantNumber: `P-${String(index + 1).padStart(3, "0")}`,
+    participantName: `참가자 ${String(index + 1).padStart(2, "0")}`,
+  }));
+  render(
+    <RosterTable
+      rows={rows}
+      canMutate={false}
+      onStatusChange={vi.fn().mockResolvedValue(undefined)}
+      onEdit={vi.fn()}
+    />,
+  );
+
+  expect(screen.getAllByRole("row")).toHaveLength(31);
+  expect(screen.getByText("총 35명 · 1–30명 표시")).toBeVisible();
+  expect(screen.getByText("참가자 30")).toBeVisible();
+  expect(screen.queryByText("참가자 31")).not.toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "다음 페이지" }));
+
+  expect(screen.getAllByRole("row")).toHaveLength(6);
+  expect(screen.getByText("총 35명 · 31–35명 표시")).toBeVisible();
+  expect(screen.getByText("참가자 31")).toBeVisible();
+  expect(screen.getByRole("button", { name: "2페이지" })).toHaveAttribute(
+    "aria-current",
+    "page",
+  );
+
+  fireEvent.click(
+    screen.getByRole("button", { name: "이름 정렬, 우선순위 3" }),
+  );
+  expect(screen.getByText("총 35명 · 1–30명 표시")).toBeVisible();
+  expect(screen.getByRole("button", { name: "1페이지" })).toHaveAttribute(
+    "aria-current",
+    "page",
+  );
+});
+
+it("resets roster page after page size and search changes", () => {
+  const rows = Array.from({ length: 65 }, (_, index) => ({
+    ...entry("ACTIVE"),
+    id: `entry-${index + 1}`,
+    participantId: `person-${index + 1}`,
+    participantNumber: `P-${String(index + 1).padStart(3, "0")}`,
+    participantName: `참가자 ${String(index + 1).padStart(2, "0")}`,
+  }));
+  render(
+    <RosterTable
+      rows={rows}
+      canMutate={false}
+      onStatusChange={vi.fn().mockResolvedValue(undefined)}
+      onEdit={vi.fn()}
+    />,
+  );
+
+  const pageSize = screen.getByRole("combobox", {
+    name: "페이지당 표시 인원",
+  });
+  expect(
+    within(pageSize)
+      .getAllByRole("option")
+      .map((option) => option.textContent),
+  ).toEqual(["30명", "60명", "100명"]);
+  fireEvent.click(screen.getByRole("button", { name: "다음 페이지" }));
+  expect(screen.getByText("총 65명 · 31–60명 표시")).toBeVisible();
+  fireEvent.change(pageSize, { target: { value: "60" } });
+  expect(screen.getAllByRole("row")).toHaveLength(61);
+  expect(screen.getByText("총 65명 · 1–60명 표시")).toBeVisible();
+
+  fireEvent.click(screen.getByRole("button", { name: "다음 페이지" }));
+  expect(screen.getByText("총 65명 · 61–65명 표시")).toBeVisible();
+  fireEvent.change(screen.getByRole("textbox", { name: "명단 검색" }), {
+    target: { value: "참가자 01" },
+  });
+
+  expect(screen.getByText("총 1명 · 1–1명 표시")).toBeVisible();
+  expect(screen.getByRole("button", { name: "1페이지" })).toHaveAttribute(
+    "aria-current",
+    "page",
+  );
+
+  fireEvent.change(screen.getByRole("textbox", { name: "명단 검색" }), {
+    target: { value: "검색 결과 없음" },
+  });
+  expect(screen.getByText("총 0명 · 0명 표시")).toBeVisible();
+  expect(screen.getByRole("button", { name: "이전 페이지" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "다음 페이지" })).toBeDisabled();
 });
 
 it("toggles roster sort keys while preserving their fixed priority", () => {
@@ -1702,7 +1801,7 @@ it("toggles roster sort keys while preserving their fixed priority", () => {
     screen
       .getAllByRole("row")
       .slice(1)
-      .map((row) => within(row).getAllByRole("cell").at(0)?.textContent),
+      .map((row) => within(row).getAllByRole("cell").at(2)?.textContent),
   ).toEqual(["첫 번째", "두 번째"]);
 });
 
@@ -2632,7 +2731,9 @@ it("creates and adds a participant with one atomic roster request", async () => 
   expect(rosterWrites).toHaveLength(1);
   expect(JSON.parse(String(rosterWrites[0]?.[1]?.body))).toEqual({
     organizationId: "org-1",
-    participants: [{ name: "김신규", role: "STUDENT", grade: "M1" }],
+    participants: [
+      { name: "김신규", role: "STUDENT", grade: "M1", gender: null },
+    ],
     confirmDuplicateNames: false,
     expectedRevision: 2,
   });
@@ -2748,6 +2849,7 @@ it("confirms reusable participant details in one existing-roster request", async
       organizationId: "org-2",
       role: "STUDENT",
       grade: "M1",
+      gender: null,
     },
     expectedParticipantRevision: 7,
     expectedRevision: 2,
@@ -2874,6 +2976,7 @@ it("keeps a manager reuse confirmation in the participant master organization", 
       organizationId: "org-1",
       role: "STUDENT",
       grade: "M1",
+      gender: null,
     },
     expectedParticipantRevision: 5,
     expectedRevision: 2,
@@ -3498,6 +3601,7 @@ it("routes correction add, bulk, and snapshot requests without changing ordinary
         organizationId: "org-1",
         role: "TEACHER",
         grade: null,
+        gender: null,
       },
       expectedParticipantRevision: 4,
       expectedRevision: 2,

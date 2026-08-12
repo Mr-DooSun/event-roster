@@ -86,6 +86,8 @@ export function RosterTable({
   });
   const filterMenuRef = useRef<HTMLDivElement>(null);
   const [sortKeys, setSortKeys] = useState<RosterSortKey[]>(SORT_PRIORITY);
+  const [pageSize, setPageSize] = useState<30 | 60 | 100>(30);
+  const [currentPage, setCurrentPage] = useState(1);
   const organizations = useMemo(
     () => [...new Set(rows.slice(0, 130).map((row) => row.organizationName))],
     [rows],
@@ -127,6 +129,17 @@ export function RosterTable({
       })
       .sort((left, right) => compareRoster(left, right, sortKeys));
   }, [gender, grade, organization, query, role, rows, sortKeys, status]);
+  const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const safePage = Math.min(currentPage, pageCount);
+  const firstIndex = (safePage - 1) * pageSize;
+  const pagedRows = filtered.slice(firstIndex, firstIndex + pageSize);
+  const rangeStart = filtered.length === 0 ? 0 : firstIndex + 1;
+  const rangeEnd = Math.min(firstIndex + pageSize, filtered.length);
+  const resetPage = () => setCurrentPage(1);
+
+  useEffect(() => {
+    if (currentPage > pageCount) setCurrentPage(pageCount);
+  }, [currentPage, pageCount]);
 
   useEffect(() => {
     if (activeFilter === null) return;
@@ -190,6 +203,7 @@ export function RosterTable({
             (item) => item === key || current.includes(item),
           ),
     );
+    resetPage();
   };
 
   const sortPriority = (key: RosterSortKey) => {
@@ -203,7 +217,10 @@ export function RosterTable({
       key: "query",
       text: `검색: ${query.trim()}`,
       clearLabel: "검색 필터 해제",
-      onClear: () => setQuery(""),
+      onClear: () => {
+        setQuery("");
+        resetPage();
+      },
     });
   }
   if (organization !== "ALL") {
@@ -211,7 +228,10 @@ export function RosterTable({
       key: "organization",
       text: `조직: ${organization}`,
       clearLabel: "조직 필터 해제",
-      onClear: () => setOrganization("ALL"),
+      onClear: () => {
+        setOrganization("ALL");
+        resetPage();
+      },
     });
   }
   if (role !== "ALL") {
@@ -219,7 +239,10 @@ export function RosterTable({
       key: "role",
       text: `참가자 구분: ${role === "UNSPECIFIED" ? "미지정" : ROLE_LABEL[role]}`,
       clearLabel: "참가자 구분 필터 해제",
-      onClear: () => setRole("ALL"),
+      onClear: () => {
+        setRole("ALL");
+        resetPage();
+      },
     });
   }
   if (grade !== "ALL") {
@@ -227,7 +250,10 @@ export function RosterTable({
       key: "grade",
       text: `학년: ${grade === "UNSPECIFIED" ? "미지정" : GRADE_LABEL[grade]}`,
       clearLabel: "학년 필터 해제",
-      onClear: () => setGrade("ALL"),
+      onClear: () => {
+        setGrade("ALL");
+        resetPage();
+      },
     });
   }
   if (gender !== "ALL") {
@@ -235,7 +261,10 @@ export function RosterTable({
       key: "gender",
       text: `성별: ${gender === "MALE" ? "남성" : gender === "FEMALE" ? "여성" : "미지정"}`,
       clearLabel: "성별 필터 해제",
-      onClear: () => setGender("ALL"),
+      onClear: () => {
+        setGender("ALL");
+        resetPage();
+      },
     });
   }
   if (status !== "ALL") {
@@ -243,7 +272,10 @@ export function RosterTable({
       key: "status",
       text: `상태: ${status === "ACTIVE" ? "참석" : "취소"}`,
       clearLabel: "상태 필터 해제",
-      onClear: () => setStatus("ALL"),
+      onClear: () => {
+        setStatus("ALL");
+        resetPage();
+      },
     });
   }
 
@@ -256,7 +288,10 @@ export function RosterTable({
         <select
           aria-label="조직 필터"
           value={organization}
-          onChange={(event) => setOrganization(event.currentTarget.value)}
+          onChange={(event) => {
+            setOrganization(event.currentTarget.value);
+            resetPage();
+          }}
         >
           <option value="ALL">전체 조직</option>
           {organizations.map((name) => (
@@ -271,9 +306,10 @@ export function RosterTable({
         <select
           aria-label="성별 필터"
           value={gender}
-          onChange={(event) =>
-            setGender(event.currentTarget.value as typeof gender)
-          }
+          onChange={(event) => {
+            setGender(event.currentTarget.value as typeof gender);
+            resetPage();
+          }}
         >
           <option value="ALL">전체 성별</option>
           <option value="MALE">남성</option>
@@ -286,9 +322,10 @@ export function RosterTable({
         <select
           aria-label="상태 필터"
           value={status}
-          onChange={(event) =>
-            setStatus(event.currentTarget.value as typeof status)
-          }
+          onChange={(event) => {
+            setStatus(event.currentTarget.value as typeof status);
+            resetPage();
+          }}
         >
           <option value="ALL">전체 상태</option>
           <option value="ACTIVE">참석</option>
@@ -300,9 +337,10 @@ export function RosterTable({
         <select
           aria-label="참가자 구분 필터"
           value={role}
-          onChange={(event) =>
-            setRole(event.currentTarget.value as typeof role)
-          }
+          onChange={(event) => {
+            setRole(event.currentTarget.value as typeof role);
+            resetPage();
+          }}
         >
           <option value="ALL">전체 구분</option>
           <option value="STUDENT">{ROLE_LABEL.STUDENT}</option>
@@ -315,9 +353,10 @@ export function RosterTable({
         <select
           aria-label="학년 필터"
           value={grade}
-          onChange={(event) =>
-            setGrade(event.currentTarget.value as typeof grade)
-          }
+          onChange={(event) => {
+            setGrade(event.currentTarget.value as typeof grade);
+            resetPage();
+          }}
         >
           <option value="ALL">전체 학년</option>
           {Object.entries(GRADE_LABEL).map(([value, gradeLabel]) => (
@@ -374,7 +413,10 @@ export function RosterTable({
           label="명단 검색"
           placeholder="이름, 조직"
           value={query}
-          onChange={(event) => setQuery(event.currentTarget.value)}
+          onChange={(event) => {
+            setQuery(event.currentTarget.value);
+            resetPage();
+          }}
         />
       </div>
       {rows.length > 130 ? (
@@ -530,7 +572,7 @@ export function RosterTable({
             </tr>
           </thead>
           <tbody>
-            {filtered.map((row) => (
+            {pagedRows.map((row) => (
               <tr key={row.id}>
                 <td>
                   <span className="er-table-organization">
@@ -608,6 +650,66 @@ export function RosterTable({
           </tbody>
         </table>
       </div>
+      <nav className="er-roster-pagination" aria-label="명단 페이지네이션">
+        <span className="er-roster-pagination__summary">
+          총 {filtered.length}명 ·{" "}
+          {rangeStart === 0 ? "0명 표시" : `${rangeStart}–${rangeEnd}명 표시`}
+        </span>
+        <label className="er-roster-page-size">
+          <span>페이지당</span>
+          <select
+            aria-label="페이지당 표시 인원"
+            value={pageSize}
+            onChange={(event) => {
+              setPageSize(Number(event.currentTarget.value) as 30 | 60 | 100);
+              resetPage();
+            }}
+          >
+            <option value={30}>30명</option>
+            <option value={60}>60명</option>
+            <option value={100}>100명</option>
+          </select>
+        </label>
+        <div className="er-roster-pagination__pages">
+          <Button
+            type="button"
+            variant="secondary"
+            className="er-roster-pagination__button"
+            aria-label="이전 페이지"
+            disabled={safePage === 1}
+            onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
+          >
+            이전
+          </Button>
+          {Array.from({ length: pageCount }, (_, index) => index + 1).map(
+            (page) => (
+              <Button
+                key={page}
+                type="button"
+                variant={page === safePage ? "primary" : "secondary"}
+                className="er-roster-pagination__button"
+                aria-label={`${page}페이지`}
+                aria-current={page === safePage ? "page" : undefined}
+                onClick={() => setCurrentPage(page)}
+              >
+                {page}
+              </Button>
+            ),
+          )}
+          <Button
+            type="button"
+            variant="secondary"
+            className="er-roster-pagination__button"
+            aria-label="다음 페이지"
+            disabled={safePage === pageCount}
+            onClick={() =>
+              setCurrentPage((page) => Math.min(pageCount, page + 1))
+            }
+          >
+            다음
+          </Button>
+        </div>
+      </nav>
     </div>
   );
 }

@@ -1112,6 +1112,35 @@ a {
 .er-table-wrap {
   overflow-x: auto;
 }
+.er-roster-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--er-space-4);
+  flex-wrap: wrap;
+  padding-top: var(--er-space-4);
+  color: var(--er-color-muted);
+  font-size: 0.9rem;
+}
+.er-roster-page-size,
+.er-roster-pagination__pages {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--er-space-2);
+}
+.er-roster-page-size select {
+  min-height: 2.25rem;
+  border: 1px solid var(--er-color-border);
+  border-radius: var(--er-radius-sm);
+  padding: var(--er-space-1) var(--er-space-3);
+  color: var(--er-color-ink);
+  background: var(--er-color-surface);
+}
+.er-roster-pagination__button {
+  min-width: 2.25rem;
+  min-height: 2.25rem;
+  padding: var(--er-space-1) var(--er-space-3);
+}
 table {
   width: 100%;
   border-collapse: collapse;
