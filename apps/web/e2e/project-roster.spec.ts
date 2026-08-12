@@ -1,5 +1,10 @@
 import { expect, request, test } from "@playwright/test";
-import { fixture, login } from "./support";
+import {
+  addProjectOrganizations,
+  fixture,
+  login,
+  selectRosterFilter,
+} from "./support";
 
 test("operator adds two selected organization candidates to a project at once", async ({
   page,
@@ -38,17 +43,13 @@ test("operator adds two selected organization candidates to a project at once", 
   await login(page, data.operator.loginId, data.operator.password);
   await page.goto(`/projects/${data.rosterProjectId}`);
   await page.getByRole("tab", { name: "조직" }).click();
-  for (const name of candidateNames) {
-    await page.getByRole("checkbox", { name }).check();
-  }
-
   const bulkAddResponse = page.waitForResponse(
     (response) =>
       response.url() ===
         `${data.baseUrl}/api/v1/projects/${data.rosterProjectId}/organizations/bulk` &&
       response.request().method() === "POST",
   );
-  await page.getByRole("button", { name: "선택한 2개 조직 추가" }).click();
+  await addProjectOrganizations(page, candidateNames);
   expect((await bulkAddResponse).ok()).toBe(true);
 
   const projectOrganizations = page
@@ -164,16 +165,12 @@ test("participant profile rows support exact editing and filtering", async ({
     teacherRow.getByRole("cell", { name: "취소", exact: true }),
   ).toBeVisible();
 
-  await page
-    .getByRole("combobox", { name: "참가자 구분 필터" })
-    .selectOption("TEACHER");
+  await selectRosterFilter(page, "참가자 구분", "TEACHER");
   await expect(studentRow).toBeHidden();
   await expect(teacherRow).toBeVisible();
 
-  await page
-    .getByRole("combobox", { name: "참가자 구분 필터" })
-    .selectOption("ALL");
-  await page.getByRole("combobox", { name: "학년 필터" }).selectOption("M3");
+  await selectRosterFilter(page, "참가자 구분", "ALL");
+  await selectRosterFilter(page, "학년", "M3");
   await expect(studentRow).toBeVisible();
   await expect(teacherRow).toBeHidden();
 });

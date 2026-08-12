@@ -1,5 +1,5 @@
 import { expect, request, test } from "@playwright/test";
-import { fixture, login } from "./support";
+import { addProjectOrganizations, fixture, login } from "./support";
 
 test("existing manager assignment stays usable at 360px", async ({ page }) => {
   const data = fixture();
@@ -134,8 +134,7 @@ test("operator delegates pre-registration roster entry to an organization leader
   await page.getByRole("link", { name: "프로젝트" }).click();
   await page.getByRole("link", { name: "E2E 상반기 프로젝트" }).click();
   await page.getByRole("tab", { name: "조직" }).click();
-  await page.getByRole("checkbox", { name: "E2E 2팀" }).check();
-  await page.getByRole("button", { name: "선택한 1개 조직 추가" }).click();
+  await addProjectOrganizations(page, ["E2E 2팀"]);
 
   await page.getByRole("button", { name: "로그아웃" }).click();
   await login(page, "e2e-org-leader", temporaryPassword);

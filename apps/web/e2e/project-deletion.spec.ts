@@ -1,5 +1,5 @@
 import { expect, request, test } from "@playwright/test";
-import { fixture, login } from "./support";
+import { addProjectOrganizations, fixture, login } from "./support";
 
 test("operator excludes and re-adds an organization, then deletes and restores a closed project", async ({
   page,
@@ -100,8 +100,7 @@ test("operator excludes and re-adds an organization, then deletes and restores a
     ).toHaveCount(0);
     await expect(page.getByText("연결된 조직이 없습니다.")).toBeVisible();
 
-    await page.getByRole("checkbox", { name: "E2E 1팀" }).check();
-    await page.getByRole("button", { name: "선택한 1개 조직 추가" }).click();
+    await addProjectOrganizations(page, ["E2E 1팀"]);
     await expect(
       projectOrganizations.getByText("E2E 1팀", { exact: true }),
     ).toBeVisible();

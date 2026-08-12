@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { errors, expect, request, test } from "@playwright/test";
 import * as XLSX from "xlsx";
-import { fixture, login } from "./support";
+import { fixture, login, selectRosterFilter } from "./support";
 
 test("import and export profile preserves mixed and canceled roster rows", async ({
   page,
@@ -113,9 +113,7 @@ test("import and export profile preserves mixed and canceled roster rows", async
     cancelledStudentRow.getByRole("cell", { name: "취소" }),
   ).toBeVisible();
 
-  await page
-    .getByRole("combobox", { name: "참가자 구분 필터" })
-    .selectOption("TEACHER");
+  await selectRosterFilter(page, "참가자 구분", "TEACHER");
   await expect(page.getByRole("row", { name: /E2E 담당교사/ })).toBeVisible();
   await expect(page.getByRole("row", { name: /E2E 활성 학생/ })).toBeHidden();
 

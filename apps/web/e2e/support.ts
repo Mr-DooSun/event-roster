@@ -35,6 +35,38 @@ export async function login(page: Page, loginId: string, password: string) {
   await page.getByLabel("로그인 ID").waitFor({ state: "hidden" });
 }
 
+export async function addProjectOrganizations(
+  page: Page,
+  names: readonly string[],
+) {
+  await page.getByRole("button", { name: "조직 선택 추가" }).click();
+  const dialog = page.getByRole("dialog", { name: "조직 선택 추가" });
+  for (const name of names) {
+    await dialog.getByRole("checkbox", { name }).check();
+  }
+  await dialog
+    .getByRole("button", { name: `선택한 ${names.length}개 조직 추가` })
+    .click();
+}
+
+export async function selectRosterFilter(
+  page: Page,
+  label: string,
+  value: string,
+) {
+  const trigger = page.getByRole("button", {
+    name: `${label} 필터`,
+    exact: true,
+  });
+  if ((await trigger.getAttribute("aria-expanded")) !== "true") {
+    await trigger.click();
+  }
+  const menu = page.getByRole("dialog", { name: `${label} 필터 메뉴` });
+  await menu
+    .getByRole("combobox", { name: `${label} 필터` })
+    .selectOption(value);
+}
+
 export interface E2eCleanupResource {
   id: string;
   name: string;
