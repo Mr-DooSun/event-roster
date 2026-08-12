@@ -1,8 +1,8 @@
 import {
-  type ParticipantRole,
-  ParticipantRoleSchema,
   type Gender,
   GenderSchema,
+  type ParticipantRole,
+  ParticipantRoleSchema,
   type RosterSource,
   type RosterStatus,
   type StudentGrade,

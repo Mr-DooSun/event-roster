@@ -2,10 +2,10 @@ import { z } from "zod";
 import { OrganizationIdSchema } from "./organizations";
 import { normalizeParticipantName } from "./participant-names";
 import {
-  type ParticipantRole,
-  ParticipantRoleSchema,
   type Gender,
   GenderSchema,
+  type ParticipantRole,
+  ParticipantRoleSchema,
   type StudentGrade,
   StudentGradeSchema,
 } from "./participant-profile";
@@ -13,10 +13,10 @@ import { ParticipantIdSchema } from "./participants";
 import { ProjectIdSchema } from "./projects";
 
 export {
-  type ParticipantRole,
-  ParticipantRoleSchema,
   type Gender,
   GenderSchema,
+  type ParticipantRole,
+  ParticipantRoleSchema,
   type StudentGrade,
   StudentGradeSchema,
 } from "./participant-profile";

@@ -1,9 +1,9 @@
 import { z } from "zod";
 import { OrganizationIdSchema } from "./organizations";
 import {
+  GenderSchema,
   type ParticipantRole,
   ParticipantRoleSchema,
-  GenderSchema,
   RosterParticipantProfileSchema,
   RosterStatusSchema,
   type StudentGrade,

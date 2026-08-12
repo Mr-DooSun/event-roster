@@ -823,8 +823,7 @@ function mapReturnedRoster(
       typeof row.participant_role_snapshot !== "string") ||
     (row.student_grade_snapshot !== null &&
       typeof row.student_grade_snapshot !== "string") ||
-    (row.gender_snapshot !== null &&
-      typeof row.gender_snapshot !== "string") ||
+    (row.gender_snapshot !== null && typeof row.gender_snapshot !== "string") ||
     (row.source !== "PRE_REGISTRATION" && row.source !== "IN_PROGRESS") ||
     (row.status !== "ACTIVE" && row.status !== "CANCELLED") ||
     typeof row.was_expected_at_start !== "number" ||
