@@ -313,6 +313,7 @@ export function ProjectRosterPage({
             organizationId: input.organizationId,
             role: input.role,
             grade: input.grade,
+            gender: input.gender,
             expectedProjectRevision: project.revision,
             expectedEntryRevision: latestRoster.revision,
           })

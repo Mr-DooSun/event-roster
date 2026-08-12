@@ -3376,7 +3376,7 @@ it("routes correction add, bulk, and snapshot requests without changing ordinary
       <Gate>
         <ProjectRosterPage
           project={rosterProject}
-          rows={[entry("ACTIVE")]}
+          rows={[{ ...entry("ACTIVE"), gender: "MALE" }]}
           participants={participants}
           organizations={[
             {
@@ -3400,6 +3400,9 @@ it("routes correction add, bulk, and snapshot requests without changing ordinary
   fireEvent.change(screen.getByLabelText("이름"), {
     target: { value: "보정 이름" },
   });
+  fireEvent.change(screen.getByRole("combobox", { name: "성별" }), {
+    target: { value: "FEMALE" },
+  });
   fireEvent.click(screen.getByRole("button", { name: "정보 저장" }));
   await waitFor(() => {
     const call = fetchMock.mock.calls.find(
@@ -3413,6 +3416,7 @@ it("routes correction add, bulk, and snapshot requests without changing ordinary
       organizationId: "org-1",
       role: "STUDENT",
       grade: "M1",
+      gender: "FEMALE",
       expectedProjectRevision: 2,
       expectedEntryRevision: 0,
     });
