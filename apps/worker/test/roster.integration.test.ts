@@ -139,14 +139,19 @@ it("persists participant profiles for an existing participant add", async () => 
       organizationId: "org-1",
       role: "STUDENT",
       grade: "M2",
+      gender: "MALE",
     },
     fixture.firstParticipant.revision,
   );
 
-  expect(entry).toMatchObject({ role: "STUDENT", grade: "M2" });
+  expect(entry).toMatchObject({
+    role: "STUDENT",
+    grade: "M2",
+    gender: "MALE",
+  });
   expect(
     await env.DB.prepare(
-      `SELECT participant_role_snapshot, student_grade_snapshot
+      `SELECT participant_role_snapshot, student_grade_snapshot, gender_snapshot
        FROM project_roster_entries WHERE id = ?`,
     )
       .bind(entry.id)
@@ -154,6 +159,7 @@ it("persists participant profiles for an existing participant add", async () => 
   ).toEqual({
     participant_role_snapshot: "STUDENT",
     student_grade_snapshot: "M2",
+    gender_snapshot: "MALE",
   });
 });
 
@@ -2210,6 +2216,7 @@ it("reactivates a same-project entry with the newly confirmed profile", async ()
           organizationId: "org-1",
           role: "TEACHER",
           grade: null,
+          gender: "FEMALE",
         },
         expectedParticipantRevision: 0,
         expectedRevision: cancelledBody.projectRevision,
@@ -2220,7 +2227,7 @@ it("reactivates a same-project entry with the newly confirmed profile", async ()
   expect(
     await env.DB.prepare(
       `SELECT participant_name_snapshot, organization_name_snapshot,
-              participant_role_snapshot, student_grade_snapshot
+              participant_role_snapshot, student_grade_snapshot, gender_snapshot
        FROM project_roster_entries WHERE id = ?`,
     )
       .bind(active.id)
@@ -2230,7 +2237,9 @@ it("reactivates a same-project entry with the newly confirmed profile", async ()
     organization_name_snapshot: "1팀",
     participant_role_snapshot: "TEACHER",
     student_grade_snapshot: null,
+    gender_snapshot: "FEMALE",
   });
+  expect(await reactivated.json()).toMatchObject({ gender: "FEMALE" });
 });
 
 it("closes an expired project when auto-close first loses a revision race", async () => {

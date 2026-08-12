@@ -1,4 +1,5 @@
 import type {
+  Gender,
   ParticipantRole,
   ProjectStatus,
   RosterSource,
@@ -6,6 +7,7 @@ import type {
   StudentGrade,
 } from "@event-roster/contracts";
 import {
+  GenderSchema,
   ParticipantRoleSchema,
   StudentGradeSchema,
 } from "@event-roster/contracts";
@@ -63,6 +65,7 @@ export async function addRosterEntry(
     organizationId: string;
     role: ParticipantRole;
     grade: StudentGrade | null;
+    gender?: Gender | null;
   },
   expectedParticipantRevision: number,
   now = new Date(),
@@ -180,17 +183,18 @@ export async function addRosterEntry(
     ? [
         env.DB.prepare(
           `UPDATE project_roster_entries
-           SET participant_role_snapshot = ?, student_grade_snapshot = ?,
+           SET participant_role_snapshot = ?, student_grade_snapshot = ?, gender_snapshot = ?,
                status = 'ACTIVE', source = ?, revision = revision + 1,
                updated_by = ?, updated_at = ?
            WHERE id = ?
            RETURNING id, project_id, participant_id, organization_id,
              participant_name_snapshot, organization_name_snapshot, source, status,
-             participant_role_snapshot, student_grade_snapshot,
+             participant_role_snapshot, student_grade_snapshot, gender_snapshot,
              was_expected_at_start, revision`,
         ).bind(
           confirmedParticipant.role,
           confirmedParticipant.grade,
+          confirmedParticipant.gender ?? null,
           nextSource,
           actor.session.user.id,
           timestamp,
@@ -218,15 +222,15 @@ export async function addRosterEntry(
           `INSERT INTO project_roster_entries
            (id, project_id, participant_id, organization_id,
             participant_name_snapshot, organization_name_snapshot,
-            participant_role_snapshot, student_grade_snapshot, source, status,
+            participant_role_snapshot, student_grade_snapshot, gender_snapshot, source, status,
             was_expected_at_start, revision, created_by, updated_by, created_at, updated_at)
-           SELECT ?, ?, p.id, ?, ?, o.name, ?, ?, ?, 'ACTIVE', 0, 0,
+           SELECT ?, ?, p.id, ?, ?, o.name, ?, ?, ?, ?, 'ACTIVE', 0, 0,
                   ?, ?, ?, ?
            FROM participants p JOIN organizations o ON o.id = ?
            WHERE p.id = ?
            RETURNING id, project_id, participant_id, organization_id,
              participant_name_snapshot, organization_name_snapshot, source, status,
-             participant_role_snapshot, student_grade_snapshot,
+             participant_role_snapshot, student_grade_snapshot, gender_snapshot,
              was_expected_at_start, revision`,
         ).bind(
           id,
@@ -235,6 +239,7 @@ export async function addRosterEntry(
           confirmedParticipant.name,
           confirmedParticipant.role,
           confirmedParticipant.grade,
+          confirmedParticipant.gender ?? null,
           source,
           actor.session.user.id,
           actor.session.user.id,
@@ -818,6 +823,8 @@ function mapReturnedRoster(
       typeof row.participant_role_snapshot !== "string") ||
     (row.student_grade_snapshot !== null &&
       typeof row.student_grade_snapshot !== "string") ||
+    (row.gender_snapshot !== null &&
+      typeof row.gender_snapshot !== "string") ||
     (row.source !== "PRE_REGISTRATION" && row.source !== "IN_PROGRESS") ||
     (row.status !== "ACTIVE" && row.status !== "CANCELLED") ||
     typeof row.was_expected_at_start !== "number" ||
@@ -843,7 +850,10 @@ function mapReturnedRoster(
       row.student_grade_snapshot === null
         ? null
         : StudentGradeSchema.parse(row.student_grade_snapshot),
-    gender: null,
+    gender:
+      row.gender_snapshot === null
+        ? null
+        : GenderSchema.parse(row.gender_snapshot),
     wasExpectedAtStart: row.was_expected_at_start === 1,
     revision: row.revision,
     updatedAt,
