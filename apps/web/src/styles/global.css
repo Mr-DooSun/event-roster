@@ -848,6 +848,24 @@ a {
   align-items: flex-end;
   margin-top: auto;
 }
+.er-project-organization-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--er-space-4);
+  margin-top: var(--er-space-5);
+  color: var(--er-color-muted);
+  font-size: 0.875rem;
+}
+.er-project-organization-pagination__pages {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--er-space-2);
+}
+.er-project-organization-pagination__pages .er-button {
+  min-width: 2.5rem;
+  padding: var(--er-space-2) var(--er-space-3);
+}
 .er-project-organization-bulk-picker {
   display: grid;
   gap: var(--er-space-4);
@@ -1495,6 +1513,10 @@ th {
     flex-direction: column;
   }
   .er-membership-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .er-project-organization-pagination {
     align-items: stretch;
     flex-direction: column;
   }

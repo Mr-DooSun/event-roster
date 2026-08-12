@@ -49,6 +49,8 @@ type OrganizationAction =
   | `TOGGLE:${string}`
   | null;
 
+const ORGANIZATION_PAGE_SIZE = 8;
+
 export function ProjectOrganizationsPanel({
   projectId,
   projectRevision,
@@ -76,6 +78,22 @@ export function ProjectOrganizationsPanel({
             !membership.masterIsDeleted),
       ),
     [correctionMode, memberships],
+  );
+  const [currentPage, setCurrentPage] = useState(1);
+  const pageCount = Math.max(
+    1,
+    Math.ceil(visibleMemberships.length / ORGANIZATION_PAGE_SIZE),
+  );
+  const safePage = Math.min(currentPage, pageCount);
+  const firstIndex = (safePage - 1) * ORGANIZATION_PAGE_SIZE;
+  const pagedMemberships = visibleMemberships.slice(
+    firstIndex,
+    firstIndex + ORGANIZATION_PAGE_SIZE,
+  );
+  const rangeStart = visibleMemberships.length === 0 ? 0 : firstIndex + 1;
+  const rangeEnd = Math.min(
+    firstIndex + ORGANIZATION_PAGE_SIZE,
+    visibleMemberships.length,
   );
   const linkedOrganizationIds = useMemo(
     () =>
@@ -115,6 +133,10 @@ export function ProjectOrganizationsPanel({
   useEffect(() => {
     setObservedProjectRevision(projectRevision);
   }, [projectRevision]);
+
+  useEffect(() => {
+    if (currentPage > pageCount) setCurrentPage(pageCount);
+  }, [currentPage, pageCount]);
 
   const selectedInactiveMembership =
     pendingSelection?.kind === "EXISTING"
@@ -397,24 +419,73 @@ export function ProjectOrganizationsPanel({
         {visibleMemberships.length === 0 ? (
           <p className="er-muted">연결된 조직이 없습니다.</p>
         ) : (
-          <ul
-            className="er-project-organization-grid"
-            aria-label="프로젝트 조직 목록"
-          >
-            {visibleMemberships.map((membership) => (
-              <OrganizationMembershipRow
-                key={membership.organizationId}
-                membership={membership}
-                canMutateMemberships={canMutateMemberships}
-                canManageOrganizations={canManageOrganizations}
-                correctionMode={correctionMode}
-                busy={busy}
-                loading={busyAction === `TOGGLE:${membership.organizationId}`}
-                onExclude={() => setPendingExclusion(membership)}
-                onReactivate={() => setActive(membership, true)}
-              />
-            ))}
-          </ul>
+          <>
+            <ul
+              className="er-project-organization-grid"
+              aria-label="프로젝트 조직 목록"
+            >
+              {pagedMemberships.map((membership) => (
+                <OrganizationMembershipRow
+                  key={membership.organizationId}
+                  membership={membership}
+                  canMutateMemberships={canMutateMemberships}
+                  canManageOrganizations={canManageOrganizations}
+                  correctionMode={correctionMode}
+                  busy={busy}
+                  loading={busyAction === `TOGGLE:${membership.organizationId}`}
+                  onExclude={() => setPendingExclusion(membership)}
+                  onReactivate={() => setActive(membership, true)}
+                />
+              ))}
+            </ul>
+            <nav
+              className="er-project-organization-pagination"
+              aria-label="프로젝트 조직 페이지네이션"
+            >
+              <span>
+                총 {visibleMemberships.length}개 조직 · {rangeStart}–{rangeEnd}
+                개 표시
+              </span>
+              <div className="er-project-organization-pagination__pages">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  aria-label="이전 페이지"
+                  disabled={safePage === 1}
+                  onClick={() =>
+                    setCurrentPage((page) => Math.max(1, page - 1))
+                  }
+                >
+                  이전
+                </Button>
+                {Array.from({ length: pageCount }, (_, index) => index + 1).map(
+                  (page) => (
+                    <Button
+                      key={page}
+                      type="button"
+                      variant={page === safePage ? "primary" : "secondary"}
+                      aria-label={`${page}페이지`}
+                      aria-current={page === safePage ? "page" : undefined}
+                      onClick={() => setCurrentPage(page)}
+                    >
+                      {page}
+                    </Button>
+                  ),
+                )}
+                <Button
+                  type="button"
+                  variant="secondary"
+                  aria-label="다음 페이지"
+                  disabled={safePage === pageCount}
+                  onClick={() =>
+                    setCurrentPage((page) => Math.min(pageCount, page + 1))
+                  }
+                >
+                  다음
+                </Button>
+              </div>
+            </nav>
+          </>
         )}
       </Card>
       {canMutateMemberships && newConfirmation ? (

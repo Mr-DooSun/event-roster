@@ -1235,6 +1235,87 @@ it("renders visually distinct organization tiles with prominent roster counts", 
   ).toBeVisible();
 });
 
+it("paginates project organization tiles eight at a time", () => {
+  const memberships = Array.from({ length: 10 }, (_, index) =>
+    organizationMembership({
+      organizationId: `org-${index + 1}`,
+      name: `${index + 1}팀`,
+    }),
+  );
+  render(
+    <ProjectOrganizationsPanel
+      projectId="project-1"
+      projectRevision={7}
+      memberships={memberships}
+      allOrganizations={[]}
+      canMutateMemberships={false}
+      canManageOrganizations={false}
+      onChanged={vi.fn().mockResolvedValue(undefined)}
+    />,
+  );
+
+  const list = screen.getByRole("list", { name: "프로젝트 조직 목록" });
+  expect(within(list).getAllByRole("listitem")).toHaveLength(8);
+  expect(screen.getByText("총 10개 조직 · 1–8개 표시")).toBeVisible();
+  expect(screen.queryByText("9팀")).not.toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "다음 페이지" }));
+
+  expect(within(list).getAllByRole("listitem")).toHaveLength(2);
+  expect(screen.getByText("총 10개 조직 · 9–10개 표시")).toBeVisible();
+  expect(screen.getByRole("button", { name: "2페이지" })).toHaveAttribute(
+    "aria-current",
+    "page",
+  );
+});
+
+it("shrinks the organization page to the last valid page", async () => {
+  const memberships = Array.from({ length: 10 }, (_, index) =>
+    organizationMembership({
+      organizationId: `org-${index + 1}`,
+      name: `${index + 1}팀`,
+    }),
+  );
+  const commonProps = {
+    projectId: "project-1",
+    projectRevision: 7,
+    allOrganizations: [],
+    canMutateMemberships: false,
+    canManageOrganizations: false,
+    onChanged: vi.fn().mockResolvedValue(undefined),
+  };
+  const view = render(
+    <ProjectOrganizationsPanel {...commonProps} memberships={memberships} />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "다음 페이지" }));
+  expect(screen.getByRole("button", { name: "2페이지" })).toHaveAttribute(
+    "aria-current",
+    "page",
+  );
+
+  view.rerender(
+    <ProjectOrganizationsPanel
+      {...commonProps}
+      memberships={[
+        organizationMembership({
+          organizationId: "org-only",
+          name: "남은 조직",
+        }),
+      ]}
+    />,
+  );
+
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "1페이지" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    ),
+  );
+  expect(screen.getByText("남은 조직")).toBeVisible();
+  expect(screen.getByRole("button", { name: "이전 페이지" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "다음 페이지" })).toBeDisabled();
+});
+
 it("renders leadership metadata and only operator management links", () => {
   const memberships = [
     organizationMembership(),
@@ -1307,6 +1388,11 @@ it("hides deleted memberships from project organization management", () => {
 
   expect(screen.queryByText("삭제된 연결")).not.toBeInTheDocument();
   expect(screen.getByText("연결된 조직이 없습니다.")).toBeVisible();
+  expect(
+    screen.queryByRole("navigation", {
+      name: "프로젝트 조직 페이지네이션",
+    }),
+  ).not.toBeInTheDocument();
 });
 
 it("keeps operator organization management links without membership mutation controls", () => {
