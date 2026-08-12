@@ -29,6 +29,9 @@ export interface RosterView {
 }
 
 type RosterFilter = "organization" | "gender" | "status" | "role" | "grade";
+type RosterSortKey = "ORGANIZATION" | "GRADE" | "NAME";
+
+const SORT_PRIORITY: RosterSortKey[] = ["ORGANIZATION", "GRADE", "NAME"];
 
 export function RosterTable({
   rows,
@@ -68,9 +71,7 @@ export function RosterTable({
     left: 0,
   });
   const filterMenuRef = useRef<HTMLDivElement>(null);
-  const [sort, setSort] = useState<
-    "DEFAULT" | "ORGANIZATION" | "GRADE" | "NAME"
-  >("DEFAULT");
+  const [sortKeys, setSortKeys] = useState<RosterSortKey[]>(SORT_PRIORITY);
   const organizations = useMemo(
     () => [...new Set(rows.slice(0, 130).map((row) => row.organizationName))],
     [rows],
@@ -110,8 +111,8 @@ export function RosterTable({
           matchesGender
         );
       })
-      .sort((left, right) => compareRoster(left, right, sort));
-  }, [gender, grade, organization, query, role, rows, sort, status]);
+      .sort((left, right) => compareRoster(left, right, sortKeys));
+  }, [gender, grade, organization, query, role, rows, sortKeys, status]);
 
   useEffect(() => {
     if (activeFilter === null) return;
@@ -165,6 +166,21 @@ export function RosterTable({
       ),
     });
     setActiveFilter(filter);
+  };
+
+  const toggleSort = (key: RosterSortKey) => {
+    setSortKeys((current) =>
+      current.includes(key)
+        ? current.filter((item) => item !== key)
+        : SORT_PRIORITY.filter(
+            (item) => item === key || current.includes(item),
+          ),
+    );
+  };
+
+  const sortPriority = (key: RosterSortKey) => {
+    const index = sortKeys.indexOf(key);
+    return index < 0 ? null : index + 1;
   };
 
   const renderFilterMenu = (filter: RosterFilter, label: string) => {
@@ -290,22 +306,38 @@ export function RosterTable({
                 <span>이름</span>
                 <button
                   type="button"
-                  aria-label="이름 정렬"
-                  className="er-roster-header-icon"
-                  onClick={() => setSort("NAME")}
+                  aria-label={
+                    sortPriority("NAME") === null
+                      ? "이름 정렬, 비활성"
+                      : `이름 정렬, 우선순위 ${sortPriority("NAME")}`
+                  }
+                  aria-pressed={sortPriority("NAME") !== null}
+                  className="er-roster-header-icon er-roster-sort-control"
+                  onClick={() => toggleSort("NAME")}
                 >
                   ↕
+                  {sortPriority("NAME") === null ? null : (
+                    <small>{sortPriority("NAME")}</small>
+                  )}
                 </button>
               </th>
               <th className="er-roster-header-cell">
                 <span>조직</span>
                 <button
                   type="button"
-                  aria-label="조직 정렬"
-                  className="er-roster-header-icon"
-                  onClick={() => setSort("ORGANIZATION")}
+                  aria-label={
+                    sortPriority("ORGANIZATION") === null
+                      ? "조직 정렬, 비활성"
+                      : `조직 정렬, 우선순위 ${sortPriority("ORGANIZATION")}`
+                  }
+                  aria-pressed={sortPriority("ORGANIZATION") !== null}
+                  className="er-roster-header-icon er-roster-sort-control"
+                  onClick={() => toggleSort("ORGANIZATION")}
                 >
                   ↕
+                  {sortPriority("ORGANIZATION") === null ? null : (
+                    <small>{sortPriority("ORGANIZATION")}</small>
+                  )}
                 </button>
                 <button
                   type="button"
@@ -341,11 +373,19 @@ export function RosterTable({
                 <span>학년</span>
                 <button
                   type="button"
-                  aria-label="학년 정렬"
-                  className="er-roster-header-icon"
-                  onClick={() => setSort("GRADE")}
+                  aria-label={
+                    sortPriority("GRADE") === null
+                      ? "학년 정렬, 비활성"
+                      : `학년 정렬, 우선순위 ${sortPriority("GRADE")}`
+                  }
+                  aria-pressed={sortPriority("GRADE") !== null}
+                  className="er-roster-header-icon er-roster-sort-control"
+                  onClick={() => toggleSort("GRADE")}
                 >
                   ↕
+                  {sortPriority("GRADE") === null ? null : (
+                    <small>{sortPriority("GRADE")}</small>
+                  )}
                 </button>
                 <button
                   type="button"
@@ -488,19 +528,20 @@ const GRADE_ORDER: Record<StudentGrade, number> = {
 function compareRoster(
   left: RosterView,
   right: RosterView,
-  sort: "DEFAULT" | "ORGANIZATION" | "GRADE" | "NAME",
+  sortKeys: RosterSortKey[],
 ) {
-  const organization = left.organizationName.localeCompare(
-    right.organizationName,
-    "ko",
-  );
-  const grade =
-    (left.grade === null ? 6 : GRADE_ORDER[left.grade]) -
-    (right.grade === null ? 6 : GRADE_ORDER[right.grade]);
-  const name = left.participantName.localeCompare(right.participantName, "ko");
-  const defaultOrder = organization || grade || name;
-  if (sort === "ORGANIZATION") return organization || grade || name;
-  if (sort === "GRADE") return grade || organization || name;
-  if (sort === "NAME") return name || organization || grade;
-  return defaultOrder;
+  const comparisons: Record<RosterSortKey, number> = {
+    ORGANIZATION: left.organizationName.localeCompare(
+      right.organizationName,
+      "ko",
+    ),
+    GRADE:
+      (left.grade === null ? 6 : GRADE_ORDER[left.grade]) -
+      (right.grade === null ? 6 : GRADE_ORDER[right.grade]),
+    NAME: left.participantName.localeCompare(right.participantName, "ko"),
+  };
+  for (const key of sortKeys) {
+    if (comparisons[key] !== 0) return comparisons[key];
+  }
+  return 0;
 }

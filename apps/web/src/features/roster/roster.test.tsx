@@ -1392,7 +1392,7 @@ it("shows participant profiles and combines role and grade filters with existing
   expect(
     screen.queryByRole("combobox", { name: "성별 필터" }),
   ).not.toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "조직 정렬" })).toBeVisible();
+  expect(screen.getByRole("button", { name: /^조직 정렬/ })).toBeVisible();
   expect(screen.getByRole("button", { name: "조직 필터" })).toBeVisible();
   const studentRow = screen.getByText("중2 학생").closest("tr");
   const teacherRow = screen.getByText("담당 교사").closest("tr");
@@ -1436,6 +1436,131 @@ it("shows participant profiles and combines role and grade filters with existing
   expect(screen.queryByText("중1 학생")).not.toBeInTheDocument();
   expect(screen.queryByText("담당 교사")).not.toBeInTheDocument();
   expect(screen.queryByText("기존 참가자")).not.toBeInTheDocument();
+});
+
+it("uses organization grade and name as the default sort priority", () => {
+  const rows: RosterView[] = [
+    {
+      ...entry("ACTIVE"),
+      id: "entry-org-b",
+      participantId: "person-org-b",
+      participantName: "나조직 학생",
+      organizationName: "나 조직",
+      grade: "M1",
+    },
+    {
+      ...entry("ACTIVE"),
+      id: "entry-grade-two",
+      participantId: "person-grade-two",
+      participantName: "중2 학생",
+      organizationName: "가 조직",
+      grade: "M2",
+    },
+    {
+      ...entry("ACTIVE"),
+      id: "entry-name-last",
+      participantId: "person-name-last",
+      participantName: "차 학생",
+      organizationName: "가 조직",
+      grade: "M1",
+    },
+    {
+      ...entry("ACTIVE"),
+      id: "entry-name-first",
+      participantId: "person-name-first",
+      participantName: "가 학생",
+      organizationName: "가 조직",
+      grade: "M1",
+    },
+  ];
+  render(
+    <RosterTable
+      rows={rows}
+      canMutate={false}
+      onStatusChange={vi.fn().mockResolvedValue(undefined)}
+      onEdit={vi.fn()}
+    />,
+  );
+
+  expect(
+    screen
+      .getAllByRole("row")
+      .slice(1)
+      .map((row) => within(row).getAllByRole("cell").at(0)?.textContent),
+  ).toEqual(["가 학생", "차 학생", "중2 학생", "나조직 학생"]);
+  expect(
+    screen.getByRole("button", { name: "조직 정렬, 우선순위 1" }),
+  ).toHaveAttribute("aria-pressed", "true");
+  expect(
+    screen.getByRole("button", { name: "학년 정렬, 우선순위 2" }),
+  ).toHaveAttribute("aria-pressed", "true");
+  expect(
+    screen.getByRole("button", { name: "이름 정렬, 우선순위 3" }),
+  ).toHaveAttribute("aria-pressed", "true");
+});
+
+it("toggles roster sort keys while preserving their fixed priority", () => {
+  const rows: RosterView[] = [
+    {
+      ...entry("ACTIVE"),
+      id: "entry-first",
+      participantId: "person-first",
+      participantName: "첫 번째",
+      organizationName: "나 조직",
+      grade: "M2",
+    },
+    {
+      ...entry("ACTIVE"),
+      id: "entry-second",
+      participantId: "person-second",
+      participantName: "두 번째",
+      organizationName: "가 조직",
+      grade: "M1",
+    },
+  ];
+  render(
+    <RosterTable
+      rows={rows}
+      canMutate={false}
+      onStatusChange={vi.fn().mockResolvedValue(undefined)}
+      onEdit={vi.fn()}
+    />,
+  );
+
+  fireEvent.click(
+    screen.getByRole("button", { name: "학년 정렬, 우선순위 2" }),
+  );
+  expect(
+    screen.getByRole("button", { name: "학년 정렬, 비활성" }),
+  ).toHaveAttribute("aria-pressed", "false");
+  expect(
+    screen.getByRole("button", { name: "이름 정렬, 우선순위 2" }),
+  ).toBeVisible();
+
+  fireEvent.click(screen.getByRole("button", { name: "학년 정렬, 비활성" }));
+  expect(
+    screen.getByRole("button", { name: "학년 정렬, 우선순위 2" }),
+  ).toBeVisible();
+  expect(
+    screen.getByRole("button", { name: "이름 정렬, 우선순위 3" }),
+  ).toBeVisible();
+
+  fireEvent.click(
+    screen.getByRole("button", { name: "조직 정렬, 우선순위 1" }),
+  );
+  fireEvent.click(
+    screen.getByRole("button", { name: "학년 정렬, 우선순위 1" }),
+  );
+  fireEvent.click(
+    screen.getByRole("button", { name: "이름 정렬, 우선순위 1" }),
+  );
+
+  expect(
+    screen
+      .getAllByRole("row")
+      .slice(1)
+      .map((row) => within(row).getAllByRole("cell").at(0)?.textContent),
+  ).toEqual(["첫 번째", "두 번째"]);
 });
 
 it("opens roster filters from table headers and closes the menu outside or with Escape", () => {
