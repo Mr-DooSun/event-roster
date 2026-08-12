@@ -66,9 +66,17 @@ it("uses compact bulk participant layout for new mode", () => {
   expect(summary?.querySelector(".er-bulk-participant-rows")).not.toBeNull();
   const finalAction = screen.getByRole("button", { name: "명단에 추가" });
   expect(finalAction.closest(".er-dialog-actions")?.parentElement).toBe(form);
-  expect(summary?.parentElement).toBe(form);
   const addParticipant = screen.getByRole("button", { name: "참가자 추가" });
   expect(addParticipant).toHaveClass("er-bulk-participant-add");
+  const participantEditor = addParticipant.closest(
+    ".er-bulk-participant-editor",
+  );
+  expect(participantEditor).not.toBeNull();
+  expect(summary?.parentElement).toBe(participantEditor);
+  expect(participantEditor?.parentElement).toBe(form);
+  expect(participantEditor).not.toContainElement(
+    finalAction.closest(".er-dialog-actions"),
+  );
   fireEvent.click(addParticipant);
   expect(
     screen.getByRole("button", { name: "1번 참가자 삭제" }),

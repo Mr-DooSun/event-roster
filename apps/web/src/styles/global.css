@@ -1315,8 +1315,14 @@ th {
   min-height: 0;
   flex-direction: column;
 }
-.er-dialog-form--roster-compact > .er-bulk-participant-summary {
+.er-bulk-participant-editor {
+  display: grid;
   flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+.er-bulk-participant-editor > .er-bulk-participant-summary {
+  min-height: 0;
 }
 .er-danger-zone {
   display: grid;

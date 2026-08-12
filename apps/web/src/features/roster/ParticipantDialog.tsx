@@ -538,14 +538,16 @@ export function ParticipantDialog({
                 주세요.
               </StatusMessage>
             ) : null}
-            <BulkParticipantRowsField
-              rows={rows}
-              duplicates={duplicates}
-              duplicateNamesConfirmed={duplicateNamesConfirmed}
-              disabled={busy !== null}
-              onRowsChange={changeRows}
-              onDuplicateNamesConfirmedChange={setDuplicateNamesConfirmed}
-            />
+            <div className="er-bulk-participant-editor">
+              <BulkParticipantRowsField
+                rows={rows}
+                duplicates={duplicates}
+                duplicateNamesConfirmed={duplicateNamesConfirmed}
+                disabled={busy !== null}
+                onRowsChange={changeRows}
+                onDuplicateNamesConfirmedChange={setDuplicateNamesConfirmed}
+              />
+            </div>
             <div className="er-dialog-actions">
               <Button type="button" disabled={busy !== null} onClick={close}>
                 닫기
