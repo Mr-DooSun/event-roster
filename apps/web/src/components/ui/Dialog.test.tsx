@@ -43,6 +43,18 @@ it("applies the wide modifier only when requested", () => {
   );
 });
 
+it("supports the compact roster size", () => {
+  render(
+    <Dialog title="컴팩트 명단" size="roster-compact" onClose={vi.fn()}>
+      내용
+    </Dialog>,
+  );
+
+  expect(screen.getByRole("dialog", { name: "컴팩트 명단" })).toHaveClass(
+    "er-dialog--roster-compact",
+  );
+});
+
 it("uses a caller-provided acknowledgement label", () => {
   const onClose = vi.fn();
   render(

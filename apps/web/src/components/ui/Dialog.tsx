@@ -22,7 +22,7 @@ export function Dialog({
   children: ReactNode;
   closeLabel?: string;
   hideDefaultCloseAction?: boolean;
-  size?: "default" | "wide" | "roster";
+  size?: "default" | "wide" | "roster" | "roster-compact";
   onClose: () => void;
 }) {
   const dialogRef = useRef<HTMLElement>(null);

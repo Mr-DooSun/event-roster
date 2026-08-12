@@ -353,7 +353,7 @@ export function ParticipantDialog({
     <Dialog
       title="참가자 추가"
       hideDefaultCloseAction
-      size="roster"
+      size={mode === "NEW" ? "roster-compact" : "roster"}
       onClose={close}
     >
       <div className="er-participant-mode-actions er-action-row">

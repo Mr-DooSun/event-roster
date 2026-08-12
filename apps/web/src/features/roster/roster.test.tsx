@@ -45,6 +45,26 @@ const bulkDialogProps = {
   onClose: vi.fn(),
 };
 
+it("uses compact bulk participant layout for new mode", () => {
+  render(
+    <ParticipantDialog
+      {...bulkDialogProps}
+      onCreateAndAdd={vi.fn().mockResolvedValue({ kind: "SUCCESS" })}
+    />,
+  );
+
+  fireEvent.click(screen.getByRole("button", { name: "새 참가자" }));
+  expect(screen.getByRole("dialog", { name: "참가자 추가" })).toHaveClass(
+    "er-dialog--roster-compact",
+  );
+  const addParticipant = screen.getByRole("button", { name: "참가자 추가" });
+  expect(addParticipant).toHaveClass("er-bulk-participant-add");
+  fireEvent.click(addParticipant);
+  expect(
+    screen.getByRole("button", { name: "1번 참가자 삭제" }),
+  ).toHaveTextContent("×");
+});
+
 it("starts new mode empty and submits two structured participant profiles", async () => {
   const onCreateAndAdd = vi.fn().mockResolvedValue({ kind: "SUCCESS" });
   render(
