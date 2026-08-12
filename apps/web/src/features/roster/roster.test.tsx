@@ -1499,6 +1499,62 @@ it("uses organization grade and name as the default sort priority", () => {
   ).toHaveAttribute("aria-pressed", "true");
 });
 
+it("renders active sort priorities as unobtrusive superscripts", () => {
+  render(
+    <RosterTable
+      rows={[entry("ACTIVE")]}
+      canMutate={false}
+      onStatusChange={vi.fn().mockResolvedValue(undefined)}
+      onEdit={vi.fn()}
+    />,
+  );
+
+  const organizationSort = screen.getByRole("button", {
+    name: "조직 정렬, 우선순위 1",
+  });
+  const gradeSort = screen.getByRole("button", {
+    name: "학년 정렬, 우선순위 2",
+  });
+  const nameSort = screen.getByRole("button", {
+    name: "이름 정렬, 우선순위 3",
+  });
+
+  expect(within(organizationSort).getByText("1").tagName).toBe("SUP");
+  expect(within(gradeSort).getByText("2").tagName).toBe("SUP");
+  expect(within(nameSort).getByText("3").tagName).toBe("SUP");
+});
+
+it("places registration source at the end of each roster row", () => {
+  render(
+    <RosterTable
+      rows={[entry("ACTIVE")]}
+      canMutate={false}
+      onStatusChange={vi.fn().mockResolvedValue(undefined)}
+      onEdit={vi.fn()}
+    />,
+  );
+
+  expect(
+    screen.getAllByRole("columnheader").map((header) =>
+      header.textContent?.replace(/[↕⏷123]/g, "").trim(),
+    ),
+  ).toEqual([
+    "이름",
+    "조직",
+    "참가자 구분",
+    "학년",
+    "성별",
+    "상태",
+    "작업",
+    "등록 시점",
+  ]);
+
+  const firstDataRow = screen.getByRole("row", { name: /박민수/ });
+  expect(within(firstDataRow).getAllByRole("cell").at(-1)).toHaveTextContent(
+    "사전",
+  );
+});
+
 it("toggles roster sort keys while preserving their fixed priority", () => {
   const rows: RosterView[] = [
     {

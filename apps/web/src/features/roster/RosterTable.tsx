@@ -393,7 +393,7 @@ export function RosterTable({
                 >
                   ↕
                   {sortPriority("NAME") === null ? null : (
-                    <small>{sortPriority("NAME")}</small>
+                    <sup aria-hidden="true">{sortPriority("NAME")}</sup>
                   )}
                 </button>
               </th>
@@ -412,7 +412,9 @@ export function RosterTable({
                 >
                   ↕
                   {sortPriority("ORGANIZATION") === null ? null : (
-                    <small>{sortPriority("ORGANIZATION")}</small>
+                    <sup aria-hidden="true">
+                      {sortPriority("ORGANIZATION")}
+                    </sup>
                   )}
                 </button>
                 <button
@@ -462,7 +464,7 @@ export function RosterTable({
                 >
                   ↕
                   {sortPriority("GRADE") === null ? null : (
-                    <small>{sortPriority("GRADE")}</small>
+                    <sup aria-hidden="true">{sortPriority("GRADE")}</sup>
                   )}
                 </button>
                 <button
@@ -499,7 +501,6 @@ export function RosterTable({
                 </button>
                 {renderFilterMenu("gender", "성별")}
               </th>
-              <th>등록 시점</th>
               <th className="er-roster-header-cell">
                 <span>상태</span>
                 <button
@@ -519,6 +520,7 @@ export function RosterTable({
                 {renderFilterMenu("status", "상태")}
               </th>
               <th>작업</th>
+              <th>등록 시점</th>
             </tr>
           </thead>
           <tbody>
@@ -547,9 +549,6 @@ export function RosterTable({
                     : row.gender === "FEMALE"
                       ? "여성"
                       : "미지정"}
-                </td>
-                <td>
-                  {row.source === "PRE_REGISTRATION" ? "사전" : "진행 중 추가"}
                 </td>
                 <td>{row.status === "ACTIVE" ? "참석" : "취소"}</td>
                 <td>
@@ -587,6 +586,9 @@ export function RosterTable({
                   ) : (
                     "읽기 전용"
                   )}
+                </td>
+                <td>
+                  {row.source === "PRE_REGISTRATION" ? "사전" : "진행 중 추가"}
                 </td>
               </tr>
             ))}
