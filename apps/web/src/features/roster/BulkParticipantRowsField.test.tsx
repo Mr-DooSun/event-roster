@@ -51,6 +51,7 @@ it("starts empty and adds a student row with no selected grade", () => {
       name: "",
       role: "STUDENT",
       grade: null,
+      gender: null,
     }),
   ]);
 
