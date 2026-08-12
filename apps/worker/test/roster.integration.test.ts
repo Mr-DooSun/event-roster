@@ -1161,6 +1161,7 @@ it("writes structured bulk profiles in order and increments the project once", a
           participantName: "중학생",
           participantRole: "STUDENT",
           studentGrade: "M2",
+          gender: null,
         },
       },
       {
@@ -1174,6 +1175,7 @@ it("writes structured bulk profiles in order and increments the project once", a
           participantName: "중학생",
           participantRole: "STUDENT",
           studentGrade: "M2",
+          gender: null,
         },
       },
       {
@@ -1187,6 +1189,7 @@ it("writes structured bulk profiles in order and increments the project once", a
           participantName: "중학생",
           participantRole: "TEACHER",
           studentGrade: null,
+          gender: null,
         },
       },
       {
@@ -1200,6 +1203,7 @@ it("writes structured bulk profiles in order and increments the project once", a
           participantName: "중학생",
           participantRole: "TEACHER",
           studentGrade: null,
+          gender: null,
         },
       },
     ]),

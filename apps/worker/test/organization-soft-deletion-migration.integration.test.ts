@@ -3,13 +3,32 @@ import { env } from "cloudflare:workers";
 import { expect, it } from "vitest";
 
 it("preserves organizations while adding nullable deletion metadata", async () => {
-  const [m1, m2, m3, m4, m5, m6, organizationSoftDeletion] =
-    env.TEST_MIGRATIONS;
-  if (!m1 || !m2 || !m3 || !m4 || !m5 || !m6 || !organizationSoftDeletion) {
-    throw new Error("expected migrations 0001 through 0007");
+  const priorMigrationNames = [
+    "0001_initial.sql",
+    "0002_project_model.sql",
+    "0003_organization_leadership.sql",
+    "0004_automatic_project_preregistration.sql",
+    "0005_roster_participant_profiles.sql",
+    "0006_project_soft_deletion.sql",
+    "0006_roster_gender.sql",
+  ];
+  const priorMigrations = priorMigrationNames.map((name) =>
+    env.TEST_MIGRATIONS.find((migration) => migration.name === name),
+  );
+  const organizationSoftDeletion = env.TEST_MIGRATIONS.find(
+    (migration) => migration.name === "0007_organization_soft_deletion.sql",
+  );
+  if (
+    priorMigrations.some((migration) => !migration) ||
+    !organizationSoftDeletion
+  ) {
+    throw new Error("expected migrations before organization soft deletion");
   }
 
-  await applyD1Migrations(env.MIGRATION_DB, [m1, m2, m3, m4, m5, m6]);
+  await applyD1Migrations(
+    env.MIGRATION_DB,
+    priorMigrations.filter((migration) => migration !== undefined),
+  );
   await seedMigrationUserAndOrganizations();
   const before = await countOrganizations();
 

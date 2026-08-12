@@ -4,21 +4,34 @@ import { expect, it } from "vitest";
 import { listRoster } from "../src/db/roster";
 
 it("preserves legacy roster profiles and validates new participant profile snapshots", async () => {
-  const [
-    initial,
-    projectModel,
-    organizationLeadership,
-    automaticPreregistration,
-    participantProfiles,
-  ] = env.TEST_MIGRATIONS;
+  const initial = env.TEST_MIGRATIONS.find(
+    (migration) => migration.name === "0001_initial.sql",
+  );
+  const projectModel = env.TEST_MIGRATIONS.find(
+    (migration) => migration.name === "0002_project_model.sql",
+  );
+  const organizationLeadership = env.TEST_MIGRATIONS.find(
+    (migration) => migration.name === "0003_organization_leadership.sql",
+  );
+  const automaticPreregistration = env.TEST_MIGRATIONS.find(
+    (migration) =>
+      migration.name === "0004_automatic_project_preregistration.sql",
+  );
+  const participantProfiles = env.TEST_MIGRATIONS.find(
+    (migration) => migration.name === "0005_roster_participant_profiles.sql",
+  );
+  const rosterGender = env.TEST_MIGRATIONS.find(
+    (migration) => migration.name === "0006_roster_gender.sql",
+  );
   if (
     !initial ||
     !projectModel ||
     !organizationLeadership ||
     !automaticPreregistration ||
-    !participantProfiles
+    !participantProfiles ||
+    !rosterGender
   ) {
-    throw new Error("expected migrations 0001 through 0005");
+    throw new Error("expected roster profile and gender migrations");
   }
 
   await applyD1Migrations(env.MIGRATION_DB, [
@@ -138,6 +151,8 @@ it("preserves legacy roster profiles and validates new participant profile snaps
        SET student_grade_snapshot = 'H3' WHERE id = 'teacher-ok'`,
     ).run(),
   ).rejects.toThrow(/INVALID_ROSTER_PROFILE/);
+
+  await applyD1Migrations(env.MIGRATION_DB, [rosterGender]);
 
   await expect(
     listRoster(env.MIGRATION_DB, "legacy-profile-project"),
