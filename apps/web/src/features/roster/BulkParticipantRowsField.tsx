@@ -1,7 +1,7 @@
 import {
   type BulkParticipantDuplicate,
-  type Gender,
   canonicalizeParticipantName,
+  type Gender,
   normalizeParticipantName,
   type ParticipantRole,
   type StudentGrade,
@@ -86,6 +86,11 @@ export function BulkParticipantRowsField({
     onDuplicateNamesConfirmedChange(false);
   }
 
+  function addRow() {
+    onRowsChange([...rows, createBulkParticipantDraft()]);
+    onDuplicateNamesConfirmedChange(false);
+  }
+
   function changeRole(clientId: string, role: ParticipantRole) {
     changeRow(clientId, (row) => ({
       ...row,
@@ -101,22 +106,13 @@ export function BulkParticipantRowsField({
 
   return (
     <div className="er-bulk-participant-summary">
-      <div className="er-bulk-participant-add">
-        <Button
-          type="button"
-          disabled={disabled || atLimit}
-          onClick={() => {
-            onRowsChange([...rows, createBulkParticipantDraft()]);
-            onDuplicateNamesConfirmedChange(false);
-          }}
-        >
-          참가자 추가
-        </Button>
-        <span className="er-bulk-participant-count">
-          {atLimit ? "최대 30명" : `등록 예정 ${rows.length}명 / 최대 30명`}
-        </span>
-      </div>
+      <span className="er-bulk-participant-count">
+        {atLimit ? "최대 30명" : `등록 예정 ${rows.length}명 / 최대 30명`}
+      </span>
       <div className="er-bulk-participant-rows">
+        {rows.length === 0 ? (
+          <p className="er-bulk-participant-empty">등록할 참가자가 없습니다.</p>
+        ) : null}
         {rows.map((row, index) => {
           const rowNumber = index + 1;
           const duplicate = duplicateByName.get(
@@ -138,8 +134,14 @@ export function BulkParticipantRowsField({
               <legend className="er-visually-hidden">
                 {rowNumber}번 참가자
               </legend>
+              <span
+                className="er-bulk-participant-row__heading"
+                aria-hidden="true"
+              >
+                {rowNumber}번 참가자
+              </span>
               <label className="er-field">
-                <span>{rowNumber}번 이름</span>
+                <span>이름</span>
                 <input
                   value={row.name}
                   disabled={disabled}
@@ -171,10 +173,11 @@ export function BulkParticipantRowsField({
                 ) : null}
               </label>
               <label className="er-field">
-                <span>{rowNumber}번 성별</span>
+                <span>성별</span>
                 <select
                   value={row.gender ?? ""}
                   disabled={disabled}
+                  aria-label={`${rowNumber}번 성별`}
                   onChange={(event) =>
                     changeRow(row.clientId, (current) => ({
                       ...current,
@@ -189,10 +192,11 @@ export function BulkParticipantRowsField({
                 </select>
               </label>
               <label className="er-field">
-                <span>{rowNumber}번 참가자 구분</span>
+                <span>참가자 구분</span>
                 <select
                   value={row.role}
                   disabled={disabled}
+                  aria-label={`${rowNumber}번 참가자 구분`}
                   onChange={(event) =>
                     changeRole(
                       row.clientId,
@@ -205,7 +209,7 @@ export function BulkParticipantRowsField({
                 </select>
               </label>
               <label className="er-field">
-                <span>{rowNumber}번 학년</span>
+                <span>학년</span>
                 <select
                   value={row.grade ?? ""}
                   disabled={disabled || row.role === "TEACHER"}
@@ -241,18 +245,27 @@ export function BulkParticipantRowsField({
               </label>
               <Button
                 type="button"
-                variant="danger"
+                variant="secondary"
                 className="er-bulk-participant-row__remove"
                 disabled={disabled}
                 aria-label={`${rowNumber}번 참가자 삭제`}
                 onClick={() => removeRow(row.clientId)}
               >
-                삭제
+                <span aria-hidden="true">×</span>
               </Button>
             </fieldset>
           );
         })}
       </div>
+      <Button
+        type="button"
+        className="er-bulk-participant-add"
+        disabled={disabled || atLimit}
+        aria-label="참가자 추가"
+        onClick={addRow}
+      >
+        + 참가자 추가
+      </Button>
       {duplicates.length > 0 ? (
         <>
           <p

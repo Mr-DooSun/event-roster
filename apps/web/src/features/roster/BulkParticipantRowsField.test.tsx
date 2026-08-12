@@ -38,7 +38,12 @@ it("starts empty and adds a student row with no selected grade", () => {
   expect(
     screen.queryByRole("textbox", { name: /이름/ }),
   ).not.toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: "참가자 추가" }));
+  expect(screen.getByText("등록할 참가자가 없습니다.")).toBeVisible();
+  const addButton = screen.getByRole("button", { name: "참가자 추가" });
+  expect(addButton).toHaveClass("er-bulk-participant-add");
+  expect(screen.getByText("등록 예정 0명 / 최대 30명")).toBeVisible();
+
+  fireEvent.click(addButton);
 
   expect(onRowsChange).toHaveBeenCalledWith([
     expect.objectContaining({
@@ -67,6 +72,30 @@ it("starts empty and adds a student row with no selected grade", () => {
     "STUDENT",
   );
   expect(screen.getByRole("combobox", { name: "1번 학년" })).toHaveValue("");
+});
+
+it("places the participant add action after the card list", () => {
+  render(
+    <BulkParticipantRowsField
+      rows={[
+        student("row-1", "첫 번째", "M1"),
+        student("row-2", "두 번째", "M2"),
+      ]}
+      duplicates={[]}
+      duplicateNamesConfirmed={false}
+      onRowsChange={vi.fn()}
+      onDuplicateNamesConfirmedChange={vi.fn()}
+    />,
+  );
+
+  const groups = screen.getAllByRole("group", { name: /번 참가자/ });
+  const addButton = screen.getByRole("button", { name: "참가자 추가" });
+  const lastGroup = groups.at(-1);
+  if (!lastGroup) throw new Error("participant group was not rendered");
+  expect(
+    lastGroup.compareDocumentPosition(addButton) &
+      Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
 });
 
 it("requires a grade for students and accepts teachers without one", () => {
@@ -196,6 +225,25 @@ it("deletes only the row identified by its client id", () => {
   expect(onRowsChange).toHaveBeenCalledWith([
     { clientId: "row-2", name: "두 번째", role: "STUDENT", grade: "H1" },
   ]);
+});
+
+it("allows deleting the final row and resets duplicate confirmation", () => {
+  const onRowsChange = vi.fn();
+  const onConfirmedChange = vi.fn();
+  render(
+    <BulkParticipantRowsField
+      rows={[student("row-1", "마지막 참가자", "M1")]}
+      duplicates={[]}
+      duplicateNamesConfirmed
+      onRowsChange={onRowsChange}
+      onDuplicateNamesConfirmedChange={onConfirmedChange}
+    />,
+  );
+
+  fireEvent.click(screen.getByRole("button", { name: "1번 참가자 삭제" }));
+
+  expect(onRowsChange).toHaveBeenCalledWith([]);
+  expect(onConfirmedChange).toHaveBeenCalledWith(false);
 });
 
 it("disables adding at 30 rows and announces the limit", () => {
