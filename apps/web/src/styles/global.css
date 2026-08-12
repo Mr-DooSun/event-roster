@@ -770,7 +770,83 @@ a {
 }
 .er-organization-membership {
   display: grid;
-  gap: var(--er-space-2);
+  gap: var(--er-space-4);
+}
+.er-project-organization-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--er-space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.er-project-organization-tile {
+  display: grid;
+  min-width: 0;
+  border: 1px solid var(--er-color-border);
+  border-left: 5px solid var(--er-organization-accent);
+  border-radius: var(--er-radius-md);
+  padding: var(--er-space-5);
+  background: var(--er-color-surface);
+}
+.er-project-organization-tile[data-color-index="0"] {
+  --er-organization-accent: #4770db;
+}
+.er-project-organization-tile[data-color-index="1"] {
+  --er-organization-accent: #7b61c9;
+}
+.er-project-organization-tile[data-color-index="2"] {
+  --er-organization-accent: #3a9384;
+}
+.er-project-organization-tile[data-color-index="3"] {
+  --er-organization-accent: #c17a3b;
+}
+.er-project-organization-tile[data-color-index="4"] {
+  --er-organization-accent: #458092;
+}
+.er-project-organization-tile[data-color-index="5"] {
+  --er-organization-accent: #b65f6a;
+}
+.er-membership-heading,
+.er-membership-actions {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--er-space-3);
+}
+.er-membership-heading > strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.er-membership-roster-count {
+  margin: 0;
+}
+.er-membership-roster-count div {
+  display: grid;
+  gap: var(--er-space-1);
+}
+.er-membership-roster-count dt {
+  color: var(--er-color-muted);
+  font-size: 0.8rem;
+}
+.er-membership-roster-count dd {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--er-space-1);
+  margin: 0;
+  color: var(--er-color-primary);
+}
+.er-membership-roster-count strong {
+  font-size: 1.75rem;
+  line-height: 1;
+}
+.er-membership-roster-count span {
+  color: var(--er-color-muted);
+  line-height: 1.2;
+}
+.er-membership-actions {
+  align-items: flex-end;
+  margin-top: auto;
 }
 .er-project-organization-bulk-picker {
   display: grid;
@@ -1398,6 +1474,9 @@ th {
   .er-project-organization-candidate-grid {
     grid-template-columns: 1fr;
   }
+  .er-project-organization-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 42rem) {
@@ -1412,6 +1491,10 @@ th {
   .er-section-heading,
   .er-manager-list li,
   .er-organization-project-list li {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .er-membership-actions {
     align-items: stretch;
     flex-direction: column;
   }

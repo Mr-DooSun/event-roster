@@ -1197,6 +1197,44 @@ it("reloads a stale project revision and clears the bulk selection", async () =>
   expect(mockApi.post).toHaveBeenCalledTimes(1);
 });
 
+it("renders visually distinct organization tiles with prominent roster counts", () => {
+  render(
+    <ProjectOrganizationsPanel
+      projectId="project-1"
+      projectRevision={7}
+      memberships={[
+        organizationMembership({ rosterCount: 0 }),
+        organizationMembership({
+          organizationId: "org-2",
+          name: "2팀",
+          rosterCount: 11,
+        }),
+      ]}
+      allOrganizations={[]}
+      canMutateMemberships={false}
+      canManageOrganizations
+      onChanged={vi.fn().mockResolvedValue(undefined)}
+    />,
+  );
+
+  const list = screen.getByRole("list", { name: "프로젝트 조직 목록" });
+  expect(list).toHaveClass("er-project-organization-grid");
+  const [firstTile, secondTile] = within(list).getAllByRole("listitem");
+  if (!firstTile || !secondTile) throw new Error("조직 타일이 누락되었습니다.");
+  const tiles = [firstTile, secondTile];
+  expect(tiles).toHaveLength(2);
+  expect(firstTile).toHaveClass("er-project-organization-tile");
+  expect(firstTile).toHaveAttribute("data-color-index");
+  expect(secondTile).toHaveAttribute("data-color-index");
+  expect(within(firstTile).getByText("현재 명단")).toBeVisible();
+  expect(
+    within(firstTile).getByText("0", { selector: "strong" }),
+  ).toBeVisible();
+  expect(
+    within(secondTile).getByText("11", { selector: "strong" }),
+  ).toBeVisible();
+});
+
 it("renders leadership metadata and only operator management links", () => {
   const memberships = [
     organizationMembership(),
@@ -1225,7 +1263,7 @@ it("renders leadership metadata and only operator management links", () => {
   expect(screen.getByText("대표 조직장 김대표")).toBeVisible();
   expect(screen.getByText("담당자 0명")).toBeVisible();
   expect(screen.getByText("담당자 3명")).toBeVisible();
-  expect(screen.getByText("현재 명단 11명")).toBeVisible();
+  expect(screen.getByText("11", { selector: "strong" })).toBeVisible();
   expect(
     screen.getAllByRole("link", { name: "조직 관리에서 담당자 지정" })[1],
   ).toHaveAttribute("href", "/organizations/org-2");

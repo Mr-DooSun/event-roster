@@ -397,7 +397,10 @@ export function ProjectOrganizationsPanel({
         {visibleMemberships.length === 0 ? (
           <p className="er-muted">연결된 조직이 없습니다.</p>
         ) : (
-          <ul className="er-list">
+          <ul
+            className="er-project-organization-grid"
+            aria-label="프로젝트 조직 목록"
+          >
             {visibleMemberships.map((membership) => (
               <OrganizationMembershipRow
                 key={membership.organizationId}
@@ -553,62 +556,89 @@ function OrganizationMembershipRow({
   onReactivate: () => Promise<boolean>;
 }) {
   return (
-    <li>
+    <li
+      className="er-project-organization-tile"
+      data-color-index={organizationColorIndex(membership.organizationId)}
+    >
       <div className="er-organization-membership">
-        <strong>{membership.name}</strong>
-        <span className="er-membership-state">
-          {membership.masterIsDeleted ? (
-            <span className="er-badge er-badge--deleted">삭제됨</span>
-          ) : !membership.masterIsActive ? (
-            <span className="er-badge er-badge--inactive">사용 중지</span>
-          ) : (
-            <span className="er-muted">
-              {membership.isActive ? "사용 중" : "사용 중지"}
-            </span>
-          )}
-        </span>
+        <div className="er-membership-heading">
+          <strong>{membership.name}</strong>
+          <span className="er-membership-state">
+            {membership.masterIsDeleted ? (
+              <span className="er-badge er-badge--deleted">삭제됨</span>
+            ) : !membership.masterIsActive ? (
+              <span className="er-badge er-badge--inactive">사용 중지</span>
+            ) : (
+              <span className="er-muted">
+                {membership.isActive ? "사용 중" : "사용 중지"}
+              </span>
+            )}
+          </span>
+        </div>
+        <dl className="er-membership-roster-count">
+          <div>
+            <dt>현재 명단</dt>
+            <dd>
+              <strong>{membership.rosterCount}</strong>
+              <span>명</span>
+            </dd>
+          </div>
+        </dl>
         <div className="er-membership-meta">
           <span>
             대표 조직장 {membership.primaryLeader?.displayName ?? "미지정"}
           </span>
           <span>담당자 {getTotalOrganizationManagerCount(membership)}명</span>
-          <span>현재 명단 {membership.rosterCount}명</span>
         </div>
-        {canManageOrganizations ? (
-          <a
-            href={`/organizations/${encodeURIComponent(membership.organizationId)}`}
-          >
-            조직 관리에서 담당자 지정
-          </a>
+        {canManageOrganizations || canMutateMemberships ? (
+          <div className="er-membership-actions">
+            {canManageOrganizations ? (
+              <a
+                href={`/organizations/${encodeURIComponent(membership.organizationId)}`}
+              >
+                조직 관리에서 담당자 지정
+              </a>
+            ) : null}
+            {canMutateMemberships ? (
+              <div className="er-action-row">
+                {membership.isActive ? (
+                  <Button
+                    type="button"
+                    variant="danger"
+                    disabled={busy}
+                    onClick={onExclude}
+                  >
+                    프로젝트에서 제외
+                  </Button>
+                ) : (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    loading={loading}
+                    loadingText="변경 중…"
+                    disabled={
+                      busy || (!correctionMode && !membership.masterIsActive)
+                    }
+                    onClick={() => void onReactivate()}
+                  >
+                    다시 사용
+                  </Button>
+                )}
+              </div>
+            ) : null}
+          </div>
         ) : null}
       </div>
-      {canMutateMemberships ? (
-        <div className="er-action-row">
-          {membership.isActive ? (
-            <Button
-              type="button"
-              variant="danger"
-              disabled={busy}
-              onClick={onExclude}
-            >
-              프로젝트에서 제외
-            </Button>
-          ) : (
-            <Button
-              type="button"
-              variant="secondary"
-              loading={loading}
-              loadingText="변경 중…"
-              disabled={busy || (!correctionMode && !membership.masterIsActive)}
-              onClick={() => void onReactivate()}
-            >
-              다시 사용
-            </Button>
-          )}
-        </div>
-      ) : null}
     </li>
   );
+}
+
+function organizationColorIndex(organizationId: string) {
+  let hash = 0;
+  for (const character of organizationId) {
+    hash = (hash * 31 + (character.codePointAt(0) ?? 0)) >>> 0;
+  }
+  return hash % 6;
 }
 
 function isOrganizationNameConflict(error: ApiError) {
