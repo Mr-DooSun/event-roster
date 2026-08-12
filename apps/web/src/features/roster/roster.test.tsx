@@ -1448,9 +1448,6 @@ it("opens roster filters from table headers and closes the menu outside or with 
     />,
   );
 
-  const organizationHeader = screen.getByRole("columnheader", {
-    name: /^조직/,
-  });
   const organizationFilter = screen.getByRole("button", {
     name: "조직 필터",
   });
@@ -1458,7 +1455,7 @@ it("opens roster filters from table headers and closes the menu outside or with 
   fireEvent.click(organizationFilter);
 
   const menu = screen.getByRole("dialog", { name: "조직 필터 메뉴" });
-  expect(organizationHeader).toContainElement(menu);
+  expect(menu.parentElement).toBe(document.body);
   expect(
     within(menu).getByRole("combobox", { name: "조직 필터" }),
   ).toBeVisible();
@@ -1475,6 +1472,30 @@ it("opens roster filters from table headers and closes the menu outside or with 
   expect(
     screen.queryByRole("dialog", { name: "조직 필터 메뉴" }),
   ).not.toBeInTheDocument();
+});
+
+it("keeps a roster filter menu outside the scroll container when filtering leaves no rows", () => {
+  render(
+    <RosterTable
+      rows={[entry("ACTIVE")]}
+      canMutate={false}
+      onStatusChange={vi.fn().mockResolvedValue(undefined)}
+      onEdit={vi.fn()}
+    />,
+  );
+
+  const statusFilter = screen.getByRole("button", { name: "상태 필터" });
+  fireEvent.click(statusFilter);
+  fireEvent.change(screen.getByRole("combobox", { name: "상태 필터" }), {
+    target: { value: "CANCELLED" },
+  });
+  fireEvent.pointerDown(document.body);
+
+  expect(screen.queryByText("박민수")).not.toBeInTheDocument();
+
+  fireEvent.click(statusFilter);
+  const menu = screen.getByRole("dialog", { name: "상태 필터 메뉴" });
+  expect(menu.parentElement).toBe(document.body);
 });
 
 it("keeps the roster snapshot name and labels rows from deleted organizations", () => {

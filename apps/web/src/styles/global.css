@@ -443,10 +443,8 @@ a {
   position: relative;
 }
 .er-roster-filter-popover {
-  position: absolute;
-  z-index: 10;
-  top: calc(100% + var(--er-space-2));
-  left: var(--er-space-2);
+  position: fixed;
+  z-index: 100;
   min-width: 13rem;
   border: 1px solid var(--er-color-border);
   border-radius: var(--er-radius-sm);

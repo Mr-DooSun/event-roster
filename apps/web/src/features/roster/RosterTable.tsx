@@ -5,6 +5,7 @@ import type {
 } from "@event-roster/contracts";
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Button } from "../../components/ui/Button";
 import { TextInput } from "../../components/ui/TextInput";
 import { GRADE_LABEL, ROLE_LABEL } from "./participant-profile-labels";
@@ -62,6 +63,10 @@ export function RosterTable({
   );
   const [gender, setGender] = useState<"ALL" | Gender | "UNSPECIFIED">("ALL");
   const [activeFilter, setActiveFilter] = useState<RosterFilter | null>(null);
+  const [filterMenuPosition, setFilterMenuPosition] = useState({
+    top: 0,
+    left: 0,
+  });
   const filterMenuRef = useRef<HTMLDivElement>(null);
   const [sort, setSort] = useState<
     "DEFAULT" | "ORGANIZATION" | "GRADE" | "NAME"
@@ -126,17 +131,40 @@ export function RosterTable({
     const closeWithEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") setActiveFilter(null);
     };
+    const closeOnViewportChange = () => setActiveFilter(null);
 
     document.addEventListener("pointerdown", closeOutside);
     document.addEventListener("keydown", closeWithEscape);
+    document.addEventListener("scroll", closeOnViewportChange, true);
+    window.addEventListener("resize", closeOnViewportChange);
     return () => {
       document.removeEventListener("pointerdown", closeOutside);
       document.removeEventListener("keydown", closeWithEscape);
+      document.removeEventListener("scroll", closeOnViewportChange, true);
+      window.removeEventListener("resize", closeOnViewportChange);
     };
   }, [activeFilter]);
 
-  const toggleFilter = (filter: RosterFilter) => {
-    setActiveFilter((current) => (current === filter ? null : filter));
+  const toggleFilter = (filter: RosterFilter, trigger: HTMLButtonElement) => {
+    if (activeFilter === filter) {
+      setActiveFilter(null);
+      return;
+    }
+
+    const triggerRect = trigger.getBoundingClientRect();
+    const menuWidth = 208;
+    const viewportPadding = 16;
+    setFilterMenuPosition({
+      top: triggerRect.bottom + 8,
+      left: Math.max(
+        viewportPadding,
+        Math.min(
+          triggerRect.left,
+          window.innerWidth - menuWidth - viewportPadding,
+        ),
+      ),
+    });
+    setActiveFilter(filter);
   };
 
   const renderFilterMenu = (filter: RosterFilter, label: string) => {
@@ -222,18 +250,20 @@ export function RosterTable({
       );
     }
 
-    return (
+    return createPortal(
       <div
         ref={filterMenuRef}
         className="er-roster-filter-popover"
         role="dialog"
         aria-label={`${label} 필터 메뉴`}
+        style={filterMenuPosition}
       >
         <div className="er-field">
           <span>{label} 필터</span>
           {control}
         </div>
-      </div>
+      </div>,
+      document.body,
     );
   };
 
@@ -284,7 +314,9 @@ export function RosterTable({
                   aria-haspopup="dialog"
                   aria-expanded={activeFilter === "organization"}
                   data-roster-filter-trigger
-                  onClick={() => toggleFilter("organization")}
+                  onClick={(event) =>
+                    toggleFilter("organization", event.currentTarget)
+                  }
                 >
                   ⏷
                 </button>
@@ -299,7 +331,7 @@ export function RosterTable({
                   aria-haspopup="dialog"
                   aria-expanded={activeFilter === "role"}
                   data-roster-filter-trigger
-                  onClick={() => toggleFilter("role")}
+                  onClick={(event) => toggleFilter("role", event.currentTarget)}
                 >
                   ⏷
                 </button>
@@ -322,7 +354,9 @@ export function RosterTable({
                   aria-haspopup="dialog"
                   aria-expanded={activeFilter === "grade"}
                   data-roster-filter-trigger
-                  onClick={() => toggleFilter("grade")}
+                  onClick={(event) =>
+                    toggleFilter("grade", event.currentTarget)
+                  }
                 >
                   ⏷
                 </button>
@@ -337,7 +371,9 @@ export function RosterTable({
                   aria-haspopup="dialog"
                   aria-expanded={activeFilter === "gender"}
                   data-roster-filter-trigger
-                  onClick={() => toggleFilter("gender")}
+                  onClick={(event) =>
+                    toggleFilter("gender", event.currentTarget)
+                  }
                 >
                   ⏷
                 </button>
@@ -353,7 +389,9 @@ export function RosterTable({
                   aria-haspopup="dialog"
                   aria-expanded={activeFilter === "status"}
                   data-roster-filter-trigger
-                  onClick={() => toggleFilter("status")}
+                  onClick={(event) =>
+                    toggleFilter("status", event.currentTarget)
+                  }
                 >
                   ⏷
                 </button>
