@@ -375,13 +375,24 @@ it("submits normalized bulk names with one organization", async () => {
   fireEvent.click(screen.getByRole("button", { name: "새 참가자" }));
   addStudentParticipantRow("  홍길동  ", "M1");
   addStudentParticipantRow("김\t민수", "H2");
+  fireEvent.change(screen.getByRole("combobox", { name: "1번 성별" }), {
+    target: { value: "MALE" },
+  });
+  fireEvent.change(screen.getByRole("combobox", { name: "2번 성별" }), {
+    target: { value: "FEMALE" },
+  });
   fireEvent.click(screen.getByRole("button", { name: "2명 명단에 추가" }));
 
   await waitFor(() =>
     expect(onCreateAndAdd).toHaveBeenCalledWith({
       participants: [
-        { name: "홍길동", role: "STUDENT", grade: "M1" },
-        { name: "김 민수", role: "STUDENT", grade: "H2" },
+        { name: "홍길동", role: "STUDENT", grade: "M1", gender: "MALE" },
+        {
+          name: "김 민수",
+          role: "STUDENT",
+          grade: "H2",
+          gender: "FEMALE",
+        },
       ],
       organizationId: "org-1",
       confirmDuplicateNames: false,
@@ -551,7 +562,7 @@ it("keeps the current inactive organization while editing an existing participan
   expect(screen.getByLabelText("소속 조직")).toHaveValue("org-inactive");
 });
 
-it("defaults reusable participants from an inactive master organization to an active project organization", () => {
+it("submits gender for an existing participant", () => {
   const onAdd = vi.fn().mockResolvedValue(undefined);
   render(
     <ParticipantDialog
@@ -573,6 +584,9 @@ it("defaults reusable participants from an inactive master organization to an ac
     />,
   );
 
+  fireEvent.change(screen.getByRole("combobox", { name: "성별" }), {
+    target: { value: "FEMALE" },
+  });
   fireEvent.click(screen.getByRole("button", { name: "명단에 추가" }));
   expect(onAdd).toHaveBeenCalledWith({
     participantId: "person-1",
@@ -580,6 +594,7 @@ it("defaults reusable participants from an inactive master organization to an ac
     organizationId: "org-active",
     role: "STUDENT",
     grade: "M1",
+    gender: "FEMALE",
     expectedParticipantRevision: 3,
   });
 });

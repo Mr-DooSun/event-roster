@@ -1,5 +1,6 @@
 import type {
   BulkParticipantDuplicate,
+  Gender,
   Organization,
   ParticipantRole,
   RosterParticipantInput,
@@ -40,6 +41,7 @@ export interface ExistingParticipantConfirmation {
   organizationId: string;
   role: ParticipantRole;
   grade: StudentGrade | null;
+  gender: Gender | null;
   expectedParticipantRevision: number;
 }
 
@@ -164,6 +166,7 @@ export function ParticipantDialog({
   const [confirmedGrade, setConfirmedGrade] = useState<StudentGrade | null>(
     initialProfile.grade,
   );
+  const [confirmedGender, setConfirmedGender] = useState<Gender | null>(null);
   const [organizationId, setOrganizationId] = useState(
     firstActiveOrganizationId(organizations, recentOrganizationIds),
   );
@@ -256,6 +259,7 @@ export function ParticipantDialog({
     const profile = suggestedProfile(participant);
     setConfirmedRole(profile.role);
     setConfirmedGrade(profile.grade);
+    setConfirmedGender(null);
   }
 
   async function addExisting() {
@@ -277,6 +281,7 @@ export function ParticipantDialog({
         organizationId: confirmedOrganizationId,
         role: confirmedRole,
         grade: confirmedGrade,
+        gender: confirmedGender,
         expectedParticipantRevision: selectedParticipant.revision,
       });
     } catch {
@@ -305,6 +310,7 @@ export function ParticipantDialog({
           name: normalizeParticipantName(row.name),
           role: row.role,
           grade: row.grade,
+          gender: row.gender ?? null,
         })),
         organizationId,
         confirmDuplicateNames: duplicateNamesConfirmed,
@@ -438,6 +444,22 @@ export function ParticipantDialog({
                 주세요.
               </StatusMessage>
             ) : null}
+            <label className="er-field">
+              <span>성별</span>
+              <select
+                value={confirmedGender ?? ""}
+                disabled={busy !== null}
+                onChange={(event) =>
+                  setConfirmedGender(
+                    (event.currentTarget.value || null) as Gender | null,
+                  )
+                }
+              >
+                <option value="">미지정</option>
+                <option value="MALE">남성</option>
+                <option value="FEMALE">여성</option>
+              </select>
+            </label>
             <label className="er-field">
               <span>참가자 구분</span>
               <select
